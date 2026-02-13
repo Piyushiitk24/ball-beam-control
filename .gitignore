@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+/data/runs/*.log
+/data/runs/*.csv
+/data/runs/*.png
+/data/runs/*.pdf
+/data/calibration/*.csv
+/data/calibration/*.log
+/firmware/.pio/
+/firmware/.vscode/
+/model/first_principles/*.json
+/model/first_principles/*.png

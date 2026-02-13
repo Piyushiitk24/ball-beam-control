@@ -1,0 +1,19 @@
+plant:
+  gravity_mps2: 9.81
+  beam_length_m: 0.50
+  ball_radius_m: 0.012
+  ball_mass_kg: 0.05
+  rolling_factor: 0.7142857143  # 5/7 for solid sphere
+  viscous_damping_1ps: 0.18
+  actuator_tau_s: 0.08
+
+limits:
+  theta_cmd_deg: 8.0
+  step_rate_sps: 1800.0
+
+design:
+  inner_bw_hz: 4.0
+  inner_zeta: 0.9
+  outer_bw_hz: 1.1
+  outer_zeta: 0.85
+  extra_pole_factor: 4.0
