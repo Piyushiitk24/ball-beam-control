@@ -1,6 +1,6 @@
 #include "sensors/hcsr04_sensor.h"
 
-#include <math.h>
+#include <util/atomic.h>
 
 #include "calibration.h"
 #include "config.h"
@@ -14,7 +14,19 @@ HCSR04Sensor::HCSR04Sensor(uint8_t trig_pin, uint8_t echo_pin)
       history_count_(0),
       history_index_(0),
       ema_initialized_(false),
-      ema_cm_(0.0f) {}
+      ema_cm_(0.0f),
+      has_sample_(false),
+      last_distance_cm_(0.0f),
+      last_x_cm_(0.0f),
+      last_x_filt_cm_(0.0f),
+      last_sample_ms_(0),
+      timeout_flag_(false),
+      last_trigger_us_(0),
+      waiting_echo_(false),
+      rise_us_(0),
+      pulse_width_us_(0),
+      awaiting_fall_(false),
+      sample_ready_(false) {}
 
 void HCSR04Sensor::begin() {
   pinMode(trig_pin_, OUTPUT);
@@ -22,44 +34,109 @@ void HCSR04Sensor::begin() {
 
   digitalWrite(trig_pin_, LOW);
   delayMicroseconds(5);
+
+  last_trigger_us_ = micros() - kSonarTriggerPeriodUs;
 }
 
-bool HCSR04Sensor::readDistanceCm(float& distance_cm) {
-  digitalWrite(trig_pin_, LOW);
-  delayMicroseconds(2);
-  digitalWrite(trig_pin_, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(trig_pin_, LOW);
+void HCSR04Sensor::service(uint32_t now_us, uint32_t now_ms) {
+  if (!waiting_echo_ && static_cast<uint32_t>(now_us - last_trigger_us_) >= kSonarTriggerPeriodUs) {
+    digitalWrite(trig_pin_, LOW);
+    delayMicroseconds(2);
+    digitalWrite(trig_pin_, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(trig_pin_, LOW);
 
-  const unsigned long duration_us = pulseIn(echo_pin_, HIGH, kSonarEchoTimeoutUs);
-  if (duration_us == 0) {
+    last_trigger_us_ = now_us;
+    waiting_echo_ = true;
+  }
+
+  uint32_t pulse_width_us = 0;
+  bool sample_ready = false;
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+    if (sample_ready_) {
+      sample_ready_ = false;
+      pulse_width_us = pulse_width_us_;
+      sample_ready = true;
+    }
+  }
+
+  if (sample_ready) {
+    waiting_echo_ = false;
+    if (pulse_width_us > 0 && pulse_width_us <= kSonarEchoTimeoutUs) {
+      const float distance_cm = static_cast<float>(pulse_width_us) * 0.0343f * 0.5f;
+      last_distance_cm_ = distance_cm;
+
+      pushHistory(distance_cm);
+      const float median_cm = medianHistory();
+
+      if (!ema_initialized_) {
+        ema_cm_ = median_cm;
+        ema_initialized_ = true;
+      } else {
+        ema_cm_ = (kSonarEmaAlpha * median_cm) + ((1.0f - kSonarEmaAlpha) * ema_cm_);
+      }
+
+      last_x_cm_ = mapBallPosCm(last_distance_cm_);
+      last_x_filt_cm_ = mapBallPosCm(ema_cm_);
+      last_sample_ms_ = now_ms;
+      has_sample_ = true;
+      timeout_flag_ = false;
+    } else {
+      timeout_flag_ = true;
+    }
+  }
+
+  if (waiting_echo_ && static_cast<uint32_t>(now_us - last_trigger_us_) > kSonarEchoTimeoutUs) {
+    waiting_echo_ = false;
+    timeout_flag_ = true;
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+      awaiting_fall_ = false;
+      sample_ready_ = false;
+    }
+  }
+}
+
+bool HCSR04Sensor::getPosition(float& x_cm, float& x_filt_cm, float& distance_raw_cm) const {
+  if (!has_sample_) {
     return false;
   }
 
-  distance_cm = static_cast<float>(duration_us) * 0.0343f * 0.5f;
+  x_cm = last_x_cm_;
+  x_filt_cm = last_x_filt_cm_;
+  distance_raw_cm = last_distance_cm_;
   return true;
 }
 
-bool HCSR04Sensor::readPositionCm(float& x_cm,
-                                  float& x_filt_cm,
-                                  float& distance_raw_cm) {
-  if (!readDistanceCm(distance_raw_cm)) {
+bool HCSR04Sensor::hasFreshSample(uint32_t now_ms) const {
+  if (!has_sample_) {
     return false;
   }
+  return sampleAgeMs(now_ms) <= kPosSampleFreshMs;
+}
 
-  pushHistory(distance_raw_cm);
-  const float median_cm = medianHistory();
+uint32_t HCSR04Sensor::sampleAgeMs(uint32_t now_ms) const {
+  if (!has_sample_) {
+    return 0xFFFFFFFFUL;
+  }
+  return static_cast<uint32_t>(now_ms - last_sample_ms_);
+}
 
-  if (!ema_initialized_) {
-    ema_cm_ = median_cm;
-    ema_initialized_ = true;
-  } else {
-    ema_cm_ = (kSonarEmaAlpha * median_cm) + ((1.0f - kSonarEmaAlpha) * ema_cm_);
+bool HCSR04Sensor::hasTimeout() const { return timeout_flag_; }
+
+void HCSR04Sensor::handleEchoEdgeIsr(uint32_t now_us, bool level_high) {
+  if (level_high) {
+    rise_us_ = now_us;
+    awaiting_fall_ = true;
+    return;
   }
 
-  x_cm = mapBallPosCm(distance_raw_cm);
-  x_filt_cm = mapBallPosCm(ema_cm_);
-  return true;
+  if (!awaiting_fall_) {
+    return;
+  }
+
+  pulse_width_us_ = static_cast<uint32_t>(now_us - rise_us_);
+  sample_ready_ = true;
+  awaiting_fall_ = false;
 }
 
 void HCSR04Sensor::pushHistory(float sample_cm) {

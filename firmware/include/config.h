@@ -23,8 +23,21 @@ constexpr float kThetaCmdLimitDeg = 8.0f;
 constexpr float kThetaHardLimitDeg = 15.0f;
 constexpr float kBallPosHardLimitCm = 22.0f;
 
-constexpr uint32_t kSensorInvalidFaultMs = 200;
+constexpr float kDegToRad = 0.01745329252f;
+constexpr float kRadToDeg = 57.295779513f;
+constexpr float kCmToM = 0.01f;
+constexpr float kMToCm = 100.0f;
+
+constexpr float kThetaCmdLimitRad = kThetaCmdLimitDeg * kDegToRad;
+constexpr float kThetaHardLimitRad = kThetaHardLimitDeg * kDegToRad;
+constexpr float kBallPosHardLimitM = kBallPosHardLimitCm * kCmToM;
+
+constexpr uint32_t kSensorInvalidFaultMsBringup = 1000;
+constexpr uint32_t kSensorInvalidFaultMsRunning = 300;
+
 constexpr uint32_t kSonarEchoTimeoutUs = 25000;
+constexpr uint32_t kSonarTriggerPeriodUs = 35000;
+constexpr uint32_t kPosSampleFreshMs = 120;
 constexpr float kSonarEmaAlpha = 0.35f;
 
 constexpr float kDefaultBallSetpointCm = 0.0f;

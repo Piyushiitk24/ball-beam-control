@@ -15,10 +15,16 @@ enum class AppState : uint8_t {
 
 struct SensorData {
   float beam_angle_deg = 0.0f;
+  float beam_angle_rad = 0.0f;
   float beam_angle_raw_deg = 0.0f;
+
   float ball_pos_cm = 0.0f;
+  float ball_pos_m = 0.0f;
   float ball_pos_filt_cm = 0.0f;
+  float ball_pos_filt_m = 0.0f;
+
   float sonar_distance_raw_cm = 0.0f;
+
   bool valid_angle = false;
   bool valid_pos = false;
   uint32_t ts_ms = 0;
@@ -26,6 +32,7 @@ struct SensorData {
 
 struct Setpoint {
   float ball_pos_cm_target = 0.0f;
+  float ball_pos_m_target = 0.0f;
 };
 
 struct ActuatorCmd {

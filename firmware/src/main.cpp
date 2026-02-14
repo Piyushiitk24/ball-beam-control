@@ -39,7 +39,11 @@ bool g_manual_enable = false;
 
 uint32_t g_last_control_ms = 0;
 uint32_t g_last_telemetry_ms = 0;
-uint32_t g_last_valid_sensor_ms = 0;
+uint32_t g_last_valid_angle_ms = 0;
+uint32_t g_last_valid_pos_ms = 0;
+
+volatile uint8_t* g_echo_pin_reg = nullptr;
+uint8_t g_echo_pin_mask = 0;
 
 char g_cmd_buffer[96];
 size_t g_cmd_len = 0;
@@ -82,6 +86,12 @@ const char* stateToString(AppState state) {
   }
 }
 
+uint32_t activeStaleThresholdMs() {
+  return (g_state_machine.state() == AppState::RUNNING)
+             ? kSensorInvalidFaultMsRunning
+             : kSensorInvalidFaultMsBringup;
+}
+
 bool hasAnyFault() {
   return g_fault_flags.sonar_timeout || g_fault_flags.i2c_error ||
          g_fault_flags.angle_oob || g_fault_flags.pos_oob;
@@ -92,6 +102,21 @@ void applySafeDisable() {
   g_stepper.enable(false);
 }
 
+void setupEchoPcint() {
+  g_echo_pin_reg = portInputRegister(digitalPinToPort(PIN_ECHO));
+  g_echo_pin_mask = digitalPinToBitMask(PIN_ECHO);
+
+  volatile uint8_t* pcicr = digitalPinToPCICR(PIN_ECHO);
+  volatile uint8_t* pcmsk = digitalPinToPCMSK(PIN_ECHO);
+
+  if (pcicr == nullptr || pcmsk == nullptr) {
+    return;
+  }
+
+  *pcicr |= _BV(digitalPinToPCICRbit(PIN_ECHO));
+  *pcmsk |= _BV(digitalPinToPCMSKbit(PIN_ECHO));
+}
+
 bool readSensors(uint32_t now_ms) {
   g_sensor.ts_ms = now_ms;
 
@@ -100,7 +125,9 @@ bool readSensors(uint32_t now_ms) {
   const bool angle_ok = g_as5600.readBeamThetaDeg(theta_deg, theta_raw_deg);
   if (angle_ok) {
     g_sensor.beam_angle_deg = theta_deg;
+    g_sensor.beam_angle_rad = theta_deg * kDegToRad;
     g_sensor.beam_angle_raw_deg = theta_raw_deg;
+    g_last_valid_angle_ms = now_ms;
     g_fault_flags.i2c_error = false;
   } else {
     g_fault_flags.i2c_error = true;
@@ -110,35 +137,54 @@ bool readSensors(uint32_t now_ms) {
   float x_cm = 0.0f;
   float x_filt_cm = 0.0f;
   float dist_cm = 0.0f;
-  const bool pos_ok = g_hcsr04.readPositionCm(x_cm, x_filt_cm, dist_cm);
-  if (pos_ok) {
-    g_sensor.ball_pos_cm = x_cm;
-    g_sensor.ball_pos_filt_cm = x_filt_cm;
-    g_sensor.sonar_distance_raw_cm = dist_cm;
-    g_fault_flags.sonar_timeout = false;
-  } else {
-    g_fault_flags.sonar_timeout = true;
-  }
-  g_sensor.valid_pos = pos_ok;
+  const bool has_pos_sample = g_hcsr04.getPosition(x_cm, x_filt_cm, dist_cm);
 
-  if (angle_ok && pos_ok) {
-    g_last_valid_sensor_ms = now_ms;
+  if (has_pos_sample) {
+    g_sensor.ball_pos_cm = x_cm;
+    g_sensor.ball_pos_m = x_cm * kCmToM;
+    g_sensor.ball_pos_filt_cm = x_filt_cm;
+    g_sensor.ball_pos_filt_m = x_filt_cm * kCmToM;
+    g_sensor.sonar_distance_raw_cm = dist_cm;
+
+    if (g_hcsr04.hasFreshSample(now_ms)) {
+      g_last_valid_pos_ms = now_ms;
+    }
+
+    if (!g_hcsr04.hasTimeout()) {
+      g_fault_flags.sonar_timeout = false;
+    }
+  } else {
+    if (g_hcsr04.hasTimeout()) {
+      g_fault_flags.sonar_timeout = true;
+    }
   }
+
+  g_sensor.valid_pos = has_pos_sample && g_hcsr04.hasFreshSample(now_ms) && !g_hcsr04.hasTimeout();
 
   if (angle_ok) {
-    g_fault_flags.angle_oob = fabsf(g_sensor.beam_angle_deg) > kThetaHardLimitDeg;
-  }
-  if (pos_ok) {
-    g_fault_flags.pos_oob = fabsf(g_sensor.ball_pos_filt_cm) > kBallPosHardLimitCm;
+    g_fault_flags.angle_oob = fabsf(g_sensor.beam_angle_rad) > kThetaHardLimitRad;
   }
 
-  return angle_ok && pos_ok;
+  if (has_pos_sample) {
+    g_fault_flags.pos_oob = fabsf(g_sensor.ball_pos_filt_m) > kBallPosHardLimitM;
+  }
+
+  return g_sensor.valid_angle && g_sensor.valid_pos;
 }
 
 void updateFaultState(uint32_t now_ms) {
-  if (static_cast<uint32_t>(now_ms - g_last_valid_sensor_ms) > kSensorInvalidFaultMs) {
-    g_fault_flags.sonar_timeout = true;
+  const uint32_t stale_threshold_ms = activeStaleThresholdMs();
+
+  if (static_cast<uint32_t>(now_ms - g_last_valid_angle_ms) > stale_threshold_ms) {
     g_fault_flags.i2c_error = true;
+  }
+
+  if (static_cast<uint32_t>(now_ms - g_last_valid_pos_ms) > stale_threshold_ms) {
+    g_fault_flags.sonar_timeout = true;
+  }
+
+  if (g_hcsr04.hasTimeout()) {
+    g_fault_flags.sonar_timeout = true;
   }
 
   if (hasAnyFault()) {
@@ -163,6 +209,8 @@ void printHelp() {
 }
 
 void printStatus() {
+  const uint32_t now_ms = millis();
+
   Serial.print(F("STATE,"));
   Serial.println(stateToString(g_state_machine.state()));
 
@@ -177,6 +225,11 @@ void printStatus() {
   Serial.print(g_sensor.ball_pos_cm, 4);
   Serial.print(F(",x_filt_cm="));
   Serial.println(g_sensor.ball_pos_filt_cm, 4);
+
+  Serial.print(F("AGE,angle_ms="));
+  Serial.print(static_cast<uint32_t>(now_ms - g_last_valid_angle_ms));
+  Serial.print(F(",pos_ms="));
+  Serial.println(static_cast<uint32_t>(now_ms - g_last_valid_pos_ms));
 
   Serial.print(F("FAULTS,bits="));
   Serial.println(packFaultFlags(g_fault_flags));
@@ -214,12 +267,19 @@ void emitTelemetry(uint32_t now_ms) {
 void runJogBlocking(uint32_t timeout_ms) {
   const uint32_t start_ms = millis();
   while (g_stepper.jogActive()) {
-    g_stepper.serviceStepPulse(micros());
-    if (static_cast<uint32_t>(millis() - start_ms) > timeout_ms) {
+    const uint32_t now_us = micros();
+    const uint32_t now_ms = millis();
+
+    g_stepper.processIsrFlags();
+    g_hcsr04.service(now_us, now_ms);
+
+    if (static_cast<uint32_t>(now_ms - start_ms) > timeout_ms) {
       g_stepper.stop();
       break;
     }
   }
+
+  g_stepper.processIsrFlags();
 }
 
 void handleCalSignBegin() {
@@ -441,6 +501,7 @@ void handleCommand(char* line) {
     if (g_state_machine.requestRun(currentConditions())) {
       g_controller.reset();
       g_setpoint.ball_pos_cm_target = kDefaultBallSetpointCm;
+      g_setpoint.ball_pos_m_target = g_setpoint.ball_pos_cm_target * kCmToM;
       Serial.println(F("OK,running"));
     } else {
       Serial.println(F("ERR,run_blocked_check_status"));
@@ -496,6 +557,8 @@ void serviceControl(uint32_t now_ms) {
       return;
     }
 
+    g_setpoint.ball_pos_m_target = g_setpoint.ball_pos_cm_target * kCmToM;
+
     const ActuatorCmd cmd = g_controller.update(g_sensor, g_setpoint, kControlDtSec);
     if (cmd.enable) {
       g_stepper.enable(true);
@@ -518,7 +581,32 @@ void serviceControl(uint32_t now_ms) {
   }
 }
 
+void handleEchoPcintIsr() {
+  if (g_echo_pin_reg == nullptr || g_echo_pin_mask == 0) {
+    return;
+  }
+
+  const bool level_high = ((*g_echo_pin_reg) & g_echo_pin_mask) != 0;
+  g_hcsr04.handleEchoEdgeIsr(micros(), level_high);
+}
+
 }  // namespace
+
+ISR(TIMER1_COMPA_vect) {
+  g_stepper.handleTimerCompareIsr();
+}
+
+ISR(PCINT0_vect) {
+  handleEchoPcintIsr();
+}
+
+ISR(PCINT1_vect) {
+  handleEchoPcintIsr();
+}
+
+ISR(PCINT2_vect) {
+  handleEchoPcintIsr();
+}
 
 void setup() {
   Serial.begin(SERIAL_BAUD);
@@ -527,11 +615,13 @@ void setup() {
   Serial.println(F("BALL_BEAM_BOOT"));
 
   g_stepper.begin();
+  g_stepper.beginScheduler();
   applySafeDisable();
 
   Wire.begin();
   const bool i2c_ok = g_as5600.begin(Wire, AS5600_I2C_ADDR);
   g_hcsr04.begin();
+  setupEchoPcint();
 
   g_fault_flags = FaultFlags{};
   if (!i2c_ok) {
@@ -539,20 +629,24 @@ void setup() {
   }
 
   g_setpoint.ball_pos_cm_target = kDefaultBallSetpointCm;
+  g_setpoint.ball_pos_m_target = g_setpoint.ball_pos_cm_target * kCmToM;
 
   g_last_control_ms = millis();
   g_last_telemetry_ms = g_last_control_ms;
-  g_last_valid_sensor_ms = g_last_control_ms;
+  g_last_valid_angle_ms = g_last_control_ms;
+  g_last_valid_pos_ms = g_last_control_ms;
 
   printHelp();
   printStatus();
 }
 
 void loop() {
-  g_stepper.serviceStepPulse(micros());
-  pollSerial();
-
+  const uint32_t now_us = micros();
   const uint32_t now_ms = millis();
+
+  g_stepper.processIsrFlags();
+  g_hcsr04.service(now_us, now_ms);
+  pollSerial();
 
   if (static_cast<uint32_t>(now_ms - g_last_control_ms) >= kControlPeriodMs) {
     g_last_control_ms = now_ms;

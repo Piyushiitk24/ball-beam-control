@@ -1,7 +1,5 @@
 #include "control/pid.h"
 
-#include <math.h>
-
 namespace bb {
 namespace {
 
@@ -37,12 +35,25 @@ float PID::update(float error, float dt_s) {
     return 0.0f;
   }
 
-  integral_ += error * dt_s;
-  integral_ = clampf(integral_, gains_.i_min, gains_.i_max);
-
   float derivative = 0.0f;
   if (has_prev_) {
     derivative = (error - prev_error_) / dt_s;
+  }
+
+  // Evaluate saturation tendency before integration.
+  const float pre_int_output =
+      gains_.kp * error + gains_.ki * integral_ + gains_.kd * derivative;
+  const bool sat_high = (pre_int_output >= gains_.out_max);
+  const bool sat_low = (pre_int_output <= gains_.out_min);
+
+  bool allow_integral = true;
+  if ((sat_high && error > 0.0f) || (sat_low && error < 0.0f)) {
+    allow_integral = false;
+  }
+
+  if (allow_integral) {
+    integral_ += error * dt_s;
+    integral_ = clampf(integral_, gains_.i_min, gains_.i_max);
   }
 
   float output = gains_.kp * error + gains_.ki * integral_ + gains_.kd * derivative;

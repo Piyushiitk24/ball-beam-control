@@ -51,8 +51,13 @@ def design_gains(params: dict) -> dict:
     kdo = a2 / k_theta_to_xddot
     kio = a0 / k_theta_to_xddot
 
-    theta_lim = float(params["limits"]["theta_cmd_deg"])
+    theta_lim_deg = float(params["limits"]["theta_cmd_deg"])
+    theta_lim_rad = np.deg2rad(theta_lim_deg)
     step_lim = float(params["limits"]["step_rate_sps"])
+
+    eps = 1e-6
+    inner_i_lim = step_lim / max(abs(kii), eps)
+    outer_i_lim = theta_lim_rad / max(abs(kio), eps)
 
     return {
         "meta": {
@@ -60,13 +65,21 @@ def design_gains(params: dict) -> dict:
             "k_theta_to_xddot": k_theta_to_xddot,
             "inner_bw_hz": inner_bw_hz,
             "outer_bw_hz": outer_bw_hz,
+            "units": {
+                "outer_error": "m",
+                "outer_output": "rad",
+                "inner_error": "rad",
+                "inner_output": "step_per_s",
+                "outer_integral_state": "m*s",
+                "inner_integral_state": "rad*s",
+            },
         },
         "inner": {
             "kp": float(kpi),
             "ki": float(kii),
             "kd": float(kdi),
-            "i_min": -200.0,
-            "i_max": 200.0,
+            "i_min": -float(inner_i_lim),
+            "i_max": float(inner_i_lim),
             "out_min": -step_lim,
             "out_max": step_lim,
         },
@@ -74,41 +87,41 @@ def design_gains(params: dict) -> dict:
             "kp": float(kpo),
             "ki": float(kio),
             "kd": float(kdo),
-            "i_min": -theta_lim,
-            "i_max": theta_lim,
-            "out_min": -theta_lim,
-            "out_max": theta_lim,
+            "i_min": -float(outer_i_lim),
+            "i_max": float(outer_i_lim),
+            "out_min": -float(theta_lim_rad),
+            "out_max": float(theta_lim_rad),
         },
     }
 
 
-def simulate_seed_response(params: dict, gains: dict, t_end: float = 10.0) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def simulate_seed_response(
+    params: dict, gains: dict, t_end: float = 10.0
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     g = float(params["plant"]["gravity_mps2"])
     rolling = float(params["plant"]["rolling_factor"])
     c = float(params["plant"]["viscous_damping_1ps"])
     inner_bw = 2.0 * np.pi * float(params["design"]["inner_bw_hz"])
+
     theta_limit_deg = float(params["limits"]["theta_cmd_deg"])
-    theta_limit = np.deg2rad(theta_limit_deg)
+    theta_limit_rad = np.deg2rad(theta_limit_deg)
 
     k = rolling * g
     ko = gains["outer"]
 
     def rhs(t: float, y: np.ndarray) -> np.ndarray:
         x, x_dot, theta, i_outer = y
-        r = 0.0 if t < 1.0 else 0.03  # 3 cm target step
+        r = 0.0 if t < 1.0 else 0.03  # 3 cm target step (meters)
 
         e = r - x
         e_dot = -x_dot
 
-        theta_cmd_deg = (
-            ko["kp"] * e + ko["ki"] * i_outer + ko["kd"] * e_dot
-        )
-        theta_cmd_deg = clamp(theta_cmd_deg, ko["out_min"], ko["out_max"])
-        theta_cmd = np.deg2rad(theta_cmd_deg)
-        theta_cmd = clamp(theta_cmd, -theta_limit, theta_limit)
+        theta_cmd_rad = ko["kp"] * e + ko["ki"] * i_outer + ko["kd"] * e_dot
+        theta_cmd_rad = clamp(theta_cmd_rad, ko["out_min"], ko["out_max"])
+        theta_cmd_rad = clamp(theta_cmd_rad, -theta_limit_rad, theta_limit_rad)
 
         x_ddot = k * np.sin(theta) - c * x_dot
-        theta_dot = inner_bw * (theta_cmd - theta)
+        theta_dot = inner_bw * (theta_cmd_rad - theta)
         i_dot = e
 
         return np.array([x_dot, x_ddot, theta_dot, i_dot], dtype=float)
@@ -155,7 +168,7 @@ def main() -> None:
     axes[1].grid(True, alpha=0.3)
     axes[1].legend()
 
-    fig.suptitle("Seed Closed-Loop Simulation (Model-Based Initial Gains)")
+    fig.suptitle("Seed Closed-Loop Simulation (SI-Consistent Initial Gains)")
     fig.tight_layout()
 
     plot_path = out_dir / "closed_loop_seed.png"

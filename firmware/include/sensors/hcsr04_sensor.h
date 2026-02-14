@@ -9,9 +9,14 @@ class HCSR04Sensor {
   HCSR04Sensor(uint8_t trig_pin, uint8_t echo_pin);
 
   void begin();
+  void service(uint32_t now_us, uint32_t now_ms);
 
-  bool readDistanceCm(float& distance_cm);
-  bool readPositionCm(float& x_cm, float& x_filt_cm, float& distance_raw_cm);
+  bool getPosition(float& x_cm, float& x_filt_cm, float& distance_raw_cm) const;
+  bool hasFreshSample(uint32_t now_ms) const;
+  uint32_t sampleAgeMs(uint32_t now_ms) const;
+  bool hasTimeout() const;
+
+  void handleEchoEdgeIsr(uint32_t now_us, bool level_high);
 
  private:
   static constexpr uint8_t kWindow = 5;
@@ -25,6 +30,21 @@ class HCSR04Sensor {
 
   bool ema_initialized_;
   float ema_cm_;
+
+  bool has_sample_;
+  float last_distance_cm_;
+  float last_x_cm_;
+  float last_x_filt_cm_;
+  uint32_t last_sample_ms_;
+
+  bool timeout_flag_;
+  uint32_t last_trigger_us_;
+  bool waiting_echo_;
+
+  volatile uint32_t rise_us_;
+  volatile uint32_t pulse_width_us_;
+  volatile bool awaiting_fall_;
+  volatile bool sample_ready_;
 
   void pushHistory(float sample_cm);
   float medianHistory() const;

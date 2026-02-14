@@ -6,8 +6,12 @@ struct PIDGains {
   float kp = 0.0f;
   float ki = 0.0f;
   float kd = 0.0f;
+
+  // Integral state limits (error * seconds), not output limits.
   float i_min = -1e9f;
   float i_max = 1e9f;
+
+  // Controller output limits.
   float out_min = -1e9f;
   float out_max = 1e9f;
 };

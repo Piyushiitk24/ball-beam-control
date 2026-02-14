@@ -18,7 +18,7 @@ float clampf(float value, float min_value, float max_value) {
 
 }  // namespace
 
-CascadeController::CascadeController() : last_theta_cmd_deg_(0.0f) {
+CascadeController::CascadeController() : last_theta_cmd_rad_(0.0f) {
   PIDGains outer_gains;
   outer_gains.kp = generated::kOuterKp;
   outer_gains.ki = generated::kOuterKi;
@@ -43,7 +43,7 @@ CascadeController::CascadeController() : last_theta_cmd_deg_(0.0f) {
 void CascadeController::reset() {
   outer_pos_pid_.reset();
   inner_theta_pid_.reset();
-  last_theta_cmd_deg_ = 0.0f;
+  last_theta_cmd_rad_ = 0.0f;
 }
 
 ActuatorCmd CascadeController::update(const SensorData& sensor,
@@ -54,17 +54,18 @@ ActuatorCmd CascadeController::update(const SensorData& sensor,
     cmd.enable = false;
     cmd.signed_step_rate_sps = 0.0f;
     cmd.dir_positive = true;
-    last_theta_cmd_deg_ = 0.0f;
+    last_theta_cmd_rad_ = 0.0f;
     return cmd;
   }
 
-  const float pos_error = setpoint.ball_pos_cm_target - sensor.ball_pos_filt_cm;
-  float theta_cmd = outer_pos_pid_.update(pos_error, dt_s);
-  theta_cmd = clampf(theta_cmd, -kThetaCmdLimitDeg, kThetaCmdLimitDeg);
-  last_theta_cmd_deg_ = theta_cmd;
+  const float pos_error_m = setpoint.ball_pos_m_target - sensor.ball_pos_filt_m;
 
-  const float theta_error = theta_cmd - sensor.beam_angle_deg;
-  float signed_step_rate = inner_theta_pid_.update(theta_error, dt_s);
+  float theta_cmd_rad = outer_pos_pid_.update(pos_error_m, dt_s);
+  theta_cmd_rad = clampf(theta_cmd_rad, -kThetaCmdLimitRad, kThetaCmdLimitRad);
+  last_theta_cmd_rad_ = theta_cmd_rad;
+
+  const float theta_error_rad = theta_cmd_rad - sensor.beam_angle_rad;
+  float signed_step_rate = inner_theta_pid_.update(theta_error_rad, dt_s);
   signed_step_rate = clampf(signed_step_rate, -kMaxStepRateSps, kMaxStepRateSps);
 
   cmd.enable = true;
@@ -73,6 +74,10 @@ ActuatorCmd CascadeController::update(const SensorData& sensor,
   return cmd;
 }
 
-float CascadeController::lastThetaCmdDeg() const { return last_theta_cmd_deg_; }
+float CascadeController::lastThetaCmdDeg() const {
+  return last_theta_cmd_rad_ * kRadToDeg;
+}
+
+float CascadeController::lastThetaCmdRad() const { return last_theta_cmd_rad_; }
 
 }  // namespace bb

@@ -21,7 +21,7 @@ mkvenv
 pip install -r /Users/piyush/code/ball-beam-control/requirements.txt
 ```
 
-4. Generate initial controller gains and exported firmware header:
+4. Generate SI-consistent controller gains and exported firmware header:
 
 ```bash
 python model/first_principles/design_cascade_pid.py
@@ -35,6 +35,14 @@ cd firmware
 pio run -e nano_new
 pio run -e nano_old
 ```
+
+## Runtime Architecture (Hardening v2)
+
+- Step pulses are generated in a Timer1 ISR with integer scheduling only.
+- ISR stepping path avoids float math and `digitalWrite()`.
+- HC-SR04 echo capture uses PCINT timestamp ISR (edge+time+flag only).
+- Sonar filtering/mapping runs in the main thread.
+- Control math is SI internal (`m`, `rad`) and telemetry stays human-readable (`cm`, `deg`).
 
 ## Firmware Notes
 

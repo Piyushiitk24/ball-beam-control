@@ -9,6 +9,9 @@ class StepperTMC2209 {
   StepperTMC2209(uint8_t step_pin, uint8_t dir_pin, uint8_t en_pin);
 
   void begin();
+  void beginScheduler();
+  void endScheduler();
+
   void enable(bool enabled);
   bool isEnabled() const;
 
@@ -19,24 +22,42 @@ class StepperTMC2209 {
   void requestJogSteps(long signed_steps, float abs_rate_sps);
   bool jogActive() const;
 
-  void serviceStepPulse(uint32_t now_us);
+  void processIsrFlags();
+  void handleTimerCompareIsr();
 
  private:
+  static constexpr uint16_t kTimerHz = 40000;  // 25us tick at prescaler 8
+  static constexpr uint16_t kMinHalfPeriodTicks = 1;
+  static constexpr uint16_t kMaxHalfPeriodTicks = 60000;
+
   uint8_t step_pin_;
   uint8_t dir_pin_;
   uint8_t en_pin_;
 
-  bool enabled_;
-  bool step_level_;
-  bool direction_positive_;
+  volatile uint8_t* step_port_out_;
+  uint8_t step_mask_;
+  volatile uint8_t* dir_port_out_;
+  uint8_t dir_mask_;
+
+  volatile bool scheduler_started_;
+  volatile bool enabled_;
+  volatile bool step_level_;
+  volatile bool pulse_active_;
+  volatile bool direction_positive_;
 
   float signed_rate_sps_;
   float abs_rate_sps_;
 
-  long jog_steps_remaining_;
-  bool jog_mode_;
+  volatile uint16_t half_period_ticks_;
+  volatile uint16_t ticks_until_toggle_;
 
-  uint32_t last_toggle_us_;
+  volatile int32_t jog_steps_remaining_;
+  volatile bool jog_mode_;
+  volatile bool jog_finished_flag_;
+
+  uint16_t rateToHalfPeriodTicks(float abs_rate_sps) const;
+  void setStepPinLevelFast(bool high);
+  void setDirPinFast(bool positive);
 };
 
 }  // namespace bb
