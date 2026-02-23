@@ -3,13 +3,79 @@ plant:
   beam_length_m: 0.50
   ball_radius_m: 0.012
   ball_mass_kg: 0.05
-  rolling_factor: 0.7142857143  # 5/7 for solid sphere
-  viscous_damping_1ps: 0.18
-  actuator_tau_s: 0.08
+  ball_inertia_ratio: 0.4  # 2/5 for a solid sphere
+
+  # Beam + attachments (excluding ball), about pivot.
+  beam_inertia_kgm2: 0.005
+  beam_mass_kg: 0.0
+  beam_com_l_m: 0.0
+  beam_com_h_m: 0.0
+
+  # Dissipation.
+  rolling_damping_ns_per_m: 0.0125
+  rolling_coulomb_n: 0.0
+  pivot_damping_nms: 0.006
+  pivot_coulomb_nm: 0.0
 
 limits:
   theta_cmd_deg: 8.0
   step_rate_sps: 1800.0
+
+actuator:
+  # Motor-angle first-order response: phi_dot = (phi_cmd - phi)/phi_tau_s
+  phi_tau_s: 0.08
+
+  # Torque law: tau = kp*(theta_ref - theta) - kd*theta_dot, clamped to +/- torque_limit_nm.
+  # Leave kp/kd unset to auto-derive from design.inner_bw_hz and design.inner_zeta.
+  # theta_kp_nm_per_rad: 0.0
+  # theta_kd_nms_per_rad: 0.0
+  torque_limit_nm: 0.35
+
+calibration:
+  theta_from_phi:
+    # Supported modes: linear | poly | lut
+    mode: linear
+    linear:
+      phi0_rad: 0.0
+      theta0_rad: 0.0
+      gain_theta_per_phi: 1.0
+    # poly:
+    #   coeffs: [0.0, 1.0]  # theta = c0 + c1*phi + c2*phi^2 + ...
+    # lut:
+    #   phi_rad: [-0.35, 0.0, 0.35]
+    #   theta_rad: [-0.35, 0.0, 0.35]
+    hysteresis:
+      enabled: false
+      up:
+        phi_rad: [-0.35, 0.0, 0.35]
+        theta_rad: [-0.35, 0.0, 0.35]
+      down:
+        phi_rad: [-0.35, 0.0, 0.35]
+        theta_rad: [-0.35, 0.0, 0.35]
+
+  x_from_d_theta:
+    # Supported modes: linear | affine_theta | lut1d | lut2d
+    mode: linear
+    linear:
+      center_m: 0.20
+      sign: 1.0
+      gain_x_per_d: 1.0
+    # affine_theta:
+    #   c0: 0.0
+    #   c_d: 1.0
+    #   c_theta: 0.0
+    #   c_dtheta: 0.0
+    # lut1d:
+    #   d_m: [0.12, 0.20, 0.28]
+    #   x_m: [-0.08, 0.0, 0.08]
+    #   theta_gain: 0.0
+    # lut2d:
+    #   d_m: [0.12, 0.20, 0.28]
+    #   theta_rad: [-0.1, 0.0, 0.1]
+    #   x_m:
+    #     - [-0.09, -0.01, 0.07]
+    #     - [-0.08, 0.00, 0.08]
+    #     - [-0.07, 0.01, 0.09]
 
 design:
   inner_bw_hz: 4.0

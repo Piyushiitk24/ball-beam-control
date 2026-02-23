@@ -7,25 +7,26 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import yaml
 from scipy.integrate import solve_ivp
 
-
-def load_params(path: Path) -> dict:
-    with path.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
-def clamp(v: float, vmin: float, vmax: float) -> float:
-    return max(vmin, min(vmax, v))
-
+from first_principles_core import (
+    actuator_defaults,
+    clamp,
+    full_coupled_accels,
+    load_params,
+    outer_model_coeffs,
+    phi_from_theta,
+    theta_from_phi,
+    theta_tracking_torque,
+)
 
 def design_gains(params: dict) -> dict:
     g = float(params["plant"]["gravity_mps2"])
-    rolling = float(params["plant"]["rolling_factor"])
-    tau = float(params["plant"]["actuator_tau_s"])
+    alpha, beta = outer_model_coeffs(params)
+    act = actuator_defaults(params)
+    tau = float(act["phi_tau_s"])
 
-    k_theta_to_xddot = rolling * g
+    k_theta_to_xddot = alpha * g
 
     inner_bw_hz = float(params["design"]["inner_bw_hz"])
     inner_zeta = float(params["design"]["inner_zeta"])
@@ -63,6 +64,8 @@ def design_gains(params: dict) -> dict:
         "meta": {
             "method": "linearized-first-principles-cascade",
             "k_theta_to_xddot": k_theta_to_xddot,
+            "alpha": alpha,
+            "beta_1ps": beta,
             "inner_bw_hz": inner_bw_hz,
             "outer_bw_hz": outer_bw_hz,
             "units": {
@@ -97,20 +100,18 @@ def design_gains(params: dict) -> dict:
 
 def simulate_seed_response(
     params: dict, gains: dict, t_end: float = 10.0
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    g = float(params["plant"]["gravity_mps2"])
-    rolling = float(params["plant"]["rolling_factor"])
-    c = float(params["plant"]["viscous_damping_1ps"])
-    inner_bw = 2.0 * np.pi * float(params["design"]["inner_bw_hz"])
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    act = actuator_defaults(params)
+    theta_map_cfg = params.get("calibration", {}).get("theta_from_phi", {})
 
     theta_limit_deg = float(params["limits"]["theta_cmd_deg"])
     theta_limit_rad = np.deg2rad(theta_limit_deg)
 
-    k = rolling * g
     ko = gains["outer"]
+    phi_eq = phi_from_theta(0.0, theta_map_cfg, direction=1.0)
 
     def rhs(t: float, y: np.ndarray) -> np.ndarray:
-        x, x_dot, theta, i_outer = y
+        x, x_dot, theta, theta_dot, phi, i_outer = y
         r = 0.0 if t < 1.0 else 0.03  # 3 cm target step (meters)
 
         e = r - x
@@ -120,19 +121,35 @@ def simulate_seed_response(
         theta_cmd_rad = clamp(theta_cmd_rad, ko["out_min"], ko["out_max"])
         theta_cmd_rad = clamp(theta_cmd_rad, -theta_limit_rad, theta_limit_rad)
 
-        x_ddot = k * np.sin(theta) - c * x_dot
-        theta_dot = inner_bw * (theta_cmd_rad - theta)
+        phi_cmd = phi_from_theta(theta_cmd_rad, theta_map_cfg, direction=np.sign(theta_cmd_rad - theta))
+        phi_dot = (phi_cmd - phi) / max(act["phi_tau_s"], 1e-6)
+        theta_ref, _, _ = theta_from_phi(phi, theta_map_cfg, direction=np.sign(phi_dot))
+
+        tau_act = theta_tracking_torque(theta_ref, theta, theta_dot, params)
+        x_ddot, theta_ddot = full_coupled_accels(x, x_dot, theta, theta_dot, tau_act, params)
         i_dot = e
 
-        return np.array([x_dot, x_ddot, theta_dot, i_dot], dtype=float)
+        return np.array([x_dot, x_ddot, theta_dot, theta_ddot, phi_dot, i_dot], dtype=float)
 
     t_eval = np.linspace(0.0, t_end, 1500)
-    sol = solve_ivp(rhs, (0.0, t_end), np.zeros(4), t_eval=t_eval, rtol=1e-7, atol=1e-9)
+    y0 = np.array([0.0, 0.0, 0.0, 0.0, phi_eq, 0.0], dtype=float)
+    sol = solve_ivp(rhs, (0.0, t_end), y0, t_eval=t_eval, rtol=1e-7, atol=1e-9)
 
     x = sol.y[0]
     theta_deg = np.rad2deg(sol.y[2])
+    phi_deg = np.rad2deg(sol.y[4])
     ref = np.where(sol.t >= 1.0, 0.03, 0.0)
-    return sol.t, ref, x, theta_deg
+
+    theta_cmd_deg = np.empty_like(sol.t)
+    for i in range(sol.t.size):
+        e = ref[i] - x[i]
+        e_dot = -sol.y[1, i]
+        theta_cmd_rad = ko["kp"] * e + ko["ki"] * sol.y[5, i] + ko["kd"] * e_dot
+        theta_cmd_rad = clamp(theta_cmd_rad, ko["out_min"], ko["out_max"])
+        theta_cmd_rad = clamp(theta_cmd_rad, -theta_limit_rad, theta_limit_rad)
+        theta_cmd_deg[i] = np.rad2deg(theta_cmd_rad)
+
+    return sol.t, ref, x, theta_deg, theta_cmd_deg, phi_deg
 
 
 def main() -> None:
@@ -153,9 +170,9 @@ def main() -> None:
     with gains_path.open("w", encoding="utf-8") as f:
         json.dump(gains, f, indent=2)
 
-    t, ref, x, theta_deg = simulate_seed_response(params, gains)
+    t, ref, x, theta_deg, theta_cmd_deg, phi_deg = simulate_seed_response(params, gains)
 
-    fig, axes = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
+    fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
     axes[0].plot(t, ref * 100.0, label="Reference (cm)", color="#6a994e")
     axes[0].plot(t, x * 100.0, label="x (cm)", color="#1d3557")
     axes[0].set_ylabel("Position (cm)")
@@ -163,12 +180,18 @@ def main() -> None:
     axes[0].legend()
 
     axes[1].plot(t, theta_deg, label="theta (deg)", color="#e63946")
+    axes[1].plot(t, theta_cmd_deg, label="theta_cmd (deg)", color="#f4a261", alpha=0.9)
     axes[1].set_ylabel("Beam Angle (deg)")
-    axes[1].set_xlabel("Time (s)")
     axes[1].grid(True, alpha=0.3)
     axes[1].legend()
 
-    fig.suptitle("Seed Closed-Loop Simulation (SI-Consistent Initial Gains)")
+    axes[2].plot(t, phi_deg, label="phi (deg)", color="#3d405b")
+    axes[2].set_ylabel("Motor Angle (deg)")
+    axes[2].set_xlabel("Time (s)")
+    axes[2].grid(True, alpha=0.3)
+    axes[2].legend()
+
+    fig.suptitle("Seed Closed-Loop Simulation (Full Nonlinear Coupled Plant)")
     fig.tight_layout()
 
     plot_path = out_dir / "closed_loop_seed.png"

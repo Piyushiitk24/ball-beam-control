@@ -1,5 +1,8 @@
 # First-Principles Modeling
 
+Source of truth:
+- `docs/modeling_source_of_truth.md`
+
 All Python scripts are run from activated `.venv` created by `mkvenv`.
 
 ## Inputs

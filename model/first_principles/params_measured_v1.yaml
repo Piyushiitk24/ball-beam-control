@@ -1,0 +1,79 @@
+plant:
+  gravity_mps2: 9.81
+
+  # Measured ball properties.
+  ball_mass_kg: 0.0096
+  ball_radius_m: 0.0138
+  ball_inertia_ratio: 0.4  # solid sphere
+
+  # Beam + attachments excluding ball.
+  # beam_length_m is from COM measurements (195.33 mm + 172.02 mm).
+  beam_length_m: 0.36735
+  beam_mass_kg: 0.1392
+  beam_com_l_m: 0.145041716954  # from pivot, + toward motor side
+  beam_com_h_m: 0.0  # TODO: measure vertical COM offset from pivot axis
+
+  # Estimated J about pivot (needs CAD inertia export or pendulum ID for final value).
+  # Current estimate band from two plausible beam lengths: 0.00431 ... 0.00448.
+  beam_inertia_kgm2: 0.00439
+
+  # Pre-identification placeholders; re-identify after assembly.
+  rolling_damping_ns_per_m: 0.0125
+  rolling_coulomb_n: 0.0
+  pivot_damping_nms: 0.006
+  pivot_coulomb_nm: 0.0
+
+limits:
+  theta_cmd_deg: 8.0
+  step_rate_sps: 1800.0
+
+actuator:
+  phi_tau_s: 0.08
+  torque_limit_nm: 0.35
+
+calibration:
+  theta_from_phi:
+    mode: linear
+    linear:
+      phi0_rad: 0.0
+      theta0_rad: 0.0
+      gain_theta_per_phi: 1.0
+    hysteresis:
+      enabled: false
+      up:
+        phi_rad: [-0.35, 0.0, 0.35]
+        theta_rad: [-0.35, 0.0, 0.35]
+      down:
+        phi_rad: [-0.35, 0.0, 0.35]
+        theta_rad: [-0.35, 0.0, 0.35]
+
+  x_from_d_theta:
+    mode: linear
+    linear:
+      center_m: 0.20
+      sign: 1.0
+      gain_x_per_d: 1.0
+
+design:
+  inner_bw_hz: 4.0
+  inner_zeta: 0.9
+  outer_bw_hz: 1.1
+  outer_zeta: 0.85
+  extra_pole_factor: 4.0
+
+geometry:
+  measured:
+    pivot_from_fulcrum_end_m: 0.0368
+    motor_hole_from_motor_end_m: 0.00747
+    pivot_to_motor_hole_c2c_m: 0.32308
+    sensor_mount_mid_from_fulcrum_end_m: 0.0868
+    beam_com_no_sensor_from_fulcrum_end_m: 0.19533
+    beam_com_no_sensor_from_motor_end_m: 0.17202
+    motor_shaft_to_beam_motor_hole_hypotenuse_at_theta0_m: 0.0335
+    motor_shaft_to_upper_linkage_joint_m: 0.04765
+  cad:
+    pivot_to_motor_c2c_m: 0.300
+  notes:
+    - "Measured COM-implied beam length gives pivot_to_motor_hole ~= 0.32308 m."
+    - "This differs from CAD pivot_to_motor_c2c by +0.02308 m."
+    - "Current model is locked to 0.32308 m (from provided measurements)."

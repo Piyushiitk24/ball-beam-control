@@ -6,26 +6,29 @@ import json
 from pathlib import Path
 
 import numpy as np
-import yaml
 
-
-def load_params(path: Path) -> dict:
-    with path.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+from first_principles_core import (
+    actuator_defaults,
+    full_coupled_accels,
+    load_params,
+    phi_from_theta,
+    theta_from_phi,
+    theta_tracking_torque,
+)
 
 
 def f(state: np.ndarray, u: float, p: dict) -> np.ndarray:
-    x, x_dot, theta = state
+    x, x_dot, theta, theta_dot, phi = state
 
-    g = float(p["plant"]["gravity_mps2"])
-    c = float(p["plant"]["viscous_damping_1ps"])
-    tau = float(p["plant"]["actuator_tau_s"])
-    rolling = float(p["plant"]["rolling_factor"])
+    theta_map_cfg = p.get("calibration", {}).get("theta_from_phi", {})
+    act = actuator_defaults(p)
 
-    x_ddot = rolling * g * np.sin(theta) - c * x_dot
-    theta_dot = (u - theta) / tau
+    phi_dot = (u - phi) / max(act["phi_tau_s"], 1e-6)
+    theta_ref, _, _ = theta_from_phi(phi, theta_map_cfg, direction=np.sign(phi_dot))
+    tau_act = theta_tracking_torque(theta_ref, theta, theta_dot, p)
 
-    return np.array([x_dot, x_ddot, theta_dot], dtype=float)
+    x_ddot, theta_ddot = full_coupled_accels(x, x_dot, theta, theta_dot, tau_act, p)
+    return np.array([x_dot, x_ddot, theta_dot, theta_ddot, phi_dot], dtype=float)
 
 
 def jacobian_state(x0: np.ndarray, u0: float, p: dict, eps: float = 1e-6) -> np.ndarray:
@@ -57,18 +60,20 @@ def main() -> None:
     args = parser.parse_args()
 
     params = load_params(args.params)
+    theta_map_cfg = params.get("calibration", {}).get("theta_from_phi", {})
 
-    x_eq = np.array([0.0, 0.0, 0.0], dtype=float)
-    u_eq = 0.0
+    phi_eq = phi_from_theta(0.0, theta_map_cfg, direction=1.0)
+    x_eq = np.array([0.0, 0.0, 0.0, 0.0, phi_eq], dtype=float)
+    u_eq = float(phi_eq)
 
     A = jacobian_state(x_eq, u_eq, params)
     B = jacobian_input(x_eq, u_eq, params)
-    C = np.eye(3)
-    D = np.zeros((3, 1), dtype=float)
+    C = np.eye(5)
+    D = np.zeros((5, 1), dtype=float)
 
     payload = {
-        "state_order": ["x_m", "x_dot_mps", "theta_rad"],
-        "input_order": ["theta_cmd_rad"],
+        "state_order": ["x_m", "x_dot_mps", "theta_rad", "theta_dot_radps", "phi_rad"],
+        "input_order": ["phi_cmd_rad"],
         "A": A.tolist(),
         "B": B.tolist(),
         "C": C.tolist(),
@@ -79,7 +84,7 @@ def main() -> None:
     with out_path.open("w", encoding="utf-8") as f_out:
         json.dump(payload, f_out, indent=2)
 
-    print("Linearized model around x=0, x_dot=0, theta=0")
+    print("Linearized full model around x=0, x_dot=0, theta=0, theta_dot=0")
     print("Saved:", out_path)
     print("A=\n", A)
     print("B=\n", B)
