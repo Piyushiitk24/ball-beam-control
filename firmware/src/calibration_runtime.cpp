@@ -145,11 +145,19 @@ const char* runtimeCalLoadStatusName(RuntimeCalLoadStatus status) {
 
 bool runtimeCalIsZeroSet() { return hasFlag(kFlagZeroAngleCaptured) && hasFlag(kFlagZeroPosCaptured); }
 
+bool runtimeCalIsZeroAngleCaptured() { return hasFlag(kFlagZeroAngleCaptured); }
+
+bool runtimeCalIsZeroPosCaptured() { return hasFlag(kFlagZeroPosCaptured); }
+
 bool runtimeCalHasValidLimitSpan() { return g_runtime_cal.theta_lower_limit_deg < g_runtime_cal.theta_upper_limit_deg; }
 
 bool runtimeCalIsLimitsSet() {
   return hasFlag(kFlagLowerLimitCaptured) && hasFlag(kFlagUpperLimitCaptured) && runtimeCalHasValidLimitSpan();
 }
+
+bool runtimeCalIsLowerLimitCaptured() { return hasFlag(kFlagLowerLimitCaptured); }
+
+bool runtimeCalIsUpperLimitCaptured() { return hasFlag(kFlagUpperLimitCaptured); }
 
 bool runtimeCalIsSignSet() { return hasFlag(kFlagSignCaptured); }
 

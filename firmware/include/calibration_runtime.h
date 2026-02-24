@@ -34,7 +34,11 @@ RuntimeCalLoadStatus runtimeCalLoadStatus();
 const char* runtimeCalLoadStatusName(RuntimeCalLoadStatus status);
 
 bool runtimeCalIsZeroSet();
+bool runtimeCalIsZeroAngleCaptured();
+bool runtimeCalIsZeroPosCaptured();
 bool runtimeCalIsLimitsSet();
+bool runtimeCalIsLowerLimitCaptured();
+bool runtimeCalIsUpperLimitCaptured();
 bool runtimeCalIsSignSet();
 bool runtimeCalHasValidLimitSpan();
 

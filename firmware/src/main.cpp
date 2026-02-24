@@ -25,6 +25,7 @@ namespace {
 using namespace bb;
 
 constexpr float kLimitStopMarginDeg = 0.2f;
+constexpr float kLimitMinSpanDeg = 2.0f;
 
 StepperTMC2209 g_stepper(PIN_STEP, PIN_DIR, PIN_EN);
 AS5600Sensor g_as5600;
@@ -69,6 +70,30 @@ struct SignCalSession {
 };
 
 SignCalSession g_sign_cal;
+
+struct GuidedWizardSession {
+  bool active = false;
+  uint8_t step_index = 0;
+  bool telemetry_prev = true;
+  bool awaiting_save_confirm = false;
+};
+
+GuidedWizardSession g_wizard;
+bool g_runtime_cal_dirty = false;
+
+enum WizardStep : uint8_t {
+  kWizardStepZeroAngle = 0,
+  kWizardStepZeroPosition = 1,
+  kWizardStepLowerLimit = 2,
+  kWizardStepUpperLimit = 3,
+  kWizardStepSignBegin = 4,
+  kWizardStepSignSave = 5,
+  kWizardStepSaveConfirm = 6
+};
+
+void printFaultInfo();
+void printBringupMenu();
+void printSonarDiag();
 
 const char* stateToString(AppState state) {
   switch (state) {
@@ -168,6 +193,7 @@ bool sampleSonarNow(uint32_t now_ms,
   const bool has_pos_sample = g_hcsr04.getPosition(x_cm, x_filt_cm, dist_cm);
   if (!has_pos_sample) {
     g_sensor.valid_pos = false;
+    g_fault_flags.pos_oob = false;
     if (g_hcsr04.hasTimeout()) {
       g_fault_flags.sonar_timeout = true;
     }
@@ -187,11 +213,13 @@ bool sampleSonarNow(uint32_t now_ms,
   if (g_sensor.valid_pos) {
     g_last_valid_pos_ms = now_ms;
     g_fault_flags.sonar_timeout = false;
+    g_fault_flags.pos_oob = fabsf(g_sensor.ball_pos_filt_m) > kBallPosHardLimitM;
   } else if (timeout) {
     g_fault_flags.sonar_timeout = true;
+    g_fault_flags.pos_oob = false;
+  } else {
+    g_fault_flags.pos_oob = false;
   }
-
-  g_fault_flags.pos_oob = fabsf(g_sensor.ball_pos_filt_m) > kBallPosHardLimitM;
 
   if (x_cm_out != nullptr) {
     *x_cm_out = x_cm;
@@ -228,7 +256,7 @@ void updateFaultState(uint32_t now_ms) {
     g_fault_flags.sonar_timeout = true;
   }
 
-  if (hasAnyFault()) {
+  if (g_state_machine.state() == AppState::RUNNING && hasAnyFault()) {
     g_state_machine.requestFault();
     applySafeDisable();
   }
@@ -280,28 +308,31 @@ void maybeStopJogAtLimits() {
 }
 
 void printHelp() {
-  Serial.println(F("Commands:"));
+  Serial.println(F("Quick Keys:"));
+  Serial.println(F("  ?|h help, s status, t toggle telemetry"));
+  Serial.println(F("  e 0|1 enable driver, j <steps> <rate> jog"));
+  Serial.println(F("  a zero angle, p zero position, z show zero"));
+  Serial.println(F("  [|l|1 DOWN limit, ]|u|2 UP limit, m show limits"));
+  Serial.println(F("  b sign begin, g sign save, v save EEPROM"));
+  Serial.println(F("  o load EEPROM, d reset defaults, i guide"));
+  Serial.println(F("  r run, k stop, f fault reset, x fault info"));
+  Serial.println(F("Wizard Keys:"));
+  Serial.println(F("  w start guided calibration, n next step"));
+  Serial.println(F("  c confirm final save, q abort wizard"));
+  Serial.println(F("Full Commands (compat):"));
   Serial.println(F("  help"));
   Serial.println(F("  status"));
   Serial.println(F("  telemetry 0|1"));
   Serial.println(F("  en 0|1"));
   Serial.println(F("  jog <signed_steps> <rate>"));
-  Serial.println(F("  cal_zero set angle"));
-  Serial.println(F("  cal_zero set position"));
-  Serial.println(F("  cal_zero show"));
-  Serial.println(F("  cal_zero angle      (compat suggest)"));
-  Serial.println(F("  cal_zero position   (compat suggest)"));
-  Serial.println(F("  cal_limits set lower"));
-  Serial.println(F("  cal_limits set upper"));
+  Serial.println(F("  cal_zero set angle|position"));
+  Serial.println(F("  cal_zero show|angle|position"));
+  Serial.println(F("  cal_limits set down|up|lower|upper"));
   Serial.println(F("  cal_limits show"));
-  Serial.println(F("  cal_sign begin"));
-  Serial.println(F("  cal_sign save"));
-  Serial.println(F("  cal_save"));
-  Serial.println(F("  cal_load"));
-  Serial.println(F("  cal_reset defaults"));
-  Serial.println(F("  run"));
-  Serial.println(F("  stop"));
-  Serial.println(F("  fault_reset"));
+  Serial.println(F("  cal_sign begin|save"));
+  Serial.println(F("  sonar diag | sonar sign 1|-1"));
+  Serial.println(F("  cal_save | cal_load | cal_reset defaults"));
+  Serial.println(F("  run | stop | fault_reset | faults | guide"));
 }
 
 void printStatus() {
@@ -404,20 +435,25 @@ void runJogBlocking(uint32_t timeout_ms) {
   g_stepper.processIsrFlags();
 }
 
-void handleCalSignBegin() {
+bool handleCalSignBegin() {
   if (g_state_machine.state() == AppState::FAULT) {
     Serial.println(F("ERR,fault_active"));
-    return;
+    printFaultInfo();
+    Serial.println(F("GUIDE,do=Move neutral then run a,p,f,b"));
+    return false;
   }
 
-  if (!readSensors(millis())) {
-    Serial.println(F("ERR,sensors_not_ready"));
-    return;
+  const uint32_t now_ms = millis();
+  float theta_now_deg = 0.0f;
+  float theta_raw_deg = 0.0f;
+  if (!sampleAngleNow(now_ms, &theta_now_deg, &theta_raw_deg)) {
+    Serial.println(F("ERR,angle_not_ready"));
+    return false;
   }
 
   if (!g_state_machine.startSignCalibration()) {
     Serial.println(F("ERR,cannot_enter_calib_sign"));
-    return;
+    return false;
   }
 
   g_sign_cal.active = true;
@@ -427,26 +463,38 @@ void handleCalSignBegin() {
   g_sign_cal.suggested_as5600_sign = runtimeCalAs5600Sign();
   g_sign_cal.suggested_sonar_sign = runtimeCalSonarPosSign();
 
-  g_sign_cal.near_distance_cm = g_sensor.sonar_distance_raw_cm;
-  g_sign_cal.theta_before_raw_deg = g_sensor.beam_angle_raw_deg;
+  float sonar_x_cm = 0.0f;
+  float sonar_x_filt_cm = 0.0f;
+  float sonar_dist_cm = 0.0f;
+  g_sign_cal.near_captured = sampleSonarNow(now_ms, &sonar_x_cm, &sonar_x_filt_cm, &sonar_dist_cm);
+  g_sign_cal.near_distance_cm = sonar_dist_cm;
+  g_sign_cal.theta_before_raw_deg = theta_raw_deg;
 
   g_stepper.enable(true);
   g_stepper.requestJogSteps(SIGN_CAL_JOG_STEPS, SIGN_CAL_JOG_RATE_SPS);
   runJogBlocking(3000);
 
   delay(50);
-  readSensors(millis());
-  g_sign_cal.theta_after_raw_deg = g_sensor.beam_angle_raw_deg;
+  if (!sampleAngleNow(millis(), nullptr, &g_sign_cal.theta_after_raw_deg)) {
+    Serial.println(F("ERR,angle_not_ready_after_jog"));
+    g_state_machine.finishSignCalibration(false);
+    return false;
+  }
   g_sign_cal.theta_delta_raw_deg =
       wrapAngleDeltaDeg(g_sign_cal.theta_after_raw_deg - g_sign_cal.theta_before_raw_deg);
 
-  const float mapped_delta =
-      static_cast<float>(runtimeCalAs5600Sign()) * g_sign_cal.theta_delta_raw_deg;
-
   g_sign_cal.suggested_stepper_sign =
-      (mapped_delta >= 0.0f) ? runtimeCalStepperDirSign() : static_cast<int8_t>(-runtimeCalStepperDirSign());
+      (g_sign_cal.theta_delta_raw_deg >= 0.0f) ? runtimeCalStepperDirSign()
+                                               : static_cast<int8_t>(-runtimeCalStepperDirSign());
 
   g_sign_cal.suggested_as5600_sign = (g_sign_cal.theta_delta_raw_deg >= 0.0f) ? 1 : -1;
+
+  runtimeCalSetStepperDirSign(g_sign_cal.suggested_stepper_sign);
+  runtimeCalSetAs5600Sign(g_sign_cal.suggested_as5600_sign);
+  runtimeCalSetSignCaptured(true);
+  g_runtime_cal_dirty = true;
+
+  g_state_machine.finishSignCalibration(true);
 
   Serial.println(F("INFO,cal_sign_begin_complete"));
   Serial.print(F("INFO,theta_raw_delta_deg="));
@@ -455,17 +503,27 @@ void handleCalSignBegin() {
   Serial.println(g_sign_cal.suggested_stepper_sign);
   Serial.print(F("INFO,suggested_as5600_sign="));
   Serial.println(g_sign_cal.suggested_as5600_sign);
-  Serial.println(F("INFO,move ball to far end (+x), then run: cal_sign save"));
+  if (g_sign_cal.near_captured) {
+    Serial.println(F("INFO,sonar_near_captured=yes; move ball far +x then run g"));
+  } else {
+    Serial.println(F("WARN,sonar_near_captured=no; run sonar sign +/-1 or rerun b when sonar stable"));
+  }
 
   if (!g_manual_enable) {
     applySafeDisable();
   }
+  return true;
 }
 
-void handleCalSignSave() {
-  if (!g_sign_cal.active || !g_sign_cal.near_captured) {
+bool handleCalSignSave() {
+  if (!g_sign_cal.active) {
     Serial.println(F("ERR,cal_sign_not_started"));
-    return;
+    return false;
+  }
+  if (!g_sign_cal.near_captured) {
+    Serial.println(F("ERR,sign_sonar_near_missing"));
+    Serial.println(F("GUIDE,do=Run sonar sign 1|-1 or rerun b after sonar stabilizes"));
+    return false;
   }
 
   float x_cm = 0.0f;
@@ -473,7 +531,7 @@ void handleCalSignSave() {
   float dist_cm = 0.0f;
   if (!sampleSonarNow(millis(), &x_cm, &x_filt_cm, &dist_cm)) {
     Serial.println(F("ERR,sonar_not_ready"));
-    return;
+    return false;
   }
 
   g_sign_cal.far_distance_cm = dist_cm;
@@ -483,12 +541,10 @@ void handleCalSignSave() {
   g_sign_cal.complete = true;
   g_sign_cal.active = false;
 
-  runtimeCalSetStepperDirSign(g_sign_cal.suggested_stepper_sign);
-  runtimeCalSetAs5600Sign(g_sign_cal.suggested_as5600_sign);
   runtimeCalSetSonarPosSign(g_sign_cal.suggested_sonar_sign);
-  runtimeCalSetSignCaptured(true);
-
-  g_state_machine.finishSignCalibration(!hasAnyFault());
+  if (g_state_machine.state() == AppState::CALIB_SIGN) {
+    g_state_machine.finishSignCalibration(true);
+  }
 
   Serial.print(F("SIGN_CAL_RESULT,"));
   Serial.print(millis());
@@ -506,6 +562,8 @@ void handleCalSignSave() {
   Serial.println(g_sign_cal.suggested_sonar_sign);
 
   Serial.println(F("INFO,signs_applied_runtime; run cal_save to persist"));
+  g_runtime_cal_dirty = true;
+  return true;
 }
 
 AppConditions currentConditions() {
@@ -537,11 +595,689 @@ void printCalLimits() {
   Serial.println(runtimeCalIsLimitsSet() ? F("yes") : F("no"));
 }
 
+void printFaultInfo() {
+  const uint8_t bits = packFaultFlags(g_fault_flags);
+  Serial.print(F("FAULT_INFO,bits="));
+  Serial.println(bits);
+  Serial.print(F("FAULT_INFO,mode="));
+  Serial.println(g_state_machine.state() == AppState::RUNNING ? F("run_hard_fault") : F("bringup_warning"));
+  if (bits == 0) {
+    Serial.println(F("FAULT_INFO,none"));
+    return;
+  }
+  if (g_fault_flags.sonar_timeout) {
+    Serial.println(F("FAULT_INFO,sonar_timeout=1,do=Fix HC-SR04 visibility/wiring"));
+  }
+  if (g_fault_flags.i2c_error) {
+    Serial.println(F("FAULT_INFO,i2c_error=1,do=Check AS5600 wiring/power"));
+  }
+  if (g_fault_flags.angle_oob) {
+    Serial.println(F("FAULT_INFO,angle_oob=1,do=Level beam then run a"));
+  }
+  if (g_fault_flags.pos_oob) {
+    Serial.println(F("FAULT_INFO,pos_oob=1,do=Center target then run p"));
+  }
+  Serial.println(F("FAULT_INFO,recover=neutral->a->p->f->s->x"));
+}
+
+void printBringupMenu() {
+  Serial.println(F("MENU,bringup"));
+  Serial.print(F("MENU,state="));
+  Serial.print(stateToString(g_state_machine.state()));
+  Serial.print(F(",zero="));
+  Serial.print(runtimeCalIsZeroSet() ? F("yes") : F("no"));
+  Serial.print(F(",limits="));
+  Serial.print(runtimeCalIsLimitsSet() ? F("yes") : F("no"));
+  Serial.print(F(",sign="));
+  Serial.print(runtimeCalIsSignSet() ? F("yes") : F("no"));
+  Serial.print(F(",angle_ok="));
+  Serial.print(g_sensor.valid_angle ? F("yes") : F("no"));
+  Serial.print(F(",sonar_ok="));
+  Serial.println(g_sensor.valid_pos ? F("yes") : F("no"));
+  Serial.println(F("STEP,flow,t->a->p->[down]->](up)->b->(g|sonar sign)->v->r"));
+  Serial.println(F("STEP,down_up,do=Capture physical DOWN then physical UP; numeric order auto-normalized"));
+  if (!g_sensor.valid_pos) {
+    Serial.println(F("STEP,sonar,do=Use flat target and run sonar diag"));
+  }
+}
+
+void printSonarDiag() {
+  SonarDiag diag;
+  g_hcsr04.getDiag(millis(), diag);
+  Serial.print(F("SONAR_DIAG,has_sample="));
+  Serial.print(diag.has_sample ? F("1") : F("0"));
+  Serial.print(F(",fresh="));
+  Serial.print(diag.fresh ? F("1") : F("0"));
+  Serial.print(F(",timeout="));
+  Serial.print(diag.timeout ? F("1") : F("0"));
+  Serial.print(F(",age_ms="));
+  Serial.print(diag.age_ms);
+  Serial.print(F(",raw_cm="));
+  Serial.print(diag.raw_cm, 4);
+  Serial.print(F(",filt_cm="));
+  Serial.print(diag.filt_cm, 4);
+  Serial.print(F(",valid_streak="));
+  Serial.print(diag.valid_streak);
+  Serial.print(F(",timeout_cnt="));
+  Serial.print(diag.timeout_count);
+  Serial.print(F(",jump_reject_cnt="));
+  Serial.println(diag.jump_reject_count);
+}
+
+bool captureZeroAngle() {
+  float theta_deg = 0.0f;
+  float raw_deg = 0.0f;
+  if (!sampleAngleNow(millis(), &theta_deg, &raw_deg)) {
+    Serial.println(F("ERR,angle_not_ready"));
+    return false;
+  }
+  runtimeCalSetAs5600ZeroDeg(raw_deg);
+  runtimeCalMarkZeroAngleCaptured(true);
+  sampleAngleNow(millis(), nullptr, nullptr);
+  g_runtime_cal_dirty = true;
+  Serial.print(F("OK,cal_zero_angle_set="));
+  Serial.println(raw_deg, 6);
+  printCalZero();
+  return true;
+}
+
+bool captureZeroPosition() {
+  float x_cm = 0.0f;
+  float x_filt_cm = 0.0f;
+  float dist_cm = 0.0f;
+  if (!sampleSonarNow(millis(), &x_cm, &x_filt_cm, &dist_cm)) {
+    Serial.println(F("ERR,sonar_not_ready"));
+    return false;
+  }
+  runtimeCalSetSonarCenterCm(dist_cm);
+  runtimeCalMarkZeroPosCaptured(true);
+  sampleSonarNow(millis(), nullptr, nullptr, nullptr);
+  g_runtime_cal_dirty = true;
+  Serial.print(F("OK,cal_zero_position_set="));
+  Serial.println(dist_cm, 6);
+  printCalZero();
+  return true;
+}
+
+bool captureLowerLimit() {
+  float theta_deg = 0.0f;
+  if (!sampleAngleNow(millis(), &theta_deg, nullptr)) {
+    Serial.println(F("ERR,angle_not_ready"));
+    return false;
+  }
+
+  runtimeCalSetThetaLowerLimitDeg(theta_deg);
+  runtimeCalMarkLowerLimitCaptured(true);
+  g_runtime_cal_dirty = true;
+  if (!runtimeCalHasValidLimitSpan()) {
+    Serial.println(F("ERR,invalid_limit_span"));
+  }
+  Serial.print(F("OK,cal_limit_lower_set="));
+  Serial.println(theta_deg, 6);
+  printCalLimits();
+  return true;
+}
+
+bool captureUpperLimit() {
+  float theta_deg = 0.0f;
+  if (!sampleAngleNow(millis(), &theta_deg, nullptr)) {
+    Serial.println(F("ERR,angle_not_ready"));
+    return false;
+  }
+
+  runtimeCalSetThetaUpperLimitDeg(theta_deg);
+  runtimeCalMarkUpperLimitCaptured(true);
+  g_runtime_cal_dirty = true;
+  if (!runtimeCalHasValidLimitSpan()) {
+    Serial.println(F("ERR,invalid_limit_span"));
+  }
+  Serial.print(F("OK,cal_limit_upper_set="));
+  Serial.println(theta_deg, 6);
+  printCalLimits();
+  return true;
+}
+
+bool finalizeNormalizedLimitSpan() {
+  if (!runtimeCalIsLowerLimitCaptured() || !runtimeCalIsUpperLimitCaptured()) {
+    return false;
+  }
+
+  const float a_deg = runtimeCalThetaLowerLimitDeg();
+  const float b_deg = runtimeCalThetaUpperLimitDeg();
+  const float lo_deg = fminf(a_deg, b_deg);
+  const float hi_deg = fmaxf(a_deg, b_deg);
+  const float span_deg = hi_deg - lo_deg;
+  if (span_deg < kLimitMinSpanDeg) {
+    runtimeCalMarkLowerLimitCaptured(false);
+    runtimeCalMarkUpperLimitCaptured(false);
+    Serial.println(F("ERR,limit_span_too_small"));
+    return false;
+  }
+
+  runtimeCalSetThetaLowerLimitDeg(lo_deg);
+  runtimeCalSetThetaUpperLimitDeg(hi_deg);
+  return true;
+}
+
+bool captureDownLimit() {
+  float theta_deg = 0.0f;
+  if (!sampleAngleNow(millis(), &theta_deg, nullptr)) {
+    Serial.println(F("ERR,angle_not_ready"));
+    return false;
+  }
+
+  runtimeCalSetThetaLowerLimitDeg(theta_deg);
+  runtimeCalMarkLowerLimitCaptured(true);
+  g_runtime_cal_dirty = true;
+
+  Serial.print(F("OK,cal_limit_down_set="));
+  Serial.println(theta_deg, 6);
+  if (runtimeCalIsUpperLimitCaptured()) {
+    if (!finalizeNormalizedLimitSpan()) {
+      return false;
+    }
+    Serial.println(F("INFO,limits_normalized_from_down_up"));
+  }
+  printCalLimits();
+  return true;
+}
+
+bool captureUpLimit() {
+  float theta_deg = 0.0f;
+  if (!sampleAngleNow(millis(), &theta_deg, nullptr)) {
+    Serial.println(F("ERR,angle_not_ready"));
+    return false;
+  }
+
+  runtimeCalSetThetaUpperLimitDeg(theta_deg);
+  runtimeCalMarkUpperLimitCaptured(true);
+  g_runtime_cal_dirty = true;
+
+  Serial.print(F("OK,cal_limit_up_set="));
+  Serial.println(theta_deg, 6);
+  if (runtimeCalIsLowerLimitCaptured()) {
+    if (!finalizeNormalizedLimitSpan()) {
+      return false;
+    }
+    Serial.println(F("INFO,limits_normalized_from_down_up"));
+  }
+  printCalLimits();
+  return true;
+}
+
+bool suggestZeroAngle() {
+  float theta_deg = 0.0f;
+  float raw_deg = 0.0f;
+  if (!sampleAngleNow(millis(), &theta_deg, &raw_deg)) {
+    Serial.println(F("ERR,angle_not_ready"));
+    return false;
+  }
+  Serial.print(F("CAL_SUGGEST,AS5600_ZERO_DEG="));
+  Serial.println(raw_deg, 6);
+  return true;
+}
+
+bool suggestZeroPosition() {
+  float x_cm = 0.0f;
+  float x_filt_cm = 0.0f;
+  float dist_cm = 0.0f;
+  if (!sampleSonarNow(millis(), &x_cm, &x_filt_cm, &dist_cm)) {
+    Serial.println(F("ERR,sonar_not_ready"));
+    return false;
+  }
+  Serial.print(F("CAL_SUGGEST,SONAR_CENTER_CM="));
+  Serial.println(dist_cm, 6);
+  return true;
+}
+
+void printGuideNextAction() {
+  if (g_wizard.active) {
+    return;
+  }
+
+  if (!runtimeCalIsZeroAngleCaptured()) {
+    Serial.println(F("GUIDE,step=zero_angle,do=Level beam parallel, then press a (or cal_zero set angle)"));
+    return;
+  }
+  if (!runtimeCalIsZeroPosCaptured()) {
+    Serial.println(F("GUIDE,step=zero_position,do=Place ball at center, then press p (or cal_zero set position)"));
+    return;
+  }
+  if (!runtimeCalIsLowerLimitCaptured()) {
+    Serial.println(F("GUIDE,step=down_limit,do=Move beam to physical DOWN stop, then press [ (or l)"));
+    return;
+  }
+  if (!runtimeCalIsUpperLimitCaptured()) {
+    Serial.println(F("GUIDE,step=up_limit,do=Move beam to physical UP stop, then press ] (or u)"));
+    return;
+  }
+  if (!runtimeCalHasValidLimitSpan()) {
+    Serial.println(F("GUIDE,step=limits_fix,do=Recapture physical DOWN/UP using [ and ]"));
+    return;
+  }
+  if (!runtimeCalIsSignSet()) {
+    Serial.println(F("GUIDE,step=sign_begin,do=Run b to calibrate stepper+AS5600 signs"));
+    return;
+  }
+  if (g_sign_cal.active && !g_sign_cal.complete) {
+    if (g_sign_cal.near_captured) {
+      Serial.println(F("GUIDE,step=sonar_sign_auto,do=Move target far +x then run g"));
+    } else {
+      Serial.println(F("GUIDE,step=sonar_sign_manual,do=Run sonar sign 1|-1 or rerun b when sonar stable"));
+    }
+    return;
+  }
+  if (g_state_machine.state() == AppState::FAULT) {
+    Serial.println(F("GUIDE,step=fault_reset,do=Fix issue then run f"));
+    return;
+  }
+  if (!g_sensor.valid_angle) {
+    Serial.println(F("GUIDE,step=angle_sensor,do=Check AS5600 and rerun s"));
+    return;
+  }
+  if (!g_sensor.valid_pos) {
+    Serial.println(F("GUIDE,step=sonar_sensor,do=Use flat target and run sonar diag"));
+    return;
+  }
+  if (!g_inner_loop_stable) {
+    Serial.println(F("GUIDE,step=inner_loop,do=Inner loop unstable; do not run until stabilized"));
+    return;
+  }
+  if (g_runtime_cal_dirty) {
+    Serial.println(F("GUIDE,step=save,do=Persist calibration with v (or cal_save)"));
+    return;
+  }
+  Serial.println(F("GUIDE,step=run,do=Press r (or run) to start balancing"));
+}
+
+void printRunBlockedDetails(const AppConditions& cond) {
+  Serial.println(F("ERR,run_blocked"));
+  if (!cond.zero_calibrated) {
+    Serial.println(F("BLOCK,zero"));
+  }
+  if (!cond.limits_calibrated) {
+    Serial.println(F("BLOCK,limits"));
+  }
+  if (!cond.sign_calibrated) {
+    Serial.println(F("BLOCK,sign"));
+  }
+  if (!cond.sensors_ok) {
+    Serial.println(F("BLOCK,sensors"));
+  }
+  if (cond.faults_active) {
+    Serial.println(F("BLOCK,faults"));
+  }
+  if (!cond.inner_loop_stable) {
+    Serial.println(F("BLOCK,inner_loop"));
+  }
+  printGuideNextAction();
+}
+
+void printWizardStepPrompt() {
+  switch (g_wizard.step_index) {
+    case kWizardStepZeroAngle:
+      Serial.println(F("WIZ,step=1,do=Set beam parallel to ground; then press n"));
+      Serial.println(F("WIZ,hint=This captures angle zero (same as a)"));
+      return;
+    case kWizardStepZeroPosition:
+      Serial.println(F("WIZ,step=2,do=Place ball at center; then press n"));
+      Serial.println(F("WIZ,hint=This captures sonar center (same as p)"));
+      return;
+    case kWizardStepLowerLimit:
+      Serial.println(F("WIZ,step=3,do=Move beam to physical DOWN stop; then press n"));
+      Serial.println(F("WIZ,hint=This captures DOWN limit (same as [)"));
+      return;
+    case kWizardStepUpperLimit:
+      Serial.println(F("WIZ,step=4,do=Move beam to physical UP stop; then press n"));
+      Serial.println(F("WIZ,hint=This captures UP limit (same as ])"));
+      return;
+    case kWizardStepSignBegin:
+      Serial.println(F("WIZ,step=5,do=Keep ball at near reference end; then press n"));
+      Serial.println(F("WIZ,hint=This runs sign-begin jog (same as b)"));
+      return;
+    case kWizardStepSignSave:
+      Serial.println(F("WIZ,step=6,do=Move ball to far +x end; then press n"));
+      Serial.println(F("WIZ,hint=This saves sign direction (same as g)"));
+      return;
+    case kWizardStepSaveConfirm:
+      Serial.print(F("WIZ,summary,zero="));
+      Serial.print(runtimeCalIsZeroSet() ? F("yes") : F("no"));
+      Serial.print(F(",limits="));
+      Serial.print(runtimeCalIsLimitsSet() ? F("yes") : F("no"));
+      Serial.print(F(",sign="));
+      Serial.print(runtimeCalIsSignSet() ? F("yes") : F("no"));
+      Serial.print(F(",dirty="));
+      Serial.println(g_runtime_cal_dirty ? F("yes") : F("no"));
+      Serial.println(F("WIZ,step=7,do=Press c to save to EEPROM, or q to exit without save"));
+      return;
+    default:
+      return;
+  }
+}
+
+void stopWizard(const char* reason) {
+  if (!g_wizard.active) {
+    return;
+  }
+  if (g_state_machine.state() == AppState::CALIB_SIGN) {
+    g_state_machine.requestStop();
+  }
+  g_sign_cal.active = false;
+  const bool telemetry_restore = g_wizard.telemetry_prev;
+  g_wizard = GuidedWizardSession{};
+  g_telemetry_enabled = telemetry_restore;
+  Serial.print(F("WIZ,exit,reason="));
+  Serial.print(reason);
+  Serial.print(F(",telemetry_restored="));
+  Serial.println(g_telemetry_enabled ? F("1") : F("0"));
+}
+
+void startWizard() {
+  if (g_wizard.active) {
+    Serial.println(F("ERR,wizard_already_active"));
+    printWizardStepPrompt();
+    return;
+  }
+  if (g_state_machine.state() == AppState::RUNNING) {
+    Serial.println(F("ERR,stop_running_before_wizard"));
+    return;
+  }
+  if (g_state_machine.state() == AppState::FAULT) {
+    Serial.println(F("ERR,fault_active"));
+    printFaultInfo();
+    Serial.println(F("WIZ,blocked,do=Move neutral then run a,p,f,s,w"));
+    return;
+  }
+
+  g_wizard.active = true;
+  g_wizard.step_index = kWizardStepZeroAngle;
+  g_wizard.awaiting_save_confirm = false;
+  g_wizard.telemetry_prev = g_telemetry_enabled;
+  g_telemetry_enabled = false;
+
+  Serial.println(F("OK,wizard_started"));
+  Serial.print(F("WIZ,telemetry_auto_disabled,prev="));
+  Serial.println(g_wizard.telemetry_prev ? F("1") : F("0"));
+  Serial.println(F("WIZ,controls=n(next),c(confirm save),q(quit)"));
+  printWizardStepPrompt();
+}
+
+void wizardNext() {
+  if (!g_wizard.active) {
+    Serial.println(F("ERR,wizard_not_active"));
+    return;
+  }
+
+  bool success = false;
+  switch (g_wizard.step_index) {
+    case kWizardStepZeroAngle:
+      success = captureZeroAngle();
+      break;
+    case kWizardStepZeroPosition:
+      success = captureZeroPosition();
+      break;
+    case kWizardStepLowerLimit:
+      success = captureDownLimit();
+      break;
+    case kWizardStepUpperLimit:
+      success = captureUpLimit();
+      break;
+    case kWizardStepSignBegin:
+      success = handleCalSignBegin();
+      break;
+    case kWizardStepSignSave:
+      success = handleCalSignSave();
+      break;
+    case kWizardStepSaveConfirm:
+      Serial.println(F("WIZ,awaiting_confirm,press=c_to_save_or_q_to_exit"));
+      return;
+    default:
+      Serial.println(F("ERR,wizard_invalid_step"));
+      return;
+  }
+
+  if (!success) {
+    Serial.println(F("WIZ,step_failed,fix_and_press_n_again"));
+    return;
+  }
+
+  if (g_wizard.step_index < kWizardStepSaveConfirm) {
+    ++g_wizard.step_index;
+  }
+  if (g_wizard.step_index >= kWizardStepSaveConfirm) {
+    g_wizard.step_index = kWizardStepSaveConfirm;
+    g_wizard.awaiting_save_confirm = true;
+  }
+  printWizardStepPrompt();
+}
+
+void wizardConfirmSave() {
+  if (!g_wizard.active) {
+    Serial.println(F("ERR,wizard_not_active"));
+    return;
+  }
+  if (!g_wizard.awaiting_save_confirm || g_wizard.step_index != kWizardStepSaveConfirm) {
+    Serial.println(F("ERR,wizard_not_at_save_step"));
+    return;
+  }
+
+  if (runtimeCalSave()) {
+    g_runtime_cal_dirty = false;
+    Serial.println(F("OK,wizard_saved"));
+    stopWizard("saved");
+    printGuideNextAction();
+  } else {
+    Serial.println(F("ERR,cal_save_failed"));
+  }
+}
+
 void handleCommand(char* line) {
   char* saveptr = nullptr;
   char* token = strtok_r(line, " ", &saveptr);
   if (token == nullptr) {
     return;
+  }
+
+  if (strcmp(token, "?") == 0 || strlen(token) == 1) {
+    const char key = token[0];
+    switch (key) {
+      case '?':
+      case 'h':
+        printHelp();
+        return;
+      case 'i':
+        printBringupMenu();
+        printGuideNextAction();
+        return;
+      case 's':
+        printStatus();
+        printFaultInfo();
+        printGuideNextAction();
+        return;
+      case 't': {
+        char* arg = strtok_r(nullptr, " ", &saveptr);
+        if (arg == nullptr) {
+          g_telemetry_enabled = !g_telemetry_enabled;
+        } else {
+          g_telemetry_enabled = (atoi(arg) != 0);
+        }
+        Serial.print(F("OK,telemetry="));
+        Serial.println(g_telemetry_enabled ? F("1") : F("0"));
+        return;
+      }
+      case 'e': {
+        char* arg = strtok_r(nullptr, " ", &saveptr);
+        if (arg == nullptr) {
+          Serial.println(F("ERR,usage:e 0|1"));
+          return;
+        }
+        const int value = atoi(arg);
+        g_manual_enable = (value != 0);
+        if (g_manual_enable && !hasAnyFault()) {
+          g_stepper.enable(true);
+          Serial.println(F("OK,driver_enabled"));
+        } else {
+          applySafeDisable();
+          Serial.println(F("OK,driver_disabled"));
+        }
+        return;
+      }
+      case 'j': {
+        char* steps_arg = strtok_r(nullptr, " ", &saveptr);
+        char* rate_arg = strtok_r(nullptr, " ", &saveptr);
+        if (steps_arg == nullptr || rate_arg == nullptr) {
+          Serial.println(F("ERR,usage:j <signed_steps> <rate>"));
+          return;
+        }
+
+        const long steps = atol(steps_arg);
+        const float rate = atof(rate_arg);
+        if (steps == 0 || rate <= 0.0f) {
+          Serial.println(F("ERR,invalid_jog_args"));
+          return;
+        }
+        if (g_state_machine.state() == AppState::RUNNING) {
+          Serial.println(F("ERR,stop_running_before_jog"));
+          return;
+        }
+
+        float theta_now_deg = 0.0f;
+        if (runtimeCalIsLimitsSet() && sampleAngleNow(millis(), &theta_now_deg, nullptr)) {
+          if (steps > 0 && theta_now_deg >= (runtimeCalThetaUpperLimitDeg() - kLimitStopMarginDeg)) {
+            Serial.println(F("ERR,jog_blocked_upper_limit"));
+            return;
+          }
+          if (steps < 0 && theta_now_deg <= (runtimeCalThetaLowerLimitDeg() + kLimitStopMarginDeg)) {
+            Serial.println(F("ERR,jog_blocked_lower_limit"));
+            return;
+          }
+        }
+
+        g_stepper.enable(true);
+        g_stepper.requestJogSteps(steps, rate);
+        Serial.println(F("OK,jog_started"));
+        return;
+      }
+      case 'a':
+        if (captureZeroAngle()) {
+          printGuideNextAction();
+        }
+        return;
+      case 'p':
+        if (captureZeroPosition()) {
+          printGuideNextAction();
+        }
+        return;
+      case 'z':
+        printCalZero();
+        printGuideNextAction();
+        return;
+      case '[':
+      case 'l':
+      case '1':
+        if (captureDownLimit()) {
+          printGuideNextAction();
+        }
+        return;
+      case ']':
+      case 'u':
+      case '2':
+        if (captureUpLimit()) {
+          printGuideNextAction();
+        }
+        return;
+      case 'm':
+        printCalLimits();
+        printGuideNextAction();
+        return;
+      case 'b':
+        if (handleCalSignBegin()) {
+          printGuideNextAction();
+        }
+        return;
+      case 'g':
+        if (handleCalSignSave()) {
+          printGuideNextAction();
+        }
+        return;
+      case 'v':
+        if (runtimeCalSave()) {
+          g_runtime_cal_dirty = false;
+          Serial.println(F("OK,cal_saved"));
+        } else {
+          Serial.println(F("ERR,cal_save_failed"));
+        }
+        printGuideNextAction();
+        return;
+      case 'o': {
+        const bool loaded = runtimeCalLoad();
+        g_runtime_cal_dirty = false;
+        Serial.print(F("OK,cal_load,"));
+        Serial.println(loaded ? F("loaded") : F("defaults"));
+        printGuideNextAction();
+        return;
+      }
+      case 'd':
+        runtimeCalResetDefaults();
+        g_runtime_cal_dirty = true;
+        Serial.println(F("OK,cal_defaults_applied"));
+        printGuideNextAction();
+        return;
+      case 'r': {
+        readSensors(millis());
+        updateFaultState(millis());
+        const AppConditions cond = currentConditions();
+        if (g_state_machine.requestRun(cond)) {
+          g_controller.reset();
+          g_setpoint.ball_pos_cm_target = kDefaultBallSetpointCm;
+          g_setpoint.ball_pos_m_target = g_setpoint.ball_pos_cm_target * kCmToM;
+          Serial.println(F("OK,running"));
+        } else {
+          printRunBlockedDetails(cond);
+        }
+        return;
+      }
+      case 'k':
+        g_state_machine.requestStop();
+        applySafeDisable();
+        Serial.println(F("OK,stopped"));
+        printGuideNextAction();
+        return;
+      case 'f':
+        g_fault_flags = FaultFlags{};
+        if (g_state_machine.clearFault(currentConditions())) {
+          Serial.println(F("OK,fault_cleared"));
+        } else {
+          Serial.println(F("ERR,no_fault_state"));
+        }
+        printFaultInfo();
+        printGuideNextAction();
+        return;
+      case 'x':
+        printFaultInfo();
+        printSonarDiag();
+        printGuideNextAction();
+        return;
+      case 'w':
+        startWizard();
+        return;
+      case 'n':
+        wizardNext();
+        return;
+      case 'q':
+        if (!g_wizard.active) {
+          Serial.println(F("ERR,wizard_not_active"));
+          return;
+        }
+        stopWizard("aborted");
+        printGuideNextAction();
+        return;
+      case 'c':
+        wizardConfirmSave();
+        return;
+      default:
+        break;
+    }
   }
 
   if (strcmp(token, "help") == 0) {
@@ -551,6 +1287,8 @@ void handleCommand(char* line) {
 
   if (strcmp(token, "status") == 0) {
     printStatus();
+    printFaultInfo();
+    printGuideNextAction();
     return;
   }
 
@@ -631,11 +1369,15 @@ void handleCommand(char* line) {
       return;
     }
     if (strcmp(sub, "begin") == 0) {
-      handleCalSignBegin();
+      if (handleCalSignBegin()) {
+        printGuideNextAction();
+      }
       return;
     }
     if (strcmp(sub, "save") == 0) {
-      handleCalSignSave();
+      if (handleCalSignSave()) {
+        printGuideNextAction();
+      }
       return;
     }
     Serial.println(F("ERR,usage:cal_sign begin|save"));
@@ -651,31 +1393,17 @@ void handleCommand(char* line) {
 
     if (strcmp(sub, "show") == 0) {
       printCalZero();
+      printGuideNextAction();
       return;
     }
 
     if (strcmp(sub, "angle") == 0) {
-      float theta_deg = 0.0f;
-      float raw_deg = 0.0f;
-      if (!sampleAngleNow(millis(), &theta_deg, &raw_deg)) {
-        Serial.println(F("ERR,angle_not_ready"));
-        return;
-      }
-      Serial.print(F("CAL_SUGGEST,AS5600_ZERO_DEG="));
-      Serial.println(raw_deg, 6);
+      suggestZeroAngle();
       return;
     }
 
     if (strcmp(sub, "position") == 0) {
-      float x_cm = 0.0f;
-      float x_filt_cm = 0.0f;
-      float dist_cm = 0.0f;
-      if (!sampleSonarNow(millis(), &x_cm, &x_filt_cm, &dist_cm)) {
-        Serial.println(F("ERR,sonar_not_ready"));
-        return;
-      }
-      Serial.print(F("CAL_SUGGEST,SONAR_CENTER_CM="));
-      Serial.println(dist_cm, 6);
+      suggestZeroPosition();
       return;
     }
 
@@ -687,35 +1415,16 @@ void handleCommand(char* line) {
       }
 
       if (strcmp(target, "angle") == 0) {
-        float theta_deg = 0.0f;
-        float raw_deg = 0.0f;
-        if (!sampleAngleNow(millis(), &theta_deg, &raw_deg)) {
-          Serial.println(F("ERR,angle_not_ready"));
-          return;
+        if (captureZeroAngle()) {
+          printGuideNextAction();
         }
-        runtimeCalSetAs5600ZeroDeg(raw_deg);
-        runtimeCalMarkZeroAngleCaptured(true);
-        sampleAngleNow(millis(), nullptr, nullptr);
-        Serial.print(F("OK,cal_zero_angle_set="));
-        Serial.println(raw_deg, 6);
-        printCalZero();
         return;
       }
 
       if (strcmp(target, "position") == 0) {
-        float x_cm = 0.0f;
-        float x_filt_cm = 0.0f;
-        float dist_cm = 0.0f;
-        if (!sampleSonarNow(millis(), &x_cm, &x_filt_cm, &dist_cm)) {
-          Serial.println(F("ERR,sonar_not_ready"));
-          return;
+        if (captureZeroPosition()) {
+          printGuideNextAction();
         }
-        runtimeCalSetSonarCenterCm(dist_cm);
-        runtimeCalMarkZeroPosCaptured(true);
-        sampleSonarNow(millis(), nullptr, nullptr, nullptr);
-        Serial.print(F("OK,cal_zero_position_set="));
-        Serial.println(dist_cm, 6);
-        printCalZero();
         return;
       }
 
@@ -736,6 +1445,7 @@ void handleCommand(char* line) {
 
     if (strcmp(sub, "show") == 0) {
       printCalLimits();
+      printGuideNextAction();
       return;
     }
 
@@ -746,33 +1456,17 @@ void handleCommand(char* line) {
         return;
       }
 
-      float theta_deg = 0.0f;
-      if (!sampleAngleNow(millis(), &theta_deg, nullptr)) {
-        Serial.println(F("ERR,angle_not_ready"));
-        return;
-      }
-
       if (strcmp(edge, "lower") == 0) {
-        runtimeCalSetThetaLowerLimitDeg(theta_deg);
-        runtimeCalMarkLowerLimitCaptured(true);
-        if (!runtimeCalHasValidLimitSpan()) {
-          Serial.println(F("ERR,invalid_limit_span"));
+        if (captureLowerLimit()) {
+          printGuideNextAction();
         }
-        Serial.print(F("OK,cal_limit_lower_set="));
-        Serial.println(theta_deg, 6);
-        printCalLimits();
         return;
       }
 
       if (strcmp(edge, "upper") == 0) {
-        runtimeCalSetThetaUpperLimitDeg(theta_deg);
-        runtimeCalMarkUpperLimitCaptured(true);
-        if (!runtimeCalHasValidLimitSpan()) {
-          Serial.println(F("ERR,invalid_limit_span"));
+        if (captureUpperLimit()) {
+          printGuideNextAction();
         }
-        Serial.print(F("OK,cal_limit_upper_set="));
-        Serial.println(theta_deg, 6);
-        printCalLimits();
         return;
       }
 
@@ -786,17 +1480,21 @@ void handleCommand(char* line) {
 
   if (strcmp(token, "cal_save") == 0) {
     if (runtimeCalSave()) {
+      g_runtime_cal_dirty = false;
       Serial.println(F("OK,cal_saved"));
     } else {
       Serial.println(F("ERR,cal_save_failed"));
     }
+    printGuideNextAction();
     return;
   }
 
   if (strcmp(token, "cal_load") == 0) {
     const bool loaded = runtimeCalLoad();
+    g_runtime_cal_dirty = false;
     Serial.print(F("OK,cal_load,"));
     Serial.println(loaded ? F("loaded") : F("defaults"));
+    printGuideNextAction();
     return;
   }
 
@@ -807,21 +1505,23 @@ void handleCommand(char* line) {
       return;
     }
     runtimeCalResetDefaults();
+    g_runtime_cal_dirty = true;
     Serial.println(F("OK,cal_defaults_applied"));
+    printGuideNextAction();
     return;
   }
 
   if (strcmp(token, "run") == 0) {
     readSensors(millis());
     updateFaultState(millis());
-
-    if (g_state_machine.requestRun(currentConditions())) {
+    const AppConditions cond = currentConditions();
+    if (g_state_machine.requestRun(cond)) {
       g_controller.reset();
       g_setpoint.ball_pos_cm_target = kDefaultBallSetpointCm;
       g_setpoint.ball_pos_m_target = g_setpoint.ball_pos_cm_target * kCmToM;
       Serial.println(F("OK,running"));
     } else {
-      Serial.println(F("ERR,run_blocked_check_status"));
+      printRunBlockedDetails(cond);
     }
     return;
   }
@@ -830,6 +1530,7 @@ void handleCommand(char* line) {
     g_state_machine.requestStop();
     applySafeDisable();
     Serial.println(F("OK,stopped"));
+    printGuideNextAction();
     return;
   }
 
@@ -840,10 +1541,24 @@ void handleCommand(char* line) {
     } else {
       Serial.println(F("ERR,no_fault_state"));
     }
+    printFaultInfo();
+    printGuideNextAction();
     return;
   }
 
-  Serial.println(F("ERR,unknown_command"));
+  if (strcmp(token, "faults") == 0) {
+    printFaultInfo();
+    printGuideNextAction();
+    return;
+  }
+
+  if (strcmp(token, "guide") == 0) {
+    printBringupMenu();
+    printGuideNextAction();
+    return;
+  }
+
+  Serial.println(F("ERR,unknown_command,try=h"));
 }
 
 void pollSerial() {
@@ -964,7 +1679,10 @@ void setup() {
   g_last_valid_pos_ms = g_last_control_ms;
 
   printHelp();
+  printBringupMenu();
   printStatus();
+  printFaultInfo();
+  printGuideNextAction();
 }
 
 void loop() {

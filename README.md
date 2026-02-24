@@ -6,6 +6,9 @@ Ball and beam firmware + first-principles modeling + run analysis.
 
 `/Users/piyush/code/ball-beam-control`
 
+PlatformIO extension note:
+- Repo root now contains `platformio.ini` as a wrapper for `firmware/platformio.ini`, so opening the top-level folder in VS Code is supported.
+
 ## Quick Start (Offline)
 
 1. Open the repo in VS Code.
@@ -52,21 +55,53 @@ pio run -e nano_old
 - Sensor 2: HC-SR04 ultrasonic
 - Closed-loop mode is blocked until runtime zero, limits, and sign calibration are complete.
 
-## Serial Commands
+## Serial Commands (Primary UX: Quick Keys)
+
+### Quick Keys
+
+| Key | Action | Full command equivalent |
+|---|---|---|
+| `?` / `h` | help | `help` |
+| `s` | status | `status` |
+| `t` | toggle telemetry | `telemetry 0|1` |
+| `e 0|1` | driver enable/disable | `en 0|1` |
+| `j <steps> <rate>` | jog motor | `jog <signed_steps> <rate>` |
+| `a` | capture angle zero | `cal_zero set angle` |
+| `p` | capture position zero | `cal_zero set position` |
+| `z` | show zero calibration | `cal_zero show` |
+| `l` or `1` | capture lower limit | `cal_limits set lower` |
+| `u` or `2` | capture upper limit | `cal_limits set upper` |
+| `m` | show limits | `cal_limits show` |
+| `b` | sign calibration begin | `cal_sign begin` |
+| `g` | sign calibration save | `cal_sign save` |
+| `v` | save calibration to EEPROM | `cal_save` |
+| `o` | load calibration from EEPROM | `cal_load` |
+| `d` | reset runtime defaults | `cal_reset defaults` |
+| `i` | print bring-up menu | `guide` |
+| `x` | print decoded fault help | `faults` |
+| `r` | start control | `run` |
+| `k` | stop control | `stop` |
+| `f` | clear fault | `fault_reset` |
+
+### Guided Wizard Keys
+
+- `w`: start guided calibration (`zero -> limits -> sign -> save`)
+- `n`: run current wizard step and advance
+- `c`: confirm final EEPROM save at wizard end
+- `q`: abort wizard (restores telemetry state)
+
+### Full Commands (Compatibility)
 
 - `help`
 - `status`
 - `telemetry 0|1`
 - `en 0|1`
 - `jog <signed_steps> <rate>`
-- `cal_zero set angle`
-- `cal_zero set position`
-- `cal_zero show`
-- `cal_limits set lower`
-- `cal_limits set upper`
+- `cal_zero set angle|position`
+- `cal_zero show|angle|position`
+- `cal_limits set lower|upper`
 - `cal_limits show`
-- `cal_sign begin`
-- `cal_sign save`
+- `cal_sign begin|save`
 - `cal_save`
 - `cal_load`
 - `cal_reset defaults`
@@ -76,7 +111,29 @@ pio run -e nano_old
 
 ## Calibration Workflow
 
-Use runtime flow `zero -> limits -> sign -> save` before entering `run`.
+Preferred workflow:
+
+1. Start guided flow with `w`.
+2. Follow printed `WIZ,...` instructions and press `n` at each physical step.
+3. At final summary, press `c` to persist calibration.
+4. Use `r` to run after status is healthy.
+
+Manual flow (without wizard) stays available using quick keys:
+
+```text
+t
+a
+p
+l
+u
+b
+g
+v
+t
+s
+r
+```
+
 See `docs/calibration_signs.md`.
 
 ## What Changed (Important)
@@ -91,7 +148,16 @@ See `docs/calibration_signs.md`.
 
 1. Upload firmware from VS Code task: `Firmware: Upload (nano_new)` (or `nano_old`).
 2. Open monitor task: `Firmware: Monitor (115200)`.
-3. Run:
+3. Preferred bring-up run:
+```text
+w
+```
+Then follow `WIZ,...` prompts and press `n` each step, finally `c`, then:
+```text
+s
+r
+```
+4. Manual equivalent (no wizard):
 ```text
 telemetry 0
 cal_zero set angle
@@ -105,7 +171,7 @@ telemetry 1
 status
 run
 ```
-4. On next power-up, run `cal_load` only if needed; normally saved calibration auto-loads.
+5. On next power-up, run `cal_load` only if needed; normally saved calibration auto-loads.
 
 ## First Hardware Bring-Up Checklist
 
@@ -151,70 +217,68 @@ help
 status
 ```
 
-6. Optionally pause telemetry spam while entering commands:
+6. Start guided calibration (recommended):
 
 ```text
-telemetry 0
+w
 ```
 
-7. Capture runtime zeroes at neutral beam/ball setup:
+Then follow the printed `WIZ,...` instructions and press `n` for each step:
 
 ```text
-cal_zero set angle
-cal_zero set position
-cal_zero show
+n
+n
+n
+n
+n
+n
 ```
 
-8. Capture runtime travel limits at mechanical extremes:
+7. At wizard step 7, persist runtime calibration:
 
 ```text
-cal_limits set lower
-cal_limits set upper
-cal_limits show
+c
 ```
 
-9. Run sign calibration:
+8. Sanity check:
 
 ```text
-cal_sign begin
+s
+e 1
+j 120 500
+j -120 500
+e 0
 ```
 
-Then move ball manually to far `+x` and run:
+9. Start closed-loop control:
 
 ```text
-cal_sign save
-```
-
-10. Persist runtime calibration and optionally re-enable telemetry:
-
-```text
-cal_save
-telemetry 1
-```
-
-11. Sanity check:
-
-```text
-status
-en 1
-jog 120 500
-jog -120 500
-en 0
-```
-
-12. Start closed-loop control:
-
-```text
-run
+r
 ```
 
 Stop when needed:
 
 ```text
-stop
+k
 ```
 
-13. Capture and analyze a run:
+10. Manual compatibility flow (if you do not want wizard):
+
+```text
+t
+a
+p
+l
+u
+b
+g
+v
+t
+s
+r
+```
+
+11. Capture and analyze a run:
 
 ```bash
 cd /Users/piyush/code/ball-beam-control

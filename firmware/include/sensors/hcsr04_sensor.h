@@ -4,6 +4,18 @@
 
 namespace bb {
 
+struct SonarDiag {
+  bool has_sample = false;
+  bool timeout = false;
+  bool fresh = false;
+  uint32_t age_ms = 0;
+  float raw_cm = 0.0f;
+  float filt_cm = 0.0f;
+  uint16_t valid_streak = 0;
+  uint16_t timeout_count = 0;
+  uint16_t jump_reject_count = 0;
+};
+
 class HCSR04Sensor {
  public:
   HCSR04Sensor(uint8_t trig_pin, uint8_t echo_pin);
@@ -15,6 +27,7 @@ class HCSR04Sensor {
   bool hasFreshSample(uint32_t now_ms) const;
   uint32_t sampleAgeMs(uint32_t now_ms) const;
   bool hasTimeout() const;
+  void getDiag(uint32_t now_ms, SonarDiag& diag) const;
 
   void handleEchoEdgeIsr(uint32_t now_us, bool level_high);
 
@@ -36,6 +49,9 @@ class HCSR04Sensor {
   float last_x_cm_;
   float last_x_filt_cm_;
   uint32_t last_sample_ms_;
+  uint16_t valid_streak_;
+  uint16_t timeout_count_;
+  uint16_t jump_reject_count_;
 
   bool timeout_flag_;
   uint32_t last_trigger_us_;

@@ -1,11 +1,18 @@
 #include "sensors/hcsr04_sensor.h"
 
+#include <math.h>
 #include <util/atomic.h>
 
 #include "calibration_runtime.h"
 #include "config.h"
 
 namespace bb {
+namespace {
+
+constexpr float kSonarMaxJumpCm = 18.0f;
+constexpr uint8_t kSonarMinValidStreak = 2;
+
+}  // namespace
 
 HCSR04Sensor::HCSR04Sensor(uint8_t trig_pin, uint8_t echo_pin)
     : trig_pin_(trig_pin),
@@ -20,6 +27,9 @@ HCSR04Sensor::HCSR04Sensor(uint8_t trig_pin, uint8_t echo_pin)
       last_x_cm_(0.0f),
       last_x_filt_cm_(0.0f),
       last_sample_ms_(0),
+      valid_streak_(0),
+      timeout_count_(0),
+      jump_reject_count_(0),
       timeout_flag_(false),
       last_trigger_us_(0),
       waiting_echo_(false),
@@ -64,31 +74,48 @@ void HCSR04Sensor::service(uint32_t now_us, uint32_t now_ms) {
     waiting_echo_ = false;
     if (pulse_width_us > 0 && pulse_width_us <= kSonarEchoTimeoutUs) {
       const float distance_cm = static_cast<float>(pulse_width_us) * 0.0343f * 0.5f;
-      last_distance_cm_ = distance_cm;
-
-      pushHistory(distance_cm);
-      const float median_cm = medianHistory();
-
-      if (!ema_initialized_) {
-        ema_cm_ = median_cm;
-        ema_initialized_ = true;
+      if (has_sample_ && fabsf(distance_cm - last_distance_cm_) > kSonarMaxJumpCm) {
+        ++jump_reject_count_;
+        valid_streak_ = 0;
+        timeout_flag_ = true;
       } else {
-        ema_cm_ = (kSonarEmaAlpha * median_cm) + ((1.0f - kSonarEmaAlpha) * ema_cm_);
-      }
+        last_distance_cm_ = distance_cm;
 
-      last_x_cm_ = runtimeMapBallPosCm(last_distance_cm_);
-      last_x_filt_cm_ = runtimeMapBallPosCm(ema_cm_);
-      last_sample_ms_ = now_ms;
-      has_sample_ = true;
-      timeout_flag_ = false;
+        pushHistory(distance_cm);
+        const float median_cm = medianHistory();
+
+        if (!ema_initialized_) {
+          ema_cm_ = median_cm;
+          ema_initialized_ = true;
+        } else {
+          ema_cm_ = (kSonarEmaAlpha * median_cm) + ((1.0f - kSonarEmaAlpha) * ema_cm_);
+        }
+
+        last_x_cm_ = runtimeMapBallPosCm(last_distance_cm_);
+        last_x_filt_cm_ = runtimeMapBallPosCm(ema_cm_);
+        last_sample_ms_ = now_ms;
+        has_sample_ = true;
+        timeout_flag_ = false;
+        if (valid_streak_ < 0xFFFFu) {
+          ++valid_streak_;
+        }
+      }
     } else {
       timeout_flag_ = true;
+      valid_streak_ = 0;
+      if (timeout_count_ < 0xFFFFu) {
+        ++timeout_count_;
+      }
     }
   }
 
   if (waiting_echo_ && static_cast<uint32_t>(now_us - last_trigger_us_) > kSonarEchoTimeoutUs) {
     waiting_echo_ = false;
     timeout_flag_ = true;
+    valid_streak_ = 0;
+    if (timeout_count_ < 0xFFFFu) {
+      ++timeout_count_;
+    }
     ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
       awaiting_fall_ = false;
       sample_ready_ = false;
@@ -111,6 +138,9 @@ bool HCSR04Sensor::hasFreshSample(uint32_t now_ms) const {
   if (!has_sample_) {
     return false;
   }
+  if (valid_streak_ < kSonarMinValidStreak) {
+    return false;
+  }
   return sampleAgeMs(now_ms) <= kPosSampleFreshMs;
 }
 
@@ -122,6 +152,18 @@ uint32_t HCSR04Sensor::sampleAgeMs(uint32_t now_ms) const {
 }
 
 bool HCSR04Sensor::hasTimeout() const { return timeout_flag_; }
+
+void HCSR04Sensor::getDiag(uint32_t now_ms, SonarDiag& diag) const {
+  diag.has_sample = has_sample_;
+  diag.timeout = timeout_flag_;
+  diag.age_ms = sampleAgeMs(now_ms);
+  diag.fresh = hasFreshSample(now_ms);
+  diag.raw_cm = last_distance_cm_;
+  diag.filt_cm = ema_cm_;
+  diag.valid_streak = valid_streak_;
+  diag.timeout_count = timeout_count_;
+  diag.jump_reject_count = jump_reject_count_;
+}
 
 void HCSR04Sensor::handleEchoEdgeIsr(uint32_t now_us, bool level_high) {
   if (level_high) {

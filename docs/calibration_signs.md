@@ -15,43 +15,66 @@ Closed-loop mode is blocked until zero, limits, and sign calibration are complet
 3. Sign calibration
 4. Save runtime calibration
 
-## Commands
+## Preferred Workflow: Guided Wizard
 
-### 1) Zero capture (neutral beam/ball position)
+1. Start wizard:
+- `w`
 
-- `cal_zero set angle`
-- `cal_zero set position`
-- `cal_zero show`
+2. Follow each printed `WIZ,...` prompt and press:
+- `n`
 
-### 2) Travel limits (manual linkage extremes)
+Wizard step sequence:
+- Step 1: level beam (parallel) -> capture angle zero
+- Step 2: place ball at center -> capture position zero
+- Step 3: move beam to lower mechanical limit -> capture lower
+- Step 4: move beam to upper mechanical limit -> capture upper
+- Step 5: keep ball near reference end -> run sign begin (auto jog)
+- Step 6: move ball to far `+x` end -> run sign save
+- Step 7: review summary and persist
 
-- Move to lower extreme, then: `cal_limits set lower`
-- Move to upper extreme, then: `cal_limits set upper`
-- Verify: `cal_limits show`
+3. Save and exit wizard:
+- `c`
 
-### 3) Sign calibration
+4. Abort wizard without saving:
+- `q`
 
-1. `cal_sign begin`
-- Captures initial sonar reading as near reference.
-- Applies a short positive jog.
-- Reads AS5600 before/after jog.
-- Computes recommended sign updates.
+Notes:
+- Wizard auto-disables telemetry on start and restores prior telemetry state on exit.
+- Wizard writes EEPROM only when you confirm with `c`.
 
-2. Move ball to far end manually.
+## Manual Workflow (Quick Keys)
 
-3. `cal_sign save`
-- Captures far sonar reading.
-- Computes sign suggestions.
-- Applies sign values at runtime immediately.
-- Emits `SIGN_CAL_RESULT` line for logs.
+Use this if you do not want wizard mode:
 
-### 4) Persist to EEPROM
+```text
+t
+a
+p
+l
+u
+b
+g
+v
+t
+s
+r
+```
 
-- `cal_save`
+Quick key map:
+- `a`: `cal_zero set angle`
+- `p`: `cal_zero set position`
+- `l`: `cal_limits set lower`
+- `u`: `cal_limits set upper`
+- `b`: `cal_sign begin`
+- `g`: `cal_sign save`
+- `v`: `cal_save`
 
 ## Notes
 
-- `telemetry 0` can be used before calibration commands to reduce console spam.
-- `telemetry 1` re-enables telemetry.
+- `GUIDE,...` lines tell you the next required action.
+- `BLOCK,...` lines explain exactly why `run` was denied.
+- `t` toggles telemetry quickly (or use `telemetry 0|1`).
+- `i` (or `guide`) prints full bring-up step menu.
+- `x` (or `faults`) prints decoded fault reasons and recovery hint.
 - `cal_load` restores saved calibration at runtime.
 - `cal_reset defaults` restores compile-time fallback defaults at runtime.
