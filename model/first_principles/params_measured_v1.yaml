@@ -2,9 +2,9 @@ plant:
   gravity_mps2: 9.81
 
   # Measured ball properties.
-  ball_mass_kg: 0.0096
-  ball_radius_m: 0.0138
-  ball_inertia_ratio: 0.4  # solid sphere
+  ball_mass_kg: 0.0028
+  ball_radius_m: 0.020035
+  ball_inertia_ratio: 0.6666666666666666  # thin-shell hollow sphere
 
   # Beam + attachments excluding ball.
   # beam_length_m is from COM measurements (195.33 mm + 172.02 mm).

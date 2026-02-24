@@ -1,0 +1,60 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Firmware: Build (nano_new)",
+      "type": "shell",
+      "command": "pio run -e nano_new",
+      "options": {
+        "cwd": "${workspaceFolder}/firmware"
+      },
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Firmware: Upload (nano_new)",
+      "type": "shell",
+      "command": "pio run -e nano_new -t upload",
+      "options": {
+        "cwd": "${workspaceFolder}/firmware"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Firmware: Upload (nano_old)",
+      "type": "shell",
+      "command": "pio run -e nano_old -t upload",
+      "options": {
+        "cwd": "${workspaceFolder}/firmware"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Firmware: Monitor (115200)",
+      "type": "shell",
+      "command": "pio device monitor -b 115200 --echo --filter send_on_enter --eol LF",
+      "options": {
+        "cwd": "${workspaceFolder}/firmware"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Model: Design Gains",
+      "type": "shell",
+      "command": "./.venv/bin/python model/first_principles/design_cascade_pid.py --params model/first_principles/params_measured_v1.yaml",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Model: Export Gains",
+      "type": "shell",
+      "command": "./.venv/bin/python model/first_principles/export_gains.py",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

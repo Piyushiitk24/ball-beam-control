@@ -50,25 +50,62 @@ pio run -e nano_old
 - Driver: TMC2209 in STEP/DIR mode
 - Sensor 1: AS5600 (I2C addr `0x36`)
 - Sensor 2: HC-SR04 ultrasonic
-- Closed-loop mode is blocked until sign calibration is complete.
+- Closed-loop mode is blocked until runtime zero, limits, and sign calibration are complete.
 
 ## Serial Commands
 
 - `help`
 - `status`
+- `telemetry 0|1`
 - `en 0|1`
 - `jog <signed_steps> <rate>`
+- `cal_zero set angle`
+- `cal_zero set position`
+- `cal_zero show`
+- `cal_limits set lower`
+- `cal_limits set upper`
+- `cal_limits show`
 - `cal_sign begin`
 - `cal_sign save`
-- `cal_zero angle`
-- `cal_zero position`
+- `cal_save`
+- `cal_load`
+- `cal_reset defaults`
 - `run`
 - `stop`
 - `fault_reset`
 
 ## Calibration Workflow
 
-Use `cal_sign begin` then `cal_sign save` before entering `run`. See `docs/calibration_signs.md`.
+Use runtime flow `zero -> limits -> sign -> save` before entering `run`.
+See `docs/calibration_signs.md`.
+
+## What Changed (Important)
+
+- You no longer need to edit `firmware/include/calibration.h` for normal bring-up.
+- Zero, limits, and sign are now captured at runtime via serial commands.
+- Calibration is persisted on-device with `cal_save` and restored at boot.
+- `run` is blocked until runtime calibration is complete (`zero + limits + sign`).
+- Use `telemetry 0` while entering commands if monitor spam is distracting.
+
+## Daily Workflow (Short)
+
+1. Upload firmware from VS Code task: `Firmware: Upload (nano_new)` (or `nano_old`).
+2. Open monitor task: `Firmware: Monitor (115200)`.
+3. Run:
+```text
+telemetry 0
+cal_zero set angle
+cal_zero set position
+cal_limits set lower
+cal_limits set upper
+cal_sign begin
+cal_sign save
+cal_save
+telemetry 1
+status
+run
+```
+4. On next power-up, run `cal_load` only if needed; normally saved calibration auto-loads.
 
 ## First Hardware Bring-Up Checklist
 
@@ -104,7 +141,7 @@ pio device list
 4. Open serial monitor:
 
 ```bash
-pio device monitor -b 115200
+pio device monitor -b 115200 --echo --filter send_on_enter --eol LF
 ```
 
 5. In monitor, run:
@@ -114,7 +151,29 @@ help
 status
 ```
 
-6. Run sign calibration:
+6. Optionally pause telemetry spam while entering commands:
+
+```text
+telemetry 0
+```
+
+7. Capture runtime zeroes at neutral beam/ball setup:
+
+```text
+cal_zero set angle
+cal_zero set position
+cal_zero show
+```
+
+8. Capture runtime travel limits at mechanical extremes:
+
+```text
+cal_limits set lower
+cal_limits set upper
+cal_limits show
+```
+
+9. Run sign calibration:
 
 ```text
 cal_sign begin
@@ -126,27 +185,14 @@ Then move ball manually to far `+x` and run:
 cal_sign save
 ```
 
-7. Apply sign suggestions in `firmware/include/calibration.h`:
-- `AS5600_SIGN`
-- `STEPPER_DIR_SIGN`
-- `SONAR_POS_SIGN`
-
-Then rebuild/upload and re-open monitor.
-
-8. Get zero suggestions:
+10. Persist runtime calibration and optionally re-enable telemetry:
 
 ```text
-cal_zero angle
-cal_zero position
+cal_save
+telemetry 1
 ```
 
-9. Apply zero suggestions in `firmware/include/calibration.h`:
-- `AS5600_ZERO_DEG`
-- `SONAR_CENTER_CM`
-
-Then rebuild/upload and re-open monitor.
-
-10. Sanity check:
+11. Sanity check:
 
 ```text
 status
@@ -156,7 +202,7 @@ jog -120 500
 en 0
 ```
 
-11. Start closed-loop control:
+12. Start closed-loop control:
 
 ```text
 run
@@ -168,7 +214,7 @@ Stop when needed:
 stop
 ```
 
-12. Capture and analyze a run:
+13. Capture and analyze a run:
 
 ```bash
 cd /Users/piyush/code/ball-beam-control
@@ -179,5 +225,15 @@ python analysis/plot_run.py --input data/runs/<run>_clean.csv
 
 ## Modeling and Analysis
 
-- Modeling pipeline: `docs/modeling.md`
+- Canonical modeling reference: `docs/modeling.md`
 - Plotting/tuning workflow: `docs/tuning.md`
+
+## VS Code One-Click Tasks
+
+Use the Tasks panel (`Terminal -> Run Task...`) with:
+- `Firmware: Build (nano_new)`
+- `Firmware: Upload (nano_new)`
+- `Firmware: Upload (nano_old)`
+- `Firmware: Monitor (115200)`
+- `Model: Design Gains`
+- `Model: Export Gains`

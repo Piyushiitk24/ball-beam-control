@@ -48,7 +48,9 @@ void CascadeController::reset() {
 
 ActuatorCmd CascadeController::update(const SensorData& sensor,
                                      const Setpoint& setpoint,
-                                     float dt_s) {
+                                     float dt_s,
+                                     float theta_cmd_min_rad,
+                                     float theta_cmd_max_rad) {
   ActuatorCmd cmd;
   if (!sensor.valid_angle || !sensor.valid_pos) {
     cmd.enable = false;
@@ -60,8 +62,14 @@ ActuatorCmd CascadeController::update(const SensorData& sensor,
 
   const float pos_error_m = setpoint.ball_pos_m_target - sensor.ball_pos_filt_m;
 
+  if (theta_cmd_min_rad > theta_cmd_max_rad) {
+    const float swap = theta_cmd_min_rad;
+    theta_cmd_min_rad = theta_cmd_max_rad;
+    theta_cmd_max_rad = swap;
+  }
+
   float theta_cmd_rad = outer_pos_pid_.update(pos_error_m, dt_s);
-  theta_cmd_rad = clampf(theta_cmd_rad, -kThetaCmdLimitRad, kThetaCmdLimitRad);
+  theta_cmd_rad = clampf(theta_cmd_rad, theta_cmd_min_rad, theta_cmd_max_rad);
   last_theta_cmd_rad_ = theta_cmd_rad;
 
   const float theta_error_rad = theta_cmd_rad - sensor.beam_angle_rad;

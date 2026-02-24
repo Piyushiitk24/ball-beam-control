@@ -4,7 +4,7 @@
 
 #include <util/atomic.h>
 
-#include "calibration.h"
+#include "calibration_runtime.h"
 #include "config.h"
 
 namespace bb {
@@ -128,7 +128,7 @@ void StepperTMC2209::setSignedStepRate(float signed_rate_sps) {
   abs_rate_sps_ = fabsf(signed_rate_sps_);
 
   const float hardware_dir_reference =
-      signed_rate_sps_ * static_cast<float>(STEPPER_DIR_SIGN);
+      signed_rate_sps_ * static_cast<float>(runtimeCalStepperDirSign());
   direction_positive_ = (hardware_dir_reference >= 0.0f);
   setDirPinFast(direction_positive_);
 

@@ -1,6 +1,6 @@
 #include "sensors/as5600_sensor.h"
 
-#include "calibration.h"
+#include "calibration_runtime.h"
 
 namespace bb {
 namespace {
@@ -62,7 +62,7 @@ bool AS5600Sensor::readBeamThetaDeg(float& theta_deg, float& raw_angle_deg) {
     return false;
   }
 
-  theta_deg = mapThetaDeg(raw_angle_deg);
+  theta_deg = runtimeMapThetaDeg(raw_angle_deg);
   return true;
 }
 

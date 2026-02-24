@@ -28,7 +28,8 @@ bool StateMachine::requestRun(const AppConditions& cond) {
   if (state_ == AppState::FAULT) {
     return false;
   }
-  if (!cond.sign_calibrated || !cond.sensors_ok || cond.faults_active ||
+  if (!cond.sign_calibrated || !cond.zero_calibrated ||
+      !cond.limits_calibrated || !cond.sensors_ok || cond.faults_active ||
       !cond.inner_loop_stable) {
     return false;
   }
@@ -52,7 +53,10 @@ bool StateMachine::clearFault(const AppConditions& cond) {
   if (state_ != AppState::FAULT) {
     return false;
   }
-  state_ = cond.sign_calibrated ? AppState::READY : AppState::SAFE_DISABLED;
+  state_ = (cond.sign_calibrated && cond.zero_calibrated &&
+            cond.limits_calibrated)
+               ? AppState::READY
+               : AppState::SAFE_DISABLED;
   return true;
 }
 

@@ -10,7 +10,11 @@ class CascadeController {
   CascadeController();
 
   void reset();
-  ActuatorCmd update(const SensorData& sensor, const Setpoint& setpoint, float dt_s);
+  ActuatorCmd update(const SensorData& sensor,
+                     const Setpoint& setpoint,
+                     float dt_s,
+                     float theta_cmd_min_rad,
+                     float theta_cmd_max_rad);
 
   float lastThetaCmdDeg() const;
   float lastThetaCmdRad() const;

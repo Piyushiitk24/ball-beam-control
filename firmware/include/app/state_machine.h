@@ -6,6 +6,8 @@ namespace bb {
 
 struct AppConditions {
   bool sign_calibrated = false;
+  bool zero_calibrated = false;
+  bool limits_calibrated = false;
   bool sensors_ok = false;
   bool faults_active = false;
   bool inner_loop_stable = false;

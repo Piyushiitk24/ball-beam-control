@@ -6,9 +6,9 @@ This sheet converts your measured values to model parameters used by:
 
 ## 1) Raw Inputs (from build measurements)
 
-- Ball mass: `9.6 g`
-- Ball diameter: `27.6 mm`
-- Ball type: solid sphere
+- Ball mass: `2.8 g`
+- Ball diameter: `40.07 mm`
+- Ball type: hollow thin-shell sphere
 - Beam mass (without sensor mount): `121.9 g`
 - Beam COM (without sensor mount): `195.33 mm` from fulcrum end
 - Beam COM (without sensor mount): `172.02 mm` from motor end
@@ -21,8 +21,8 @@ This sheet converts your measured values to model parameters used by:
 
 ## 2) SI Conversions
 
-- `m_ball = 0.0096 kg`
-- `R = 0.0138 m`
+- `m_ball = 0.0028 kg`
+- `R = 0.020035 m`
 - `m_beam = 0.1219 kg`
 - `m_sensor = 0.0173 kg`
 - `x_beam_com = 0.19533 m` (from fulcrum end)
@@ -31,19 +31,19 @@ This sheet converts your measured values to model parameters used by:
 
 ## 3) Ball Dynamics Terms
 
-Solid sphere inertia:
-- `I = (2/5) m R^2 = 7.312896e-07 kg·m^2`
+Thin-shell hollow sphere inertia:
+- `I = (2/3) m R^2 = 7.492822866666667e-07 kg·m^2`
 
 Effective mass:
-- `m_e = m + I/R^2 = 1.4 m = 0.01344 kg`
+- `m_e = m + I/R^2 = (5/3) m = 0.004666666666666666 kg`
 
 Outer-loop gravity factor:
-- `alpha = m/m_e = 0.7142857143` (`5/7`)
+- `alpha = m/m_e = 0.6`
 
 Useful constants:
-- `m g = 0.094176 N`
-- `m_e R = 1.85472e-04 kg·m`
-- `m_e R^2 = 2.5595136e-06 kg·m^2`
+- `m g = 0.027468 N`
+- `m_e R = 9.349666666666666e-05 kg·m`
+- `m_e R^2 = 1.8732057166666665e-06 kg·m^2`
 
 ## 4) Beam + Sensor Aggregate COM
 

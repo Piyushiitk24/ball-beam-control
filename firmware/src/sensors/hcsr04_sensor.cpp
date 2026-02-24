@@ -2,7 +2,7 @@
 
 #include <util/atomic.h>
 
-#include "calibration.h"
+#include "calibration_runtime.h"
 #include "config.h"
 
 namespace bb {
@@ -76,8 +76,8 @@ void HCSR04Sensor::service(uint32_t now_us, uint32_t now_ms) {
         ema_cm_ = (kSonarEmaAlpha * median_cm) + ((1.0f - kSonarEmaAlpha) * ema_cm_);
       }
 
-      last_x_cm_ = mapBallPosCm(last_distance_cm_);
-      last_x_filt_cm_ = mapBallPosCm(ema_cm_);
+      last_x_cm_ = runtimeMapBallPosCm(last_distance_cm_);
+      last_x_filt_cm_ = runtimeMapBallPosCm(ema_cm_);
       last_sample_ms_ = now_ms;
       has_sample_ = true;
       timeout_flag_ = false;

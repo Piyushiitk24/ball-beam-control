@@ -19,11 +19,11 @@ constexpr float kInnerIMax = 35.620729f;
 constexpr float kInnerOutMin = -1800.000000f;
 constexpr float kInnerOutMax = 1800.000000f;
 
-constexpr float kOuterKp = 53.173927f;
-constexpr float kOuterKi = 188.467591f;
-constexpr float kOuterKd = 5.622202f;
-constexpr float kOuterIMin = -0.000741f;
-constexpr float kOuterIMax = 0.000741f;
+constexpr float kOuterKp = 63.302294f;
+constexpr float kOuterKi = 224.366180f;
+constexpr float kOuterKd = 6.693097f;
+constexpr float kOuterIMin = -0.000622f;
+constexpr float kOuterIMax = 0.000622f;
 constexpr float kOuterOutMin = -0.139626f;
 constexpr float kOuterOutMax = 0.139626f;
 
