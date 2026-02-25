@@ -45,6 +45,8 @@ uint32_t g_last_control_ms = 0;
 uint32_t g_last_telemetry_ms = 0;
 uint32_t g_last_valid_angle_ms = 0;
 uint32_t g_last_valid_pos_ms = 0;
+uint32_t g_last_angle_read_ms = 0;
+uint32_t g_last_angle_read_dt_ms = 0;
 
 volatile uint8_t* g_echo_pin_reg = nullptr;
 uint8_t g_echo_pin_mask = 0;
@@ -94,6 +96,7 @@ enum WizardStep : uint8_t {
 void printFaultInfo();
 void printBringupMenu();
 void printSonarDiag();
+void printAs5600Diag();
 
 const char* stateToString(AppState state) {
   switch (state) {
@@ -170,6 +173,10 @@ bool sampleAngleNow(uint32_t now_ms,
   g_sensor.beam_angle_rad = theta_deg * kDegToRad;
   g_sensor.beam_angle_raw_deg = theta_raw_deg;
   g_sensor.valid_angle = true;
+  if (g_last_angle_read_ms != 0) {
+    g_last_angle_read_dt_ms = static_cast<uint32_t>(now_ms - g_last_angle_read_ms);
+  }
+  g_last_angle_read_ms = now_ms;
   g_last_valid_angle_ms = now_ms;
   g_fault_flags.i2c_error = false;
   g_fault_flags.angle_oob = fabsf(g_sensor.beam_angle_rad) > kThetaHardLimitRad;
@@ -311,9 +318,8 @@ void printHelp() {
   Serial.println(F("HELP,keys"));
   Serial.println(F("HELP,core=?/h s t e j a p z [ ] m b g v o d i x r k f"));
   Serial.println(F("HELP,wiz=w n c q"));
-  Serial.println(F("HELP,limits=[=DOWN ]=UP (l/u/1/2 aliases)"));
-  Serial.println(F("HELP,sonar=sonar diag | sonar sign 1|-1"));
-  Serial.println(F("HELP,long=cal_zero|cal_limits|cal_sign|cal_save|cal_load|run|stop"));
+  Serial.println(F("HELP,limits=[ ] (l/u/1/2)"));
+  Serial.println(F("HELP,diag=sonar diag|as5600 diag"));
 }
 
 void printStatus() {
@@ -647,6 +653,28 @@ void printSonarDiag() {
   Serial.print(diag.timeout_count);
   Serial.print(F(",jump_reject_cnt="));
   Serial.println(diag.jump_reject_count);
+}
+
+void printAs5600Diag() {
+  const uint32_t now_ms = millis();
+  float theta_deg = g_sensor.beam_angle_deg;
+  float raw_deg = g_sensor.beam_angle_raw_deg;
+  const bool ok = sampleAngleNow(now_ms, &theta_deg, &raw_deg);
+  float read_hz = 0.0f;
+  if (g_last_angle_read_dt_ms > 0 && g_last_angle_read_dt_ms < 1000) {
+    read_hz = 1000.0f / static_cast<float>(g_last_angle_read_dt_ms);
+  }
+
+  Serial.print(F("AS5600_DIAG,"));
+  Serial.print(ok ? F("1") : F("0"));
+  Serial.print(',');
+  Serial.print(raw_deg, 4);
+  Serial.print(',');
+  Serial.print(theta_deg, 4);
+  Serial.print(',');
+  Serial.print(g_as5600.errorCount());
+  Serial.print(',');
+  Serial.println(read_hz, 2);
 }
 
 bool captureZeroAngle() {
@@ -1406,6 +1434,12 @@ void handleCommand(char* line) {
     return;
   }
 
+  if (strcmp(token, "as5600") == 0) {
+    printAs5600Diag();
+    printGuideNextAction();
+    return;
+  }
+
   if (strcmp(token, "cal_zero") == 0) {
     char* sub = strtok_r(nullptr, " ", &saveptr);
     if (sub == nullptr) {
@@ -1461,7 +1495,7 @@ void handleCommand(char* line) {
   if (strcmp(token, "cal_limits") == 0) {
     char* sub = strtok_r(nullptr, " ", &saveptr);
     if (sub == nullptr) {
-      Serial.println(F("ERR,usage:cal_limits set down|up|lower|upper | cal_limits show"));
+      Serial.println(F("ERR,usage:cal_limits set ... | show"));
       return;
     }
 
@@ -1474,7 +1508,7 @@ void handleCommand(char* line) {
     if (strcmp(sub, "set") == 0) {
       char* edge = strtok_r(nullptr, " ", &saveptr);
       if (edge == nullptr) {
-        Serial.println(F("ERR,usage:cal_limits set down|up|lower|upper"));
+        Serial.println(F("ERR,usage:cal_limits set ..."));
         return;
       }
 
@@ -1506,11 +1540,11 @@ void handleCommand(char* line) {
         return;
       }
 
-      Serial.println(F("ERR,usage:cal_limits set down|up|lower|upper"));
+      Serial.println(F("ERR,usage:cal_limits set ..."));
       return;
     }
 
-    Serial.println(F("ERR,usage:cal_limits set down|up|lower|upper | cal_limits show"));
+    Serial.println(F("ERR,usage:cal_limits set ... | show"));
     return;
   }
 

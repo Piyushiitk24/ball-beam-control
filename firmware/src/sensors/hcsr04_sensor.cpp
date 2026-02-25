@@ -9,7 +9,7 @@
 namespace bb {
 namespace {
 
-constexpr float kSonarMaxJumpCm = 18.0f;
+constexpr float kSonarMaxJumpCm = 25.0f;
 constexpr uint8_t kSonarMinValidStreak = 2;
 
 }  // namespace
@@ -78,6 +78,7 @@ void HCSR04Sensor::service(uint32_t now_us, uint32_t now_ms) {
         ++jump_reject_count_;
         valid_streak_ = 0;
         timeout_flag_ = true;
+        last_distance_cm_ += (distance_cm > last_distance_cm_) ? kSonarMaxJumpCm : -kSonarMaxJumpCm;
       } else {
         last_distance_cm_ = distance_cm;
 

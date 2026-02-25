@@ -81,6 +81,7 @@ pio run -e nano_old
 | `i` | print bring-up menu | `guide` |
 | `x` | print decoded fault help | `faults` |
 | `sonar diag` | print sonar health stats | `sonar diag` |
+| `as5600 diag` | print AS5600 health stats | `as5600 diag` |
 | `sonar sign 1|-1` | manual sonar sign override | `sonar sign 1|-1` |
 | `r` | start control | `run` |
 | `k` | stop control | `stop` |
@@ -106,6 +107,7 @@ pio run -e nano_old
 - `cal_limits show`
 - `cal_sign begin|save`
 - `sonar diag | sonar sign 1|-1`
+- `as5600 diag`
 - `cal_save`
 - `cal_load`
 - `cal_reset defaults`
