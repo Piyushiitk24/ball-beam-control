@@ -53,6 +53,7 @@ pio run -e nano_old
 - Driver: TMC2209 in STEP/DIR mode
 - Sensor 1: AS5600 (I2C addr `0x36`)
 - Sensor 2: HC-SR04 ultrasonic
+- Current hardware note: HC-SR04 calibration steps use a flat target for stable echoes.
 - Closed-loop mode is blocked until runtime zero, limits, and sign calibration are complete.
 
 ## Serial Commands (Primary UX: Quick Keys)
@@ -69,8 +70,8 @@ pio run -e nano_old
 | `a` | capture angle zero | `cal_zero set angle` |
 | `p` | capture position zero | `cal_zero set position` |
 | `z` | show zero calibration | `cal_zero show` |
-| `l` or `1` | capture lower limit | `cal_limits set lower` |
-| `u` or `2` | capture upper limit | `cal_limits set upper` |
+| `[` / `l` / `1` | capture physical DOWN limit | `cal_limits set down` |
+| `]` / `u` / `2` | capture physical UP limit | `cal_limits set up` |
 | `m` | show limits | `cal_limits show` |
 | `b` | sign calibration begin | `cal_sign begin` |
 | `g` | sign calibration save | `cal_sign save` |
@@ -79,6 +80,8 @@ pio run -e nano_old
 | `d` | reset runtime defaults | `cal_reset defaults` |
 | `i` | print bring-up menu | `guide` |
 | `x` | print decoded fault help | `faults` |
+| `sonar diag` | print sonar health stats | `sonar diag` |
+| `sonar sign 1|-1` | manual sonar sign override | `sonar sign 1|-1` |
 | `r` | start control | `run` |
 | `k` | stop control | `stop` |
 | `f` | clear fault | `fault_reset` |
@@ -99,9 +102,10 @@ pio run -e nano_old
 - `jog <signed_steps> <rate>`
 - `cal_zero set angle|position`
 - `cal_zero show|angle|position`
-- `cal_limits set lower|upper`
+- `cal_limits set down|up|lower|upper`
 - `cal_limits show`
 - `cal_sign begin|save`
+- `sonar diag | sonar sign 1|-1`
 - `cal_save`
 - `cal_load`
 - `cal_reset defaults`
@@ -124,10 +128,12 @@ Manual flow (without wizard) stays available using quick keys:
 t
 a
 p
-l
-u
+[
+]
 b
-g
+g        # optional if sonar near/far capture is valid
+# OR use manual sonar sign:
+# sonar sign 1
 v
 t
 s
@@ -143,6 +149,8 @@ See `docs/calibration_signs.md`.
 - Calibration is persisted on-device with `cal_save` and restored at boot.
 - `run` is blocked until runtime calibration is complete (`zero + limits + sign`).
 - Use `telemetry 0` while entering commands if monitor spam is distracting.
+- In bring-up states, sensor faults are warnings/blockers (not forced FAULT latch).
+- In `RUNNING`, faults remain hard safety faults.
 
 ## Daily Workflow (Short)
 
@@ -162,10 +170,12 @@ r
 telemetry 0
 cal_zero set angle
 cal_zero set position
-cal_limits set lower
-cal_limits set upper
+cal_limits set down
+cal_limits set up
 cal_sign begin
-cal_sign save
+cal_sign save            # optional if sonar near/far is valid
+# or manual sonar sign:
+# sonar sign 1
 cal_save
 telemetry 1
 status
@@ -197,6 +207,17 @@ If upload fails due to bootloader profile mismatch:
 ```bash
 pio run -e nano_old -t upload
 ```
+
+If upload auto-detects Bluetooth instead of the Nano, force the USB port:
+
+```bash
+pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
+```
+
+Important:
+- Close monitor before upload (`Ctrl+C`), or upload can fail.
+- After reboot, run `h`. New firmware must show `HELP,keys` and `sonar diag`.
+- If you still see old `STEP,1,cmd=t...` menu, old firmware is still running.
 
 3. Find serial port:
 
@@ -268,10 +289,11 @@ k
 t
 a
 p
-l
-u
+[
+]
 b
 g
+# or sonar sign 1|-1
 v
 t
 s
