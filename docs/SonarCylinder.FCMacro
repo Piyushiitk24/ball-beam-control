@@ -305,10 +305,13 @@ def build_ball_belt():
             shape = outer.cut(inner)
 
     # Clearance hint: ensure belt stays far from runner contact points on a V-groove.
-    # For a symmetric V-groove, the contact points are near Y = ±R*sin(v/2).
+    # For a symmetric V-groove, the contact points are near Y = ±R_BALL*sin(V/2).
+    # The belt must satisfy |belt_half_w| < |y_contact| (belt never reaches contact circle).
+    # A 3 mm safety margin is used; reduce only if groove is very narrow.
+    BELT_GROOVE_MARGIN_MM = 3.0
     v_half = 0.5 * float(BEAM_V_ANGLE_DEG)
     y_contact = float(R_BALL) * math.sin(math.radians(v_half))
-    clearance_ok = (belt_half_w <= max(0.0, y_contact - 2.0))
+    clearance_ok = (belt_half_w <= max(0.0, y_contact - BELT_GROOVE_MARGIN_MM))
     if belt_half_w > 0 and not clearance_ok:
         App.Console.PrintWarning(
             f"SonarCylinder: BELT_WIDTH_Y may be too wide for V-groove contact.\n"
