@@ -41,6 +41,12 @@ bool g_inner_loop_stable = true;
 bool g_manual_enable = false;
 bool g_telemetry_enabled = true;
 
+// AS5600 runtime filter state (EMA + jump reject). Reset whenever calibration changes mapping.
+bool g_as5600_ema_initialized = false;
+bool g_as5600_last_initialized = false;
+float g_as5600_theta_ema_deg = 0.0f;
+float g_as5600_theta_last_deg = 0.0f;
+
 uint32_t g_last_control_ms = 0;
 uint32_t g_last_telemetry_ms = 0;
 uint32_t g_last_valid_angle_ms = 0;
@@ -97,6 +103,9 @@ void printFaultInfo();
 void printBringupMenu();
 void printSonarDiag();
 void printAs5600Diag();
+bool captureSonarCalDistanceCm(float& out_cm);
+bool readAs5600RawMedianDeg(float& out_raw_deg);
+bool captureAs5600CalRawDeg(float& out_raw_deg);
 
 const char* stateToString(AppState state) {
   switch (state) {
@@ -125,6 +134,13 @@ float clampf(float value, float min_value, float max_value) {
     return max_value;
   }
   return value;
+}
+
+void resetAs5600Filter() {
+  g_as5600_ema_initialized = false;
+  g_as5600_last_initialized = false;
+  g_as5600_theta_ema_deg = 0.0f;
+  g_as5600_theta_last_deg = 0.0f;
 }
 
 // Tiny float parser to avoid pulling in strtod()/atof() (saves significant flash).
@@ -216,23 +232,51 @@ bool sampleAngleNow(uint32_t now_ms,
                     float* raw_deg_out = nullptr) {
   float theta_deg = 0.0f;
   float theta_raw_deg = 0.0f;
-  if (!g_as5600.readBeamThetaDeg(theta_deg, theta_raw_deg)) {
-    g_sensor.valid_angle = false;
-    g_fault_flags.i2c_error = true;
+  if (!readAs5600RawMedianDeg(theta_raw_deg)) {
     return false;
   }
+  theta_deg = runtimeMapThetaDeg(theta_raw_deg);
+
+  // Glitch/jump reject (common with noisy I2C or loose magnets).
+  if (g_as5600_last_initialized) {
+    const float delta = wrapAngleDeltaDeg(theta_deg - g_as5600_theta_last_deg);
+    if (fabsf(delta) > kAs5600MaxJumpDeg) {
+      return false;
+    }
+  }
+  g_as5600_theta_last_deg = theta_deg;
+  g_as5600_last_initialized = true;
+
+  // EMA smoothing on mapped theta (used by control).
+  if (!g_as5600_ema_initialized) {
+    g_as5600_theta_ema_deg = theta_deg;
+    g_as5600_ema_initialized = true;
+  } else {
+    g_as5600_theta_ema_deg =
+        (kAs5600EmaAlpha * theta_deg) + ((1.0f - kAs5600EmaAlpha) * g_as5600_theta_ema_deg);
+  }
+
+  theta_deg = g_as5600_theta_ema_deg;
 
   g_sensor.beam_angle_deg = theta_deg;
   g_sensor.beam_angle_rad = theta_deg * kDegToRad;
   g_sensor.beam_angle_raw_deg = theta_raw_deg;
-  g_sensor.valid_angle = true;
   if (g_last_angle_read_ms != 0) {
     g_last_angle_read_dt_ms = static_cast<uint32_t>(now_ms - g_last_angle_read_ms);
   }
   g_last_angle_read_ms = now_ms;
   g_last_valid_angle_ms = now_ms;
   g_fault_flags.i2c_error = false;
-  g_fault_flags.angle_oob = fabsf(g_sensor.beam_angle_rad) > kThetaHardLimitRad;
+  // Angle safety:
+  // Use calibrated limits (mechanical travel). Before limits calibration, don't fault on angle.
+  constexpr float kAngleOobMarginDeg = 1.0f;
+  if (runtimeCalIsLimitsSet()) {
+    g_fault_flags.angle_oob =
+        (theta_deg < (runtimeCalThetaLowerLimitDeg() - kAngleOobMarginDeg)) ||
+        (theta_deg > (runtimeCalThetaUpperLimitDeg() + kAngleOobMarginDeg));
+  } else {
+    g_fault_flags.angle_oob = false;
+  }
 
   if (theta_deg_out != nullptr) {
     *theta_deg_out = theta_deg;
@@ -291,9 +335,14 @@ bool sampleSonarNow(uint32_t now_ms,
 
 bool readSensors(uint32_t now_ms) {
   g_sensor.ts_ms = now_ms;
-  const bool angle_ok = sampleAngleNow(now_ms);
-  const bool pos_ok = sampleSonarNow(now_ms);
-  return angle_ok && pos_ok;
+  sampleAngleNow(now_ms);
+  sampleSonarNow(now_ms);
+
+  // Hold last-good AS5600 value until it becomes stale (matches sonar policy).
+  g_sensor.valid_angle =
+      g_as5600_last_initialized &&
+      (static_cast<uint32_t>(now_ms - g_last_valid_angle_ms) <= kPosSampleFreshMs);
+  return g_sensor.valid_angle && g_sensor.valid_pos;
 }
 
 void updateFaultState(uint32_t now_ms) {
@@ -390,31 +439,12 @@ void printStatus() {
   Serial.print(F("FAULTS,bits="));
   Serial.println(packFaultFlags(g_fault_flags));
 
-  Serial.print(F("SIGNS,current_stepper="));
-  Serial.print(runtimeCalStepperDirSign());
-  Serial.print(F(",current_as5600="));
-  Serial.print(runtimeCalAs5600Sign());
-  Serial.print(F(",current_sonar="));
-  Serial.println(runtimeCalSonarPosSign());
-
   Serial.print(F("CAL,zero_calibrated="));
   Serial.print(runtimeCalIsZeroSet() ? F("yes") : F("no"));
   Serial.print(F(",limits_calibrated="));
   Serial.print(runtimeCalIsLimitsSet() ? F("yes") : F("no"));
   Serial.print(F(",sign_calibrated="));
   Serial.println(runtimeCalIsSignSet() ? F("yes") : F("no"));
-
-  Serial.print(F("CAL_ZERO,as5600_zero_deg="));
-  Serial.print(runtimeCalAs5600ZeroDeg(), 6);
-  Serial.print(F(",sonar_center_cm="));
-  Serial.println(runtimeCalSonarCenterCm(), 6);
-
-  Serial.print(F("CAL_LIMITS,lower_deg="));
-  Serial.print(runtimeCalThetaLowerLimitDeg(), 5);
-  Serial.print(F(",upper_deg="));
-  Serial.print(runtimeCalThetaUpperLimitDeg(), 5);
-  Serial.print(F(",valid="));
-  Serial.println(runtimeCalIsLimitsSet() ? F("yes") : F("no"));
 
   Serial.print(F("CAL_STORE,status="));
   Serial.println(runtimeCalLoadStatusName(runtimeCalLoadStatus()));
@@ -472,11 +502,10 @@ bool handleCalSignBegin() {
     return false;
   }
 
-  const uint32_t now_ms = millis();
-  float theta_now_deg = 0.0f;
   float theta_raw_deg = 0.0f;
-  if (!sampleAngleNow(now_ms, &theta_now_deg, &theta_raw_deg)) {
+  if (!captureAs5600CalRawDeg(theta_raw_deg)) {
     Serial.println(F("ERR,angle_not_ready"));
+    printAs5600Diag();
     return false;
   }
 
@@ -492,10 +521,8 @@ bool handleCalSignBegin() {
   g_sign_cal.suggested_as5600_sign = runtimeCalAs5600Sign();
   g_sign_cal.suggested_sonar_sign = runtimeCalSonarPosSign();
 
-  float sonar_x_cm = 0.0f;
-  float sonar_x_filt_cm = 0.0f;
   float sonar_dist_cm = 0.0f;
-  g_sign_cal.near_captured = sampleSonarNow(now_ms, &sonar_x_cm, &sonar_x_filt_cm, &sonar_dist_cm);
+  g_sign_cal.near_captured = captureSonarCalDistanceCm(sonar_dist_cm);
   g_sign_cal.near_distance_cm = sonar_dist_cm;
   g_sign_cal.theta_before_raw_deg = theta_raw_deg;
 
@@ -504,7 +531,7 @@ bool handleCalSignBegin() {
   runJogBlocking(3000);
 
   delay(50);
-  if (!sampleAngleNow(millis(), nullptr, &g_sign_cal.theta_after_raw_deg)) {
+  if (!captureAs5600CalRawDeg(g_sign_cal.theta_after_raw_deg)) {
     Serial.println(F("ERR,angle_not_ready_after_jog"));
     g_state_machine.finishSignCalibration(false);
     return false;
@@ -522,20 +549,14 @@ bool handleCalSignBegin() {
   runtimeCalSetAs5600Sign(g_sign_cal.suggested_as5600_sign);
   runtimeCalSetSignCaptured(true);
   g_runtime_cal_dirty = true;
+  resetAs5600Filter();
 
   g_state_machine.finishSignCalibration(true);
 
-  Serial.println(F("INFO,cal_sign_begin_complete"));
-  Serial.print(F("INFO,theta_raw_delta_deg="));
-  Serial.println(g_sign_cal.theta_delta_raw_deg, 5);
-  Serial.print(F("INFO,suggested_stepper_sign="));
-  Serial.println(g_sign_cal.suggested_stepper_sign);
-  Serial.print(F("INFO,suggested_as5600_sign="));
-  Serial.println(g_sign_cal.suggested_as5600_sign);
   if (g_sign_cal.near_captured) {
-    Serial.println(F("INFO,sonar_near=yes; move_target_far_then_g"));
+    Serial.println(F("INFO,sonar_near=1"));
   } else {
-    Serial.println(F("WARN,sonar_near=no; use sonar sign +/-1 or rerun b"));
+    Serial.println(F("WARN,sonar_near=0"));
   }
 
   if (!g_manual_enable) {
@@ -555,11 +576,10 @@ bool handleCalSignSave() {
     return false;
   }
 
-  float x_cm = 0.0f;
-  float x_filt_cm = 0.0f;
   float dist_cm = 0.0f;
-  if (!sampleSonarNow(millis(), &x_cm, &x_filt_cm, &dist_cm)) {
+  if (!captureSonarCalDistanceCm(dist_cm)) {
     Serial.println(F("ERR,sonar_not_ready"));
+    printSonarDiag();
     return false;
   }
 
@@ -590,7 +610,7 @@ bool handleCalSignSave() {
   Serial.print(',');
   Serial.println(g_sign_cal.suggested_sonar_sign);
 
-  Serial.println(F("INFO,signs_applied_runtime; run cal_save to persist"));
+  Serial.println(F("INFO,signs_applied_runtime"));
   g_runtime_cal_dirty = true;
   return true;
 }
@@ -635,21 +655,19 @@ void printFaultInfo() {
     return;
   }
   if (g_fault_flags.sonar_timeout) {
-    Serial.println(F("FAULT_INFO,sonar_timeout=1,do=flat_target+check_HCSR04"));
+    Serial.println(F("FAULT_INFO,sonar_timeout=1"));
   }
   if (g_fault_flags.i2c_error) {
-    Serial.println(F("FAULT_INFO,i2c_error=1,do=check_AS5600"));
+    Serial.println(F("FAULT_INFO,i2c_error=1"));
   }
   if (g_fault_flags.angle_oob) {
-    Serial.println(F("FAULT_INFO,angle_oob=1,do=level_beam_then_a"));
+    Serial.println(F("FAULT_INFO,angle_oob=1"));
   }
   if (g_fault_flags.pos_oob) {
-    Serial.println(F("FAULT_INFO,pos_oob=1,do=center_target_then_p"));
+    Serial.println(F("FAULT_INFO,pos_oob=1"));
   }
   if (g_state_machine.state() == AppState::FAULT) {
-    Serial.println(F("FAULT_INFO,recover=fix_sensor->f->s"));
-  } else {
-    Serial.println(F("FAULT_INFO,recover=fix_sensor->s"));
+    Serial.println(F("FAULT_INFO,recover=f"));
   }
 }
 
@@ -717,15 +735,172 @@ void printAs5600Diag() {
   Serial.println(read_hz, 2);
 }
 
+bool captureSonarCalDistanceCm(float& out_cm) {
+  // Calibration needs a stable distance even when the target is a weak reflector.
+  // Take multiple fresh filtered samples and smooth them again with EMA.
+  constexpr uint8_t kNeedGood = 5;
+  constexpr uint32_t kTimeoutMs = 900;
+  constexpr uint32_t kGoodDelayMs = 45;
+  constexpr uint32_t kBadDelayMs = 10;
+
+  uint8_t good = 0;
+  float ema = 0.0f;
+  bool ema_init = false;
+
+  const uint32_t start_ms = millis();
+  while (good < kNeedGood && static_cast<uint32_t>(millis() - start_ms) < kTimeoutMs) {
+    const uint32_t now_us = micros();
+    const uint32_t now_ms = millis();
+
+    g_stepper.processIsrFlags();
+    g_hcsr04.service(now_us, now_ms);
+
+    SonarDiag diag;
+    g_hcsr04.getDiag(now_ms, diag);
+
+    if (diag.fresh && diag.has_sample) {
+      const float v = (diag.filt_cm > 0.0f) ? diag.filt_cm : diag.raw_cm;
+      if (v > 0.0f) {
+        if (!ema_init) {
+          ema = v;
+          ema_init = true;
+        } else {
+          ema = (kSonarEmaAlpha * v) + ((1.0f - kSonarEmaAlpha) * ema);
+        }
+        ++good;
+        delay(kGoodDelayMs);
+        continue;
+      }
+    }
+
+    delay(kBadDelayMs);
+  }
+
+  if (!ema_init || good < kNeedGood) {
+    return false;
+  }
+  out_cm = ema;
+  return true;
+}
+
+bool readAs5600RawMedianDeg(float& out_raw_deg) {
+  // Cheap outlier rejection for calibration: median-of-3 raw samples, with wrap handling.
+  uint16_t a = 0, b = 0, c = 0;
+  if (!g_as5600.readRaw(a)) {
+    return false;
+  }
+  delayMicroseconds(1500);
+  if (!g_as5600.readRaw(b)) {
+    return false;
+  }
+  delayMicroseconds(1500);
+  if (!g_as5600.readRaw(c)) {
+    return false;
+  }
+
+  // Unwrap around 'a' so values near 0/4095 don't break the median.
+  int16_t ai = static_cast<int16_t>(a);
+  int16_t bi = static_cast<int16_t>(b);
+  int16_t ci = static_cast<int16_t>(c);
+
+  int16_t d = static_cast<int16_t>(bi - ai);
+  if (d > 2048) {
+    bi = static_cast<int16_t>(bi - 4096);
+  } else if (d < -2048) {
+    bi = static_cast<int16_t>(bi + 4096);
+  }
+
+  d = static_cast<int16_t>(ci - ai);
+  if (d > 2048) {
+    ci = static_cast<int16_t>(ci - 4096);
+  } else if (d < -2048) {
+    ci = static_cast<int16_t>(ci + 4096);
+  }
+
+  // Median-of-3 on int16.
+  if (ai > bi) {
+    const int16_t t = ai;
+    ai = bi;
+    bi = t;
+  }
+  if (bi > ci) {
+    const int16_t t = bi;
+    bi = ci;
+    ci = t;
+  }
+  if (ai > bi) {
+    const int16_t t = ai;
+    ai = bi;
+    bi = t;
+  }
+
+  int16_t med = bi;
+  if (med < 0) {
+    med = static_cast<int16_t>(med + 4096);
+  } else if (med >= 4096) {
+    med = static_cast<int16_t>(med - 4096);
+  }
+
+  out_raw_deg = (static_cast<float>(med) * 360.0f) / 4096.0f;
+  return true;
+}
+
+bool captureAs5600CalRawDeg(float& out_raw_deg) {
+  // Calibration capture needs to be stable: take multiple median-filtered samples,
+  // ignore large jumps, and smooth with a light EMA.
+  constexpr uint8_t kNeedGood = AS5600_CAL_NEED_GOOD;
+  constexpr uint32_t kTimeoutMs = AS5600_CAL_TIMEOUT_MS;
+  constexpr uint8_t kDelayMs = 6;
+
+  uint8_t good = 0;
+  float ema = 0.0f;
+  bool ema_init = false;
+
+  float last = 0.0f;
+  bool last_init = false;
+
+  const uint32_t start_ms = millis();
+  while (good < kNeedGood && static_cast<uint32_t>(millis() - start_ms) < kTimeoutMs) {
+    float v = 0.0f;
+    if (readAs5600RawMedianDeg(v)) {
+      if (last_init) {
+        const float delta = wrapAngleDeltaDeg(v - last);
+        if (fabsf(delta) > AS5600_CAL_MAX_JUMP_DEG) {
+          delay(kDelayMs);
+          continue;
+        }
+      }
+      last = v;
+      last_init = true;
+
+      if (!ema_init) {
+        ema = v;
+        ema_init = true;
+      } else {
+        ema = (kAs5600EmaAlpha * v) + ((1.0f - kAs5600EmaAlpha) * ema);
+      }
+      ++good;
+    }
+    delay(kDelayMs);
+  }
+
+  if (!ema_init || good < kNeedGood) {
+    return false;
+  }
+  out_raw_deg = ema;
+  return true;
+}
+
 bool captureZeroAngle() {
-  float theta_deg = 0.0f;
   float raw_deg = 0.0f;
-  if (!sampleAngleNow(millis(), &theta_deg, &raw_deg)) {
+  if (!captureAs5600CalRawDeg(raw_deg)) {
     Serial.println(F("ERR,angle_not_ready"));
+    printAs5600Diag();
     return false;
   }
   runtimeCalSetAs5600ZeroDeg(raw_deg);
   runtimeCalMarkZeroAngleCaptured(true);
+  resetAs5600Filter();
   sampleAngleNow(millis(), nullptr, nullptr);
   g_runtime_cal_dirty = true;
   Serial.print(F("OK,cal_zero_angle_set="));
@@ -735,11 +910,10 @@ bool captureZeroAngle() {
 }
 
 bool captureZeroPosition() {
-  float x_cm = 0.0f;
-  float x_filt_cm = 0.0f;
   float dist_cm = 0.0f;
-  if (!sampleSonarNow(millis(), &x_cm, &x_filt_cm, &dist_cm)) {
+  if (!captureSonarCalDistanceCm(dist_cm)) {
     Serial.println(F("ERR,sonar_not_ready"));
+    printSonarDiag();
     return false;
   }
   runtimeCalSetSonarCenterCm(dist_cm);
@@ -753,11 +927,13 @@ bool captureZeroPosition() {
 }
 
 bool captureLowerLimit() {
-  float theta_deg = 0.0f;
-  if (!sampleAngleNow(millis(), &theta_deg, nullptr)) {
+  float raw_deg = 0.0f;
+  if (!captureAs5600CalRawDeg(raw_deg)) {
     Serial.println(F("ERR,angle_not_ready"));
+    printAs5600Diag();
     return false;
   }
+  const float theta_deg = runtimeMapThetaDeg(raw_deg);
 
   runtimeCalSetThetaLowerLimitDeg(theta_deg);
   runtimeCalMarkLowerLimitCaptured(true);
@@ -772,11 +948,13 @@ bool captureLowerLimit() {
 }
 
 bool captureUpperLimit() {
-  float theta_deg = 0.0f;
-  if (!sampleAngleNow(millis(), &theta_deg, nullptr)) {
+  float raw_deg = 0.0f;
+  if (!captureAs5600CalRawDeg(raw_deg)) {
     Serial.println(F("ERR,angle_not_ready"));
+    printAs5600Diag();
     return false;
   }
+  const float theta_deg = runtimeMapThetaDeg(raw_deg);
 
   runtimeCalSetThetaUpperLimitDeg(theta_deg);
   runtimeCalMarkUpperLimitCaptured(true);
@@ -813,11 +991,13 @@ bool finalizeNormalizedLimitSpan() {
 }
 
 bool captureDownLimit() {
-  float theta_deg = 0.0f;
-  if (!sampleAngleNow(millis(), &theta_deg, nullptr)) {
+  float raw_deg = 0.0f;
+  if (!captureAs5600CalRawDeg(raw_deg)) {
     Serial.println(F("ERR,angle_not_ready"));
+    printAs5600Diag();
     return false;
   }
+  const float theta_deg = runtimeMapThetaDeg(raw_deg);
 
   runtimeCalSetThetaLowerLimitDeg(theta_deg);
   runtimeCalMarkLowerLimitCaptured(true);
@@ -836,11 +1016,13 @@ bool captureDownLimit() {
 }
 
 bool captureUpLimit() {
-  float theta_deg = 0.0f;
-  if (!sampleAngleNow(millis(), &theta_deg, nullptr)) {
+  float raw_deg = 0.0f;
+  if (!captureAs5600CalRawDeg(raw_deg)) {
     Serial.println(F("ERR,angle_not_ready"));
+    printAs5600Diag();
     return false;
   }
+  const float theta_deg = runtimeMapThetaDeg(raw_deg);
 
   runtimeCalSetThetaUpperLimitDeg(theta_deg);
   runtimeCalMarkUpperLimitCaptured(true);
@@ -859,10 +1041,10 @@ bool captureUpLimit() {
 }
 
 bool suggestZeroAngle() {
-  float theta_deg = 0.0f;
   float raw_deg = 0.0f;
-  if (!sampleAngleNow(millis(), &theta_deg, &raw_deg)) {
+  if (!captureAs5600CalRawDeg(raw_deg)) {
     Serial.println(F("ERR,angle_not_ready"));
+    printAs5600Diag();
     return false;
   }
   Serial.print(F("CAL_SUGGEST,AS5600_ZERO_DEG="));
@@ -871,11 +1053,10 @@ bool suggestZeroAngle() {
 }
 
 bool suggestZeroPosition() {
-  float x_cm = 0.0f;
-  float x_filt_cm = 0.0f;
   float dist_cm = 0.0f;
-  if (!sampleSonarNow(millis(), &x_cm, &x_filt_cm, &dist_cm)) {
+  if (!captureSonarCalDistanceCm(dist_cm)) {
     Serial.println(F("ERR,sonar_not_ready"));
+    printSonarDiag();
     return false;
   }
   Serial.print(F("CAL_SUGGEST,SONAR_CENTER_CM="));
@@ -975,33 +1156,25 @@ void printRunBlockedDetails(const AppConditions& cond) {
 void printWizardStepPrompt() {
   switch (g_wizard.step_index) {
     case kWizardStepZeroAngle:
-      Serial.println(F("WIZ,1,do=level_beam_then_n"));
+      Serial.println(F("WIZ,1"));
       return;
     case kWizardStepZeroPosition:
-      Serial.println(F("WIZ,2,do=flat_target_center_then_n"));
+      Serial.println(F("WIZ,2"));
       return;
     case kWizardStepLowerLimit:
-      Serial.println(F("WIZ,3,do=move_DOWN_then_n"));
+      Serial.println(F("WIZ,3"));
       return;
     case kWizardStepUpperLimit:
-      Serial.println(F("WIZ,4,do=move_UP_then_n"));
+      Serial.println(F("WIZ,4"));
       return;
     case kWizardStepSignBegin:
-      Serial.println(F("WIZ,5,do=near_target_then_n"));
+      Serial.println(F("WIZ,5"));
       return;
     case kWizardStepSignSave:
-      Serial.println(F("WIZ,6,do=far_target_then_n"));
+      Serial.println(F("WIZ,6"));
       return;
     case kWizardStepSaveConfirm:
-      Serial.print(F("WIZ,summary,zero="));
-      Serial.print(runtimeCalIsZeroSet() ? F("yes") : F("no"));
-      Serial.print(F(",limits="));
-      Serial.print(runtimeCalIsLimitsSet() ? F("yes") : F("no"));
-      Serial.print(F(",sign="));
-      Serial.print(runtimeCalIsSignSet() ? F("yes") : F("no"));
-      Serial.print(F(",dirty="));
-      Serial.println(g_runtime_cal_dirty ? F("yes") : F("no"));
-      Serial.println(F("WIZ,7,do=c=save,q=exit"));
+      Serial.println(F("WIZ,7"));
       return;
     default:
       return;
@@ -1038,7 +1211,7 @@ void startWizard() {
   if (g_state_machine.state() == AppState::FAULT) {
     Serial.println(F("ERR,fault_active"));
     printFaultInfo();
-    Serial.println(F("WIZ,blocked,do=t->a->p->f->s->w"));
+    Serial.println(F("WIZ,blocked"));
     return;
   }
 
@@ -1051,7 +1224,6 @@ void startWizard() {
   Serial.println(F("OK,wizard_started"));
   Serial.print(F("WIZ,telemetry_auto_disabled,prev="));
   Serial.println(g_wizard.telemetry_prev ? F("1") : F("0"));
-  Serial.println(F("WIZ,controls=n,c,q"));
   printWizardStepPrompt();
 }
 
@@ -1082,7 +1254,7 @@ void wizardNext() {
       success = handleCalSignSave();
       break;
     case kWizardStepSaveConfirm:
-      Serial.println(F("WIZ,awaiting_confirm,press=c_to_save_or_q_to_exit"));
+      Serial.println(F("WIZ,awaiting_confirm"));
       return;
     default:
       Serial.println(F("ERR,wizard_invalid_step"));
@@ -1090,7 +1262,7 @@ void wizardNext() {
   }
 
   if (!success) {
-    Serial.println(F("WIZ,step_failed,fix_and_press_n_again"));
+    Serial.println(F("WIZ,step_failed"));
     return;
   }
 
@@ -1161,12 +1333,12 @@ void handleCommand(char* line) {
       case 'e': {
         char* arg = strtok_r(nullptr, " ", &saveptr);
         if (arg == nullptr) {
-          Serial.println(F("ERR,usage:e 0|1"));
+          Serial.println(F("ERR,usage:e"));
           return;
         }
         const int value = atoi(arg);
         g_manual_enable = (value != 0);
-        if (g_manual_enable && !hasAnyFault()) {
+        if (g_manual_enable && !hasAnyFault() && g_sensor.valid_angle) {
           g_stepper.enable(true);
           Serial.println(F("OK,driver_enabled"));
         } else {
@@ -1179,7 +1351,7 @@ void handleCommand(char* line) {
         char* steps_arg = strtok_r(nullptr, " ", &saveptr);
         char* rate_arg = strtok_r(nullptr, " ", &saveptr);
         if (steps_arg == nullptr || rate_arg == nullptr) {
-          Serial.println(F("ERR,usage:j <signed_steps> <rate>"));
+          Serial.println(F("ERR,usage:j"));
           return;
         }
 
@@ -1194,16 +1366,22 @@ void handleCommand(char* line) {
           return;
         }
 
+        if (!runtimeCalIsLimitsSet()) {
+          Serial.println(F("ERR,jog_requires_limits"));
+          return;
+        }
         float theta_now_deg = 0.0f;
-        if (runtimeCalIsLimitsSet() && sampleAngleNow(millis(), &theta_now_deg, nullptr)) {
-          if (steps > 0 && theta_now_deg >= (runtimeCalThetaUpperLimitDeg() - kLimitStopMarginDeg)) {
-            Serial.println(F("ERR,jog_blocked_upper_limit"));
-            return;
-          }
-          if (steps < 0 && theta_now_deg <= (runtimeCalThetaLowerLimitDeg() + kLimitStopMarginDeg)) {
-            Serial.println(F("ERR,jog_blocked_lower_limit"));
-            return;
-          }
+        if (!sampleAngleNow(millis(), &theta_now_deg, nullptr)) {
+          Serial.println(F("ERR,angle_not_ready"));
+          return;
+        }
+        if (steps > 0 && theta_now_deg >= (runtimeCalThetaUpperLimitDeg() - kLimitStopMarginDeg)) {
+          Serial.println(F("ERR,jog_blocked_upper_limit"));
+          return;
+        }
+        if (steps < 0 && theta_now_deg <= (runtimeCalThetaLowerLimitDeg() + kLimitStopMarginDeg)) {
+          Serial.println(F("ERR,jog_blocked_lower_limit"));
+          return;
         }
 
         g_stepper.enable(true);
@@ -1264,6 +1442,7 @@ void handleCommand(char* line) {
         return;
       case 'o': {
         const bool loaded = runtimeCalLoad();
+        resetAs5600Filter();
         g_runtime_cal_dirty = false;
         Serial.print(F("OK,cal_load,"));
         Serial.println(loaded ? F("loaded") : F("defaults"));
@@ -1272,6 +1451,7 @@ void handleCommand(char* line) {
       }
       case 'd':
         runtimeCalResetDefaults();
+        resetAs5600Filter();
         g_runtime_cal_dirty = true;
         Serial.println(F("OK,cal_defaults_applied"));
         printGuideNextAction();
@@ -1348,7 +1528,7 @@ void handleCommand(char* line) {
   if (strcmp(token, "telemetry") == 0) {
     char* arg = strtok_r(nullptr, " ", &saveptr);
     if (arg == nullptr) {
-      Serial.println(F("ERR,usage:telemetry 0|1"));
+      Serial.println(F("ERR,usage:telemetry"));
       return;
     }
     const int value = atoi(arg);
@@ -1367,7 +1547,7 @@ void handleCommand(char* line) {
 
     const int value = atoi(arg);
     g_manual_enable = (value != 0);
-    if (g_manual_enable && !hasAnyFault()) {
+    if (g_manual_enable && !hasAnyFault() && g_sensor.valid_angle) {
       g_stepper.enable(true);
       Serial.println(F("OK,driver_enabled"));
     } else {
@@ -1381,7 +1561,7 @@ void handleCommand(char* line) {
     char* steps_arg = strtok_r(nullptr, " ", &saveptr);
     char* rate_arg = strtok_r(nullptr, " ", &saveptr);
     if (steps_arg == nullptr || rate_arg == nullptr) {
-      Serial.println(F("ERR,usage:jog <signed_steps> <rate>"));
+      Serial.println(F("ERR,usage:jog"));
       return;
     }
 
@@ -1398,15 +1578,21 @@ void handleCommand(char* line) {
     }
 
     float theta_now_deg = 0.0f;
-    if (runtimeCalIsLimitsSet() && sampleAngleNow(millis(), &theta_now_deg, nullptr)) {
-      if (steps > 0 && theta_now_deg >= (runtimeCalThetaUpperLimitDeg() - kLimitStopMarginDeg)) {
-        Serial.println(F("ERR,jog_blocked_upper_limit"));
-        return;
-      }
-      if (steps < 0 && theta_now_deg <= (runtimeCalThetaLowerLimitDeg() + kLimitStopMarginDeg)) {
-        Serial.println(F("ERR,jog_blocked_lower_limit"));
-        return;
-      }
+    if (!runtimeCalIsLimitsSet()) {
+      Serial.println(F("ERR,jog_requires_limits"));
+      return;
+    }
+    if (!sampleAngleNow(millis(), &theta_now_deg, nullptr)) {
+      Serial.println(F("ERR,angle_not_ready"));
+      return;
+    }
+    if (steps > 0 && theta_now_deg >= (runtimeCalThetaUpperLimitDeg() - kLimitStopMarginDeg)) {
+      Serial.println(F("ERR,jog_blocked_upper_limit"));
+      return;
+    }
+    if (steps < 0 && theta_now_deg <= (runtimeCalThetaLowerLimitDeg() + kLimitStopMarginDeg)) {
+      Serial.println(F("ERR,jog_blocked_lower_limit"));
+      return;
     }
 
     g_stepper.enable(true);
@@ -1418,7 +1604,7 @@ void handleCommand(char* line) {
   if (strcmp(token, "cal_sign") == 0) {
     char* sub = strtok_r(nullptr, " ", &saveptr);
     if (sub == nullptr) {
-      Serial.println(F("ERR,usage:cal_sign begin|save"));
+      Serial.println(F("ERR,usage:cal_sign"));
       return;
     }
     if (strcmp(sub, "begin") == 0) {
@@ -1433,14 +1619,14 @@ void handleCommand(char* line) {
       }
       return;
     }
-    Serial.println(F("ERR,usage:cal_sign begin|save"));
+    Serial.println(F("ERR,usage:cal_sign"));
     return;
   }
 
   if (strcmp(token, "sonar") == 0) {
     char* sub = strtok_r(nullptr, " ", &saveptr);
     if (sub == nullptr) {
-      Serial.println(F("ERR,usage:sonar diag|sign 1|-1"));
+      Serial.println(F("ERR,usage:sonar"));
       return;
     }
     if (strcmp(sub, "diag") == 0) {
@@ -1451,12 +1637,12 @@ void handleCommand(char* line) {
     if (strcmp(sub, "sign") == 0) {
       char* arg = strtok_r(nullptr, " ", &saveptr);
       if (arg == nullptr) {
-        Serial.println(F("ERR,usage:sonar sign 1|-1"));
+        Serial.println(F("ERR,usage:sonar_sign"));
         return;
       }
       const int value = atoi(arg);
       if (value != -1 && value != 1) {
-        Serial.println(F("ERR,usage:sonar sign 1|-1"));
+        Serial.println(F("ERR,usage:sonar_sign"));
         return;
       }
       runtimeCalSetSonarPosSign(static_cast<int8_t>(value));
@@ -1470,7 +1656,7 @@ void handleCommand(char* line) {
       printGuideNextAction();
       return;
     }
-    Serial.println(F("ERR,usage:sonar diag|sign 1|-1"));
+    Serial.println(F("ERR,usage:sonar"));
     return;
   }
 
@@ -1483,7 +1669,7 @@ void handleCommand(char* line) {
   if (strcmp(token, "cal_zero") == 0) {
     char* sub = strtok_r(nullptr, " ", &saveptr);
     if (sub == nullptr) {
-      Serial.println(F("ERR,usage:cal_zero set angle|position | cal_zero show"));
+      Serial.println(F("ERR,usage:cal_zero"));
       return;
     }
 
@@ -1506,7 +1692,7 @@ void handleCommand(char* line) {
     if (strcmp(sub, "set") == 0) {
       char* target = strtok_r(nullptr, " ", &saveptr);
       if (target == nullptr) {
-        Serial.println(F("ERR,usage:cal_zero set angle|position"));
+        Serial.println(F("ERR,usage:cal_zero_set"));
         return;
       }
 
@@ -1524,18 +1710,18 @@ void handleCommand(char* line) {
         return;
       }
 
-      Serial.println(F("ERR,usage:cal_zero set angle|position"));
+      Serial.println(F("ERR,usage:cal_zero_set"));
       return;
     }
 
-    Serial.println(F("ERR,usage:cal_zero set angle|position | cal_zero show"));
+    Serial.println(F("ERR,usage:cal_zero"));
     return;
   }
 
   if (strcmp(token, "cal_limits") == 0) {
     char* sub = strtok_r(nullptr, " ", &saveptr);
     if (sub == nullptr) {
-      Serial.println(F("ERR,usage:cal_limits set ... | show"));
+      Serial.println(F("ERR,usage:cal_limits"));
       return;
     }
 
@@ -1548,7 +1734,7 @@ void handleCommand(char* line) {
     if (strcmp(sub, "set") == 0) {
       char* edge = strtok_r(nullptr, " ", &saveptr);
       if (edge == nullptr) {
-        Serial.println(F("ERR,usage:cal_limits set ..."));
+        Serial.println(F("ERR,usage:cal_limits_set"));
         return;
       }
 
@@ -1580,11 +1766,11 @@ void handleCommand(char* line) {
         return;
       }
 
-      Serial.println(F("ERR,usage:cal_limits set ..."));
+      Serial.println(F("ERR,usage:cal_limits_set"));
       return;
     }
 
-    Serial.println(F("ERR,usage:cal_limits set ... | show"));
+    Serial.println(F("ERR,usage:cal_limits"));
     return;
   }
 
@@ -1601,6 +1787,7 @@ void handleCommand(char* line) {
 
   if (strcmp(token, "cal_load") == 0) {
     const bool loaded = runtimeCalLoad();
+    resetAs5600Filter();
     g_runtime_cal_dirty = false;
     Serial.print(F("OK,cal_load,"));
     Serial.println(loaded ? F("loaded") : F("defaults"));
@@ -1611,10 +1798,11 @@ void handleCommand(char* line) {
   if (strcmp(token, "cal_reset") == 0) {
     char* sub = strtok_r(nullptr, " ", &saveptr);
     if (sub == nullptr || strcmp(sub, "defaults") != 0) {
-      Serial.println(F("ERR,usage:cal_reset defaults"));
+      Serial.println(F("ERR,usage:cal_reset"));
       return;
     }
     runtimeCalResetDefaults();
+    resetAs5600Filter();
     g_runtime_cal_dirty = true;
     Serial.println(F("OK,cal_defaults_applied"));
     printGuideNextAction();

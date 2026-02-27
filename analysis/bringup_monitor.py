@@ -49,10 +49,23 @@ class DeviceState:
     age_angle_ms: Optional[int] = None
     age_pos_ms: Optional[int] = None
 
+    # Latest "MEAS,..." snapshot (from status). Useful when TEL streaming is off.
+    meas_theta_deg: Optional[float] = None
+    meas_x_cm: Optional[float] = None
+    meas_x_filt_cm: Optional[float] = None
+    meas_host_rx_time: Optional[float] = None  # time.time()
+
+    # Track when we last received any status-style line (STATE/SENSORS/MEAS/AGE/...).
+    status_host_rx_time: Optional[float] = None  # time.time()
+
     zero_cal: Optional[bool] = None
     limits_cal: Optional[bool] = None
     sign_cal: Optional[bool] = None
     cal_store_status: Optional[str] = None  # loaded/defaults/uninitialized
+    cal_as5600_zero_deg: Optional[float] = None
+    cal_sonar_center_cm: Optional[float] = None
+    cal_theta_lower_deg: Optional[float] = None
+    cal_theta_upper_deg: Optional[float] = None  # mapped theta_deg limits
 
     fault_bits: Optional[int] = None
     fault_info_lines: list[str] = field(default_factory=list)
@@ -76,9 +89,15 @@ class DeviceState:
     logging_active: bool = False
     log_path: Optional[Path] = None
     footer_msg: str = ""
+    last_sent: Optional[str] = None
+    last_sent_ts: Optional[str] = None
 
     # Track transitions
     _prev_app_state: Optional[str] = None
+
+    # Run-block diagnostics (parsed from firmware "ERR,run_blocked" + "BLOCK,..." lines).
+    run_block_reasons: list[str] = field(default_factory=list)
+    run_block_host_rx_time: Optional[float] = None  # time.time()
 
     # Telemetry stream buffer for the "telemetry view"
     tel_stream: list[str] = field(default_factory=list)
@@ -241,10 +260,26 @@ def _fault_hint(bits: Optional[int]) -> Optional[str]:
     if "i2c_error" in names:
         return "AS5600 I2C error: check wiring, press A (as5600 diag), then s."
     if "angle_oob" in names:
-        return "Angle out of bounds: level beam and keep within +/-15 deg, then s."
+        return "Angle out of bounds: theta is outside calibrated limits. Re-capture limits ([ and ]), then s."
     if "pos_oob" in names:
         return "Position out of bounds: move target near center / check mapping, then s."
     return None
+
+
+def _fault_hints(bits: Optional[int]) -> list[str]:
+    """Return ordered list of human hints for all active fault bits."""
+    names = _fault_names(bits)
+    hints: list[str] = []
+    for name in names:
+        if name == "sonar_timeout":
+            hints.append("HC-SR04: no reliable echo (sonar_timeout). Use a FLAT board; press D then s.")
+        elif name == "i2c_error":
+            hints.append("AS5600: I2C read failing (i2c_error). Check wiring; press A then s.")
+        elif name == "angle_oob":
+            hints.append("Angle safety: theta outside calibrated limits (angle_oob). Re-capture [ and ] (wizard steps 3/4).")
+        elif name == "pos_oob":
+            hints.append("Position safety: |x| out of bounds (pos_oob). Move target near center / check mapping.")
+    return hints
 
 
 def _format_tel_line(t: TelemetrySample) -> str:
@@ -344,7 +379,7 @@ def _next_action_text(state: DeviceState) -> str:
     if state.guide_do:
         return f"NEXT: {state.guide_do}"
 
-    return "Press ?:help. Press w for wizard. Press r to run. Press q/Q to quit."
+    return "Press ?:help. Press w for wizard. Press r to run. Press Q to quit."
 
 
 def _parse_tel(line: str) -> Optional[TelemetrySample]:
@@ -410,6 +445,7 @@ def _update_from_line(state: DeviceState, line: str, outdir: Path, events: list[
     # Return possibly-updated log_fp.
 
     kind = _event_kind(line)
+    host_now = time.time()
 
     # Telemetry parsing first (frequent).
     if line.startswith("TEL,") and not line.startswith("TEL,enabled="):
@@ -445,6 +481,7 @@ def _update_from_line(state: DeviceState, line: str, outdir: Path, events: list[
             state.tel_enabled = (int(v) != 0)
         except Exception:
             pass
+        state.status_host_rx_time = host_now
         return log_fp
 
     # General: update prev state when we see STATE lines.
@@ -458,6 +495,7 @@ def _update_from_line(state: DeviceState, line: str, outdir: Path, events: list[
                 _maybe_start_logging(state, outdir, events, "STATE RUNNING")
             if state._prev_app_state == "RUNNING" and new != "RUNNING":
                 log_fp = _maybe_stop_logging(state, events, f"STATE left RUNNING -> {new}", log_fp)
+        state.status_host_rx_time = host_now
 
     if line.startswith("SENSORS,"):
         kv = _parse_kv_csv(line)
@@ -465,6 +503,21 @@ def _update_from_line(state: DeviceState, line: str, outdir: Path, events: list[
             state.angle_ok = (kv["angle"].lower() == "ok")
         if "pos" in kv:
             state.pos_ok = (kv["pos"].lower() == "ok")
+        state.status_host_rx_time = host_now
+
+    if line.startswith("MEAS,"):
+        kv = _parse_kv_csv(line)
+        try:
+            if "theta_deg" in kv:
+                state.meas_theta_deg = float(kv["theta_deg"])
+            if "x_cm" in kv:
+                state.meas_x_cm = float(kv["x_cm"])
+            if "x_filt_cm" in kv:
+                state.meas_x_filt_cm = float(kv["x_filt_cm"])
+            state.meas_host_rx_time = host_now
+        except Exception:
+            pass
+        state.status_host_rx_time = host_now
 
     if line.startswith("AGE,"):
         kv = _parse_kv_csv(line)
@@ -478,6 +531,7 @@ def _update_from_line(state: DeviceState, line: str, outdir: Path, events: list[
                 state.age_pos_ms = int(float(kv["pos_ms"]))
             except ValueError:
                 pass
+        state.status_host_rx_time = host_now
 
     if line.startswith("CAL,"):
         kv = _parse_kv_csv(line)
@@ -487,11 +541,39 @@ def _update_from_line(state: DeviceState, line: str, outdir: Path, events: list[
             state.limits_cal = (kv["limits_calibrated"].lower() == "yes")
         if "sign_calibrated" in kv:
             state.sign_cal = (kv["sign_calibrated"].lower() == "yes")
+        state.status_host_rx_time = host_now
+
+    if line.startswith("CAL_ZERO,"):
+        kv = _parse_kv_csv(line)
+        try:
+            if "as5600_zero_deg" in kv:
+                state.cal_as5600_zero_deg = float(kv["as5600_zero_deg"])
+            if "sonar_center_cm" in kv:
+                state.cal_sonar_center_cm = float(kv["sonar_center_cm"])
+            if "zero_calibrated" in kv:
+                state.zero_cal = (kv["zero_calibrated"].lower() == "yes")
+        except Exception:
+            pass
+        state.status_host_rx_time = host_now
+
+    if line.startswith("CAL_LIMITS,"):
+        kv = _parse_kv_csv(line)
+        try:
+            if "lower_deg" in kv:
+                state.cal_theta_lower_deg = float(kv["lower_deg"])
+            if "upper_deg" in kv:
+                state.cal_theta_upper_deg = float(kv["upper_deg"])
+            if "limits_calibrated" in kv:
+                state.limits_cal = (kv["limits_calibrated"].lower() == "yes")
+        except Exception:
+            pass
+        state.status_host_rx_time = host_now
 
     if line.startswith("CAL_STORE,"):
         kv = _parse_kv_csv(line)
         if "status" in kv:
             state.cal_store_status = kv["status"].strip().lower()
+        state.status_host_rx_time = host_now
 
     if line.startswith("FAULTS,bits="):
         try:
@@ -499,11 +581,22 @@ def _update_from_line(state: DeviceState, line: str, outdir: Path, events: list[
             state.fault_bits = bits
         except Exception:
             pass
+        state.status_host_rx_time = host_now
 
     if line.startswith("FAULT_INFO,"):
         # Keep only last few for status panel.
         state.fault_info_lines.append(line)
         state.fault_info_lines = state.fault_info_lines[-6:]
+        state.status_host_rx_time = host_now
+
+    if line == "ERR,run_blocked":
+        state.run_block_reasons.clear()
+        state.run_block_host_rx_time = host_now
+
+    if line.startswith("BLOCK,"):
+        reason = line.split(",", 1)[1].strip()
+        if reason:
+            state.run_block_reasons.append(reason)
 
     if line.startswith("GUIDE,step="):
         kv = _parse_kv_csv(line)
@@ -709,10 +802,91 @@ def _send_command(
         ser.write((cmd + "\n").encode("utf-8"))
         ser.flush()
         events.append(Event(_now_ts(), "HOST", f"sent: {cmd}"))
-        state.footer_msg = ""
+        state.last_sent = cmd
+        state.last_sent_ts = _now_ts()
+        state.footer_msg = f"sent: {cmd}"
     except Exception as exc:
         events.append(Event(_now_ts(), "ERR", f"send failed: {exc}"))
         state.footer_msg = "Send failed"
+
+
+def _write_support_report(path: Path, state: DeviceState, events: list[Event], port: str, baud: int) -> None:
+    def _b(v: Optional[bool]) -> str:
+        if v is None:
+            return "?"
+        return "OK" if v else "BAD"
+
+    def _yn(v: Optional[bool]) -> str:
+        if v is None:
+            return "?"
+        return "yes" if v else "no"
+
+    def _fmt_age(t: Optional[float]) -> str:
+        if t is None:
+            return "?"
+        return f"{max(0.0, time.time() - t):0.2f}s"
+
+    t = state.telemetry
+    with path.open("w", encoding="utf-8") as f:
+        f.write("bringup_monitor support report\n")
+        f.write(f"time={datetime.now().isoformat(timespec='seconds')}\n")
+        f.write(f"port={port} baud={baud}\n")
+        f.write("\n")
+
+        f.write("DEVICE STATE\n")
+        f.write(f"  app_state={state.app_state}\n")
+        f.write(f"  sensors: as5600(angle)={_b(state.angle_ok)}  hcsr04(sonar)={_b(state.pos_ok)}\n")
+        f.write(
+            f"  cal: zero={_yn(state.zero_cal)} limits={_yn(state.limits_cal)} sign={_yn(state.sign_cal)} store={state.cal_store_status}\n"
+        )
+        f.write(
+            f"  cal_values: as5600_zero_deg={state.cal_as5600_zero_deg} sonar_center_cm={state.cal_sonar_center_cm} "
+            f"theta_lo_deg={state.cal_theta_lower_deg} theta_hi_deg={state.cal_theta_upper_deg}\n"
+        )
+        f.write(f"  faults_bits={state.fault_bits} summary={_fault_summary(state.fault_bits)}\n")
+        f.write(f"  tel_enabled={state.tel_enabled} driver_enabled={state.driver_enabled}\n")
+        f.write(f"  ages: angle_ms={state.age_angle_ms} pos_ms={state.age_pos_ms}\n")
+        f.write(f"  last_sent=[{state.last_sent_ts}] {state.last_sent}\n")
+        if state.run_block_reasons:
+            f.write(f"  run_block_reasons={','.join(state.run_block_reasons)}\n")
+            f.write(f"  run_block_age={_fmt_age(state.run_block_host_rx_time)}\n")
+        f.write("\n")
+
+        f.write("STATUS SNAPSHOT (from 's')\n")
+        f.write(f"  meas_theta_deg={state.meas_theta_deg} meas_x_cm={state.meas_x_cm} meas_x_filt_cm={state.meas_x_filt_cm}\n")
+        f.write(f"  meas_rx_age={_fmt_age(state.meas_host_rx_time)} status_rx_age={_fmt_age(state.status_host_rx_time)}\n")
+        f.write("\n")
+
+        f.write("LATEST TELEMETRY (TEL,...)\n")
+        f.write(f"  tel_rx_age={_fmt_age(t.host_rx_time)}\n")
+        f.write(
+            f"  t_ms={t.t_ms} state={t.state} x_cm={t.x_cm} x_filt_cm={t.x_filt_cm} theta_deg={t.theta_deg} theta_cmd_deg={t.theta_cmd_deg} rate={t.u_step_rate} fault_bits={t.fault_bits}\n"
+        )
+        f.write("\n")
+
+        f.write("LATEST SONAR_DIAG\n")
+        for k, v in (state.sonar_diag or {}).items():
+            f.write(f"  {k}={v}\n")
+        f.write("\n")
+
+        f.write("LATEST AS5600_DIAG\n")
+        for k, v in (state.as5600_diag or {}).items():
+            f.write(f"  {k}={v}\n")
+        f.write("\n")
+
+        f.write("FAULT_INFO (last few)\n")
+        for line in state.fault_info_lines[-20:]:
+            f.write(f"  {line}\n")
+        f.write("\n")
+
+        f.write("EVENTS (last 120)\n")
+        for ev in events[-120:]:
+            f.write(f"[{ev.ts}] {ev.kind} {ev.text}\n")
+        f.write("\n")
+
+        f.write("TEL STREAM (last 40)\n")
+        for line in state.tel_stream[-40:]:
+            f.write(line + "\n")
 
 
 def _draw(
@@ -736,9 +910,10 @@ def _draw(
     view = "EVENTS" if state.view_mode == "events" else "TELEMETRY"
     raw = "ON" if state.show_raw else "OFF"
     wiz = "ON" if state.wizard_active else "OFF"
+    state_name = state.app_state or "?"
     head = (
-        f"Bring-up Monitor | port={port} baud={baud} | panel={view} (Tab) | dev_tel={tel} (t) | "
-        f"raw={raw} (X) | wiz={wiz} (w/q) | log={log_mode} LOG:{logging} | Q=quit ?=help"
+        f"Bring-up | port={port} @ {baud} | state={state_name} | tel={tel} | panel={view} (Tab) | "
+        f"log={log_mode}:{logging} | Q quit  ? help"
     )
     _safe_addstr(stdscr, 0, 0, head)
 
@@ -751,6 +926,8 @@ def _draw(
 
     left_w = max_x // 2
     right_w = max_x - left_w
+    left_inner_w = max(0, left_w - 4)
+    right_inner_w = max(0, right_w - 4)
 
     # Status panel
     _draw_box(stdscr, body_y, 0, body_h, left_w, "Status")
@@ -774,25 +951,54 @@ def _draw(
     faults = _fault_summary(state.fault_bits)
     tel = "?" if state.tel_enabled is None else ("ON" if state.tel_enabled else "OFF")
     drv = "?" if state.driver_enabled is None else ("ON" if state.driver_enabled else "OFF")
-
-    state_name = state.app_state or "?"
     state_label = STATE_LABELS.get(state_name, "")
     state_line = f"State  : {state_name}" + (f" - {state_label}" if state_label else "")
 
-    # Beginner-first status (avoid dumping protocol lines here).
+    # Status age indicators (host-side).
+    status_age = None
+    if state.status_host_rx_time is not None:
+        status_age = max(0.0, time.time() - state.status_host_rx_time)
+
+    run_block = ""
+    if state.run_block_reasons:
+        run_block = "RUN blocked by: " + ",".join(state.run_block_reasons)
+
+    # Beginner-first status (avoid dumping raw protocol lines here).
+    # Prefer live TEL for "now" values; otherwise use the last MEAS snapshot.
+    theta_now = None
+    if state.tel_enabled and state.telemetry.host_rx_time is not None and (time.time() - state.telemetry.host_rx_time) < 2.0:
+        theta_now = state.telemetry.theta_deg
+    else:
+        theta_now = state.meas_theta_deg
+
+    limits_line = ""
+    lo = state.cal_theta_lower_deg
+    hi = state.cal_theta_upper_deg
+    if lo is not None and hi is not None:
+        if theta_now is not None:
+            inside = (theta_now >= lo) and (theta_now <= hi)
+            limits_line = f"Angle  : theta={theta_now:0.2f} deg  limits=[{lo:0.1f},{hi:0.1f}]  {'IN' if inside else 'OUT'}"
+        else:
+            limits_line = f"Limits : theta=[{lo:0.1f},{hi:0.1f}] deg"
+
+    zero_line = ""
+    if state.cal_as5600_zero_deg is not None:
+        zero_line = f"Zero   : as5600_zero_deg={state.cal_as5600_zero_deg:0.2f}"
+
     lines = [
-        "START HERE: w=wizard, then Enter each step, then c=save, then r=run. Q quits anytime.",
-        "Restart calibration from scratch: R (confirm y). Toggle telemetry panel: Tab. ?:help",
-        "",
+        "Keys: w wizard, Enter next, c save, r run, k stop, R restart, Tab view, t tel, Q quit",
         state_line,
-        f"Sensors: angle={_yn(state.angle_ok)}  sonar={_yn(state.pos_ok)}",
-        f"Cal    : zero={cal_zero}  limits={cal_lim}  sign={cal_sign}   (wizard: w)",
-        f"EEPROM : {state.cal_store_status or '?'}   (defaults/uninitialized => run wizard)",
-        f"Faults : {faults}   (f=clear fault after fix)",
-        f"Device telemetry: {tel}   (t toggles device telemetry on/off)",
+        f"Status : {status_age:0.1f}s old (press s to refresh)" if status_age is not None else "Status : (press s)",
+        run_block if run_block else "",
+        f"Sensors: AS5600(angle)={_yn(state.angle_ok)}  HC-SR04(sonar)={_yn(state.pos_ok)}",
+        f"Cal    : zero={cal_zero}  limits={cal_lim}  sign={cal_sign}  EEPROM={state.cal_store_status or '?'}",
+        zero_line if zero_line else "",
+        limits_line if limits_line else "",
+        f"Faults : {faults}",
+        f"Device telemetry (TEL stream): {tel}  (press t to toggle; Tab to view stream)",
+        "Share  : press P to write a support report you can paste here",
     ]
-    if state.driver_enabled is not None or state.show_raw:
-        lines.append(f"Motor driver: {drv}   (E toggles e 1/e 0)")
+    lines.append(f"Motor  : driver={drv}  (E toggles e 1/e 0; : j 200 500 tests motor)")
     if state.age_angle_ms is not None or state.age_pos_ms is not None:
         lines.append(
             f"Data age ms: angle={state.age_angle_ms if state.age_angle_ms is not None else '?'}  "
@@ -801,10 +1007,10 @@ def _draw(
 
     next_line = _next_action_text(state)
     lines.append("")
-    hint = _fault_hint(state.fault_bits)
     lines.append("NEXT: " + next_line)
-    if hint and (hint not in next_line):
-        lines.append("HINT: " + hint)
+    for h in _fault_hints(state.fault_bits)[:3]:
+        if h and (h not in next_line):
+            lines.append("HINT: " + h)
 
     if state.wizard_active:
         wz = state.wizard_step_num or 0
@@ -817,7 +1023,9 @@ def _draw(
     for i, s in enumerate(lines):
         if y + i >= body_y + body_h - 1:
             break
-        _safe_addstr(stdscr, y + i, x0, s)
+        if not s:
+            continue
+        _safe_addstr(stdscr, y + i, x0, s[:left_inner_w])
 
     # Note: raw FAULT_INFO lines are intentionally NOT shown in the Status panel.
     # Enable Raw mode (X) to see them in Events instead.
@@ -826,23 +1034,53 @@ def _draw(
     t = state.telemetry
     ty = body_y + 1
     tx = left_w + 2
-    tel_lines = [
-        f"t_ms   : {t.t_ms if t.t_ms is not None else '?'}",
-        f"state  : {t.state or '?'}",
-        f"x      : {t.x_cm if t.x_cm is not None else '?'}",
-        f"x_filt : {t.x_filt_cm if t.x_filt_cm is not None else '?'}",
-        f"theta  : {t.theta_deg if t.theta_deg is not None else '?'}",
-        f"cmd    : {t.theta_cmd_deg if t.theta_cmd_deg is not None else '?'}",
-        f"rate   : {t.u_step_rate if t.u_step_rate is not None else '?'}",
-        f"faults : {t.fault_bits if t.fault_bits is not None else '?'}",
-    ]
+    tel_rx_age = None
     if t.host_rx_time is not None:
-        age = max(0.0, time.time() - t.host_rx_time)
-        tel_lines.append(f"rx_age : {age:0.2f}s")
+        tel_rx_age = max(0.0, time.time() - t.host_rx_time)
+
+    tel_live = bool(state.tel_enabled) and (tel_rx_age is not None) and (tel_rx_age < 2.0)
+
+    tel_lines: list[str] = []
+    if tel_live:
+        tel_lines.extend(
+            [
+                "LIVE TEL (stream):",
+                f"t_ms   : {t.t_ms if t.t_ms is not None else '?'}",
+                f"state  : {t.state or '?'}",
+                f"x_cm   : {t.x_cm if t.x_cm is not None else '?'}",
+                f"x_filt : {t.x_filt_cm if t.x_filt_cm is not None else '?'}",
+                f"theta  : {t.theta_deg if t.theta_deg is not None else '?'}",
+                f"cmd    : {t.theta_cmd_deg if t.theta_cmd_deg is not None else '?'}",
+                f"rate   : {t.u_step_rate if t.u_step_rate is not None else '?'}",
+                f"faults : {t.fault_bits if t.fault_bits is not None else '?'}",
+                f"rx_age : {tel_rx_age:0.2f}s" if tel_rx_age is not None else "",
+            ]
+        )
+    else:
+        tel_lines.append("TEL stream is OFF or stale.")
+        if state.tel_enabled is False:
+            tel_lines.append("Press t to enable streaming telemetry.")
+        if tel_rx_age is not None:
+            tel_lines.append(f"Last TEL rx_age: {tel_rx_age:0.2f}s")
+        tel_lines.append("")
+        tel_lines.append("STATUS snapshot (press s):")
+        m_age = None
+        if state.meas_host_rx_time is not None:
+            m_age = max(0.0, time.time() - state.meas_host_rx_time)
+        tel_lines.extend(
+            [
+                f"theta_deg : {state.meas_theta_deg if state.meas_theta_deg is not None else '?'}",
+                f"x_cm      : {state.meas_x_cm if state.meas_x_cm is not None else '?'}",
+                f"x_filt_cm : {state.meas_x_filt_cm if state.meas_x_filt_cm is not None else '?'}",
+                f"rx_age    : {m_age:0.2f}s" if m_age is not None else "rx_age    : ?",
+            ]
+        )
     for i, s in enumerate(tel_lines):
         if ty + i >= body_y + body_h - 1:
             break
-        _safe_addstr(stdscr, ty + i, tx, s[: max(0, right_w - 4)])
+        if not s:
+            continue
+        _safe_addstr(stdscr, ty + i, tx, s[:right_inner_w])
 
     # Panel content (last 20)
     ev_y = events_y + 1
@@ -875,7 +1113,7 @@ def _draw(
         if state.wizard_active:
             footer = "Q:quit  q:abort-wiz  w:wizard  Enter:next  c:save  R:restart-cal  r:run  k:stop  t:dev-tel  Tab:panel  X:raw  :cmd  ?:help"
         else:
-            footer = "Q:quit  q:quit  w:wizard  R:restart-cal  r:run  k:stop  s:status  t:dev-tel  Tab:panel  X:raw  :cmd  ?:help"
+            footer = "Q:quit  w:wizard  R:restart-cal  r:run  k:stop  s:status  t:dev-tel  Tab:panel  X:raw  :cmd  ?:help"
         if state.footer_msg:
             footer = state.footer_msg
     _safe_addstr(stdscr, footer_y, 0, footer[: max_x - 1])
@@ -903,12 +1141,13 @@ def _draw_help_overlay(stdscr: "curses._CursesWindow", max_y: int, max_x: int) -
         "  c  -> save calibration to EEPROM",
         "  r  -> start closed-loop run",
         "  k  -> stop",
+        "  P  -> write a support report (file) for sharing",
         "",
         "Wizard (recommended):",
         "  w = start wizard",
         "  Enter/n = wizard next step (sends n) (only when wizard active)",
         "  c = confirm EEPROM save (wizard end)",
-        "  q = abort wizard when wizard is active; otherwise quit monitor",
+        "  q = abort wizard (only when wizard active; otherwise ignored)",
         "  R = restart calibration: reset defaults + start wizard (confirm y)",
         "",
         "Calibration quick keys (manual):",
@@ -928,6 +1167,7 @@ def _draw_help_overlay(stdscr: "curses._CursesWindow", max_y: int, max_x: int) -
         "Core:",
         "  s=status  i=bringup menu  r=run  k=stop  x=faults+sonar diag",
         "  E=toggle driver enable (sends e 1/e 0)  k=stop always safe",
+        "  Motor test: : j 200 500   (or : jog 200 500)  then k to stop",
         "",
         "Telemetry:",
         "  t = toggle device telemetry 0/1 deterministically",
@@ -991,6 +1231,8 @@ def run_tui(args: argparse.Namespace) -> int:
     # On connect, request a status snapshot once.
     if not replay_mode:
         _send_command(ser, events, "s", replay_mode, state)
+        _send_command(ser, events, "z", replay_mode, state)
+        _send_command(ser, events, "m", replay_mode, state)
 
     cmd_mode = False
     cmd_buf = ""
@@ -1149,11 +1391,8 @@ def run_tui(args: argparse.Namespace) -> int:
                     _send_command(ser, events, "q", replay_mode, state)
                     state.footer_msg = "Wizard aborted (q)"
                     continue
-                # Quit monitor when wizard is inactive.
-                if not replay_mode:
-                    _send_command(ser, events, "k", replay_mode, state)
-                    _send_command(ser, events, "e 0", replay_mode, state)
-                return 0
+                state.footer_msg = "Wizard not active. Press w to start wizard, or Q to quit."
+                continue
 
             # Wizard
             if ch == ord("w"):
@@ -1177,6 +1416,8 @@ def run_tui(args: argparse.Namespace) -> int:
             # Core
             if ch == ord("s"):
                 _send_command(ser, events, "s", replay_mode, state)
+                _send_command(ser, events, "z", replay_mode, state)
+                _send_command(ser, events, "m", replay_mode, state)
                 continue
             if ch == ord("i"):
                 _send_command(ser, events, "i", replay_mode, state)
@@ -1271,6 +1512,19 @@ def run_tui(args: argparse.Namespace) -> int:
                 else:
                     state.log_mode = "auto"
                 events.append(Event(_now_ts(), "HOST", f"log_mode set to {state.log_mode}"))
+                continue
+
+            if ch == ord("P"):
+                try:
+                    outdir.mkdir(parents=True, exist_ok=True)
+                    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    path = outdir / f"bringup_{stamp}_report.txt"
+                    _write_support_report(path, state, events, str(port), baud)
+                    events.append(Event(_now_ts(), "HOST", f"REPORT SAVED: {path}"))
+                    state.footer_msg = f"Saved report: {path}"
+                except Exception as exc:
+                    events.append(Event(_now_ts(), "ERR", f"report save failed: {exc}"))
+                    state.footer_msg = "Report save failed"
                 continue
 
     try:

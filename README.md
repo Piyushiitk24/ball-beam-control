@@ -278,7 +278,7 @@ If auto-detect finds multiple ports:
 
 9. Exit safely:
 - Press `Q` to quit the bring-up monitor (it sends `k` then `e 0` before exiting).
-  - Press `q` to abort the wizard if a wizard is active; otherwise `q` also quits.
+  - Press `q` to abort the wizard if a wizard is active; otherwise `q` is ignored (use `Q` to quit).
 
 10. Analyze the captured log:
 - The log file path is shown in Events as `run_YYYYMMDD_HHMMSS_raw.log`.

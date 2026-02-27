@@ -61,6 +61,23 @@ constexpr uint32_t kSensorInvalidFaultMsRunning = 300;
 #define SONAR_MAX_VALID_MM 650.0f
 #endif
 
+// AS5600 tuning (noise rejection + calibration stability).
+#ifndef AS5600_EMA_ALPHA
+#define AS5600_EMA_ALPHA 0.5f
+#endif
+#ifndef AS5600_MAX_JUMP_DEG
+#define AS5600_MAX_JUMP_DEG 25.0f
+#endif
+#ifndef AS5600_CAL_NEED_GOOD
+#define AS5600_CAL_NEED_GOOD 5
+#endif
+#ifndef AS5600_CAL_TIMEOUT_MS
+#define AS5600_CAL_TIMEOUT_MS 900UL
+#endif
+#ifndef AS5600_CAL_MAX_JUMP_DEG
+#define AS5600_CAL_MAX_JUMP_DEG 10.0f
+#endif
+
 static_assert(SONAR_MIN_VALID_IN_WINDOW <= SONAR_MEDIAN_WINDOW,
               "SONAR_MIN_VALID_IN_WINDOW must be <= SONAR_MEDIAN_WINDOW");
 
@@ -68,6 +85,9 @@ constexpr uint32_t kSonarTriggerPeriodUs = SONAR_TRIGGER_PERIOD_US;
 constexpr uint32_t kSonarEchoTimeoutUs = SONAR_ECHO_TIMEOUT_US;
 constexpr uint32_t kPosSampleFreshMs = SONAR_POS_SAMPLE_FRESH_MS;
 constexpr float kSonarEmaAlpha = SONAR_EMA_ALPHA;
+
+constexpr float kAs5600EmaAlpha = AS5600_EMA_ALPHA;
+constexpr float kAs5600MaxJumpDeg = AS5600_MAX_JUMP_DEG;
 
 constexpr float kDefaultBallSetpointCm = 0.0f;
 
