@@ -23,6 +23,17 @@ constexpr float kThetaCmdLimitDeg = 8.0f;
 constexpr float kThetaHardLimitDeg = 15.0f;
 constexpr float kBallPosHardLimitCm = 22.0f;
 
+// Stepper angle (reference-style step-count angle source).
+#ifndef STEPPER_STEPS_PER_REV
+#define STEPPER_STEPS_PER_REV 200
+#endif
+#ifndef STEPPER_MICROSTEPS
+#define STEPPER_MICROSTEPS 16
+#endif
+#ifndef STEPPER_LIMIT_FULL_STEPS
+#define STEPPER_LIMIT_FULL_STEPS 25
+#endif
+
 constexpr float kDegToRad = 0.01745329252f;
 constexpr float kRadToDeg = 57.295779513f;
 constexpr float kCmToM = 0.01f;
@@ -31,6 +42,12 @@ constexpr float kMToCm = 100.0f;
 constexpr float kThetaCmdLimitRad = kThetaCmdLimitDeg * kDegToRad;
 constexpr float kThetaHardLimitRad = kThetaHardLimitDeg * kDegToRad;
 constexpr float kBallPosHardLimitM = kBallPosHardLimitCm * kCmToM;
+
+constexpr float kStepperDegPerStep =
+    360.0f / (static_cast<float>(STEPPER_STEPS_PER_REV) * static_cast<float>(STEPPER_MICROSTEPS));
+constexpr int32_t kStepperPosLimitSteps =
+    static_cast<int32_t>(STEPPER_LIMIT_FULL_STEPS) * static_cast<int32_t>(STEPPER_MICROSTEPS);
+constexpr int32_t kStepperPosLimitMarginSteps = 8;
 
 constexpr uint32_t kSensorInvalidFaultMsBringup = 1000;
 constexpr uint32_t kSensorInvalidFaultMsRunning = 300;

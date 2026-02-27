@@ -54,7 +54,10 @@ pio run -e nano_old
 - Sensor 1: AS5600 (I2C addr `0x36`)
 - Sensor 2: HC-SR04 ultrasonic
 - Current hardware note: HC-SR04 calibration steps use a flat target for stable echoes.
-- Closed-loop mode is blocked until runtime zero, limits, and sign calibration are complete.
+- Closed-loop mode always requires sonar position to be valid (`pos=ok`).
+- Default angle source is AS5600, where `run` is blocked until runtime calibration is complete (`zero + limits + sign`).
+- Optional: press `y` to switch to **stepper-count angle** mode (reference-style).
+  Angle is computed from step counts with a fixed travel limit (±`25` full steps at `16x` microstepping), and `run` no longer depends on AS5600 calibration flags (still requires `p` + valid sonar).
 
 ## Sonar Filtering Tuning (HC-SR04)
 
@@ -117,6 +120,7 @@ Calibration capture is also filtered (multi-sample + jump reject + EMA):
 | `?` / `h` | help | `help` |
 | `s` | status | `status` |
 | `t` | toggle telemetry | `telemetry 0|1` |
+| `y` | toggle angle source (AS5600 <-> stepper-count) | *(quick key only)* |
 | `e 0|1` | driver enable/disable | `en 0|1` |
 | `j <steps> <rate>` | jog motor | `jog <signed_steps> <rate>` |
 | `a` | capture angle zero | `cal_zero set angle` |
@@ -130,7 +134,7 @@ Calibration capture is also filtered (multi-sample + jump reject + EMA):
 | `v` | save calibration to EEPROM | `cal_save` |
 | `o` | load calibration from EEPROM | `cal_load` |
 | `d` | reset runtime defaults | `cal_reset defaults` |
-| `i` | print bring-up menu | `guide` |
+| `i` | status (alias) | `status` |
 | `x` | print decoded fault help | `faults` |
 | `sonar diag` | print sonar health stats | `sonar diag` |
 | `as5600 diag` | print AS5600 health stats | `as5600 diag` |
@@ -138,13 +142,6 @@ Calibration capture is also filtered (multi-sample + jump reject + EMA):
 | `r` | start control | `run` |
 | `k` | stop control | `stop` |
 | `f` | clear fault | `fault_reset` |
-
-### Guided Wizard Keys
-
-- `w`: start guided calibration (`zero -> limits -> sign -> save`)
-- `n`: run current wizard step and advance
-- `c`: confirm final EEPROM save at wizard end
-- `q`: abort wizard (restores telemetry state)
 
 ### Full Commands (Compatibility)
 
@@ -171,12 +168,22 @@ Calibration capture is also filtered (multi-sample + jump reject + EMA):
 
 Preferred workflow:
 
-1. Start guided flow with `w`.
-2. Follow printed `WIZ,...` instructions and press `n` at each physical step.
-3. At final summary, press `c` to persist calibration.
-4. Use `r` to run after status is healthy.
+1. Use the host-side logger and run `/bringup` (recommended).
+2. Follow the prompts (flat target for sonar, then `p`, then `a`, then limits `l/u`, then save).
+3. Use `e 1` + `j ...` to sanity-check motion, then `r` to run.
 
-Manual flow (without wizard) stays available using quick keys:
+If AS5600 is flaky and you want to bypass it (stepper-count angle mode):
+
+```text
+sonar diag          # make sure sonar is stable with a flat target
+p                  # capture sonar center at beam center
+y                  # switch to stepper-count angle (zeros step position at current angle)
+e 1
+r                  # requires target present (pos=ok)
+k
+```
+
+Manual calibration flow (AS5600 mode) stays available using quick keys:
 
 ```text
 t
@@ -201,7 +208,8 @@ See `docs/calibration_signs.md`.
 - You no longer need to edit `firmware/include/calibration.h` for normal bring-up.
 - Zero, limits, and sign are now captured at runtime via serial commands.
 - Calibration is persisted on-device with `cal_save` and restored at boot.
-- `run` is blocked until runtime calibration is complete (`zero + limits + sign`).
+- In AS5600-angle mode, `run` is blocked until runtime calibration is complete (`zero + limits + sign`).
+- In stepper-count angle mode (`y`), `run` only requires `p` (sonar center captured) and valid sonar (`pos=ok`).
 - Use `telemetry 0` while entering commands if monitor spam is distracting.
 - In bring-up states, sensor faults are warnings/blockers (not forced FAULT latch).
 - In `RUNNING`, faults remain hard safety faults.
@@ -211,16 +219,9 @@ See `docs/calibration_signs.md`.
 1. Upload firmware from VS Code task: `Firmware: Upload (nano_new)` (or `nano_old`).
 2. Start the serial logger task: `Firmware: Serial Logger (CSV+Events)` (recommended).
    Raw/debug fallback: `Firmware: Monitor (115200)`.
-3. If calibration is missing/incomplete, run the guided wizard:
+3. If calibration is missing/incomplete, run:
 ```text
-w
-n
-n
-n
-n
-n
-n
-c
+/bringup
 ```
 4. Start closed-loop control:
 ```text
@@ -235,7 +236,7 @@ e 0
 ```
 5. Quit the logger with `/quit` (it sends `k` then `e 0` before exiting).
 
-Manual bring-up (no wizard) stays available using quick keys:
+Manual bring-up stays available using quick keys:
 ```text
 telemetry 0
 cal_zero set angle
@@ -319,17 +320,10 @@ cd /Users/piyush/code/ball-beam-control
 /diag
 ```
 
-4. If calibration is missing/incomplete, run the guided wizard:
+4. If calibration is missing/incomplete, run:
 
 ```text
-w
-n
-n
-n
-n
-n
-n
-c
+/bringup
 ```
 
 5. Ensure device telemetry is ON (needed for `*_telemetry.csv`):
@@ -428,27 +422,17 @@ help
 status
 ```
 
-6. Start guided calibration (recommended):
+6. Run guided calibration in the logger (recommended):
 
 ```text
-w
+/bringup
 ```
 
-Then follow the printed `WIZ,...` instructions and press `n` for each step:
+If AS5600 is unreliable, you can still proceed using stepper-count angle mode:
 
 ```text
-n
-n
-n
-n
-n
-n
-```
-
-7. At wizard step 7, persist runtime calibration:
-
-```text
-c
+p
+y
 ```
 
 8. Sanity check:
@@ -473,7 +457,7 @@ Stop when needed:
 k
 ```
 
-10. Manual compatibility flow (if you do not want wizard):
+10. Manual compatibility flow (raw serial / device-only):
 
 ```text
 t

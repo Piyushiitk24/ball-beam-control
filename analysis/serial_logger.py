@@ -8,6 +8,7 @@ import select
 import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -103,9 +104,63 @@ def _parse_tel(line: str) -> Optional[dict[str, object]]:
         return None
 
 
+def _parse_sonar_diag(line: str) -> Optional[dict[str, object]]:
+    # SONAR_DIAG,has_sample=1,fresh=1,timeout=0,age_ms=9,raw_cm=...,filt_cm=...,valid_streak=...,timeout_cnt=...,jump_reject_cnt=...
+    if not line.startswith("SONAR_DIAG,"):
+        return None
+    kv = _parse_keyvals("SONAR_DIAG,", line)
+    if not kv:
+        return None
+    try:
+        return {
+            "has_sample": int(float(kv.get("has_sample", "0"))) != 0,
+            "fresh": int(float(kv.get("fresh", "0"))) != 0,
+            "timeout": int(float(kv.get("timeout", "0"))) != 0,
+            "age_ms": int(float(kv.get("age_ms", "0"))),
+            "raw_cm": float(kv.get("raw_cm", "nan")),
+            "filt_cm": float(kv.get("filt_cm", "nan")),
+            "timeout_cnt": int(float(kv.get("timeout_cnt", "0"))),
+            "jump_reject_cnt": int(float(kv.get("jump_reject_cnt", "0"))),
+        }
+    except ValueError:
+        return None
+
+
+def _parse_as5600_diag(line: str) -> Optional[dict[str, object]]:
+    # AS5600_DIAG,<ok>,<raw_deg>,<theta_deg>,<err_cnt>,<read_hz>
+    if not line.startswith("AS5600_DIAG,"):
+        return None
+    parts = [p.strip() for p in line.split(",")]
+    if len(parts) != 6:
+        return None
+    try:
+        return {
+            "ok": int(float(parts[1])) != 0,
+            "raw_deg": float(parts[2]),
+            "theta_deg": float(parts[3]),
+            "err_cnt": int(float(parts[4])),
+            "read_hz": float(parts[5]),
+        }
+    except ValueError:
+        return None
+
+
+def _mean_std_min_max(values: list[float]) -> tuple[float, float, float, float]:
+    if not values:
+        return (float("nan"), float("nan"), float("nan"), float("nan"))
+    mn = sum(values) / float(len(values))
+    if len(values) < 2:
+        sd = 0.0
+    else:
+        var = sum((v - mn) ** 2 for v in values) / float(len(values) - 1)
+        sd = var**0.5
+    return (mn, sd, min(values), max(values))
+
+
 @dataclass
 class Snapshot:
     state: Optional[str] = None
+    angle_src: Optional[int] = None  # 0=AS5600, 1=STEPPER
     angle_ok: Optional[bool] = None
     sonar_ok: Optional[bool] = None
     theta_deg: Optional[float] = None
@@ -129,7 +184,9 @@ class SerialLogger:
         self.raw_path = raw_path
         self.events_path = events_path
         self.telemetry_path = telemetry_path
-        self.snapshot_hz = max(0.1, float(snapshot_hz))
+        self.snapshot_hz = float(snapshot_hz)
+        if self.snapshot_hz < 0.0:
+            self.snapshot_hz = 0.0
         self.print_tel = bool(print_tel)
         self.no_input = bool(no_input)
 
@@ -140,6 +197,8 @@ class SerialLogger:
         self._start_time = time.time()
         self._protocol_warned = False
         self._first_lines: list[str] = []
+        self._suppress_print_prefixes: set[str] = set()
+        self._suppress_snapshots: bool = False
 
         self._raw_f = raw_path.open("w", encoding="utf-8")
         self._events_f = events_path.open("w", encoding="utf-8")
@@ -181,7 +240,7 @@ class SerialLogger:
         self._events_f.write(f"[{ts}] {text}\n")
         self._events_f.flush()
 
-    def _send(self, cmd: str) -> None:
+    def _send(self, cmd: str, *, echo: bool = True, log_sent: bool = True) -> None:
         cmd = cmd.strip("\r\n")
         if not cmd:
             return
@@ -193,8 +252,10 @@ class SerialLogger:
             self._log_event(f"HOST_ERR,send_failed,{exc}")
             print(f"HOST_ERR send_failed: {exc}", file=sys.stderr)
             return
-        self._log_event(f"sent: {cmd}")
-        print(f"sent: {cmd}")
+        if log_sent:
+            self._log_event(f"sent: {cmd}")
+        if echo:
+            print(f"sent: {cmd}")
 
     def _rx_worker(self) -> None:
         while not self.stop_event.is_set():
@@ -258,11 +319,18 @@ class SerialLogger:
             return
 
         # Non-TEL lines are "events": print + log with host timestamp.
-        print(line)
+        if not any(line.startswith(p) for p in self._suppress_print_prefixes):
+            print(line)
         self._log_event(line)
 
         if line.startswith("STATE,"):
             self.snap.state = line.split(",", 1)[1].strip()
+
+        if line.startswith("OK,angle_src="):
+            try:
+                self.snap.angle_src = int(line.split("=", 1)[1].strip())
+            except ValueError:
+                pass
 
         sensors = _parse_keyvals("SENSORS,", line)
         if sensors:
@@ -293,6 +361,10 @@ class SerialLogger:
     def _print_snapshot(self) -> None:
         proto = self.protocol
         state = self.snap.state or "?"
+        if self.snap.angle_src is None:
+            angle_src = "?"
+        else:
+            angle_src = "AS5600" if int(self.snap.angle_src) == 0 else "STEPPER"
         a = "?" if self.snap.angle_ok is None else ("OK" if self.snap.angle_ok else "BAD")
         s = "?" if self.snap.sonar_ok is None else ("OK" if self.snap.sonar_ok else "BAD")
         theta = "?" if self.snap.theta_deg is None else f"{self.snap.theta_deg:.1f}deg"
@@ -304,7 +376,7 @@ class SerialLogger:
             last_tel = f"{(time.time() - self.snap.last_tel_rx_time):.1f}s"
 
         print(
-            f"SNAP proto={proto}  state={state}  sensors(angle={a} sonar={s})  theta={theta}  x_filt={x}  faults={faults}  lastTEL={last_tel}"
+            f"SNAP proto={proto}  angle_src={angle_src}  state={state}  sensors(angle={a} sonar={s})  theta={theta}  x_filt={x}  faults={faults}  lastTEL={last_tel}"
         )
 
     def _print_help(self) -> None:
@@ -314,8 +386,304 @@ class SerialLogger:
             "  /quit                 Quit (sends: k then e 0)\n"
             "  /print_tel 0|1        Toggle printing raw TEL rows to terminal\n"
             "  /diag                 Send: s, as5600 diag, sonar diag, x\n"
-            "\nDevice commands: type anything else and press Enter (e.g. s, w, n, c, r, k, sonar diag)\n"
+            "  /bringup              Guided calibration flow (recommended)\n"
+            "  /as5600_stats [N]     Sample AS5600 diag N times (default 50) and summarize noise\n"
+            "  /sonar_stats [N]      Sample sonar diag N times (default 30) and summarize stability\n"
+            "\nDevice commands: type anything else and press Enter (e.g. s, y, r, k, sonar diag, as5600 diag)\n"
         )
+
+    def _drain_rx_nonblock(self, max_lines: int = 500) -> list[str]:
+        lines: list[str] = []
+        for _ in range(max_lines):
+            try:
+                s = self.rx_q.get_nowait()
+            except queue.Empty:
+                break
+            lines.append(s)
+            self._handle_device_line(s)
+        return lines
+
+    def _wait_for_line(self, timeout_s: float, *, prefixes: tuple[str, ...] = (), contains: tuple[str, ...] = ()) -> Optional[str]:
+        deadline = time.time() + float(timeout_s)
+        while time.time() < deadline and not self.stop_event.is_set():
+            lines = self._drain_rx_nonblock()
+            for s in lines:
+                line = s.strip("\r\n")
+                if not line:
+                    continue
+                if prefixes and any(line.startswith(p) for p in prefixes):
+                    return line
+                if contains and any(c in line for c in contains):
+                    return line
+            time.sleep(0.01)
+        return None
+
+    def _prompt_user(self, prompt: str) -> Optional[str]:
+        print(prompt)
+        while not self.stop_event.is_set():
+            self._drain_rx_nonblock()
+            r, _, _ = select.select([sys.stdin], [], [], 0.10)
+            if not r:
+                continue
+            line = sys.stdin.readline()
+            if line == "":
+                return None
+            return line.rstrip("\r\n")
+        return None
+
+    def _cmd_as5600_stats(self, n: int) -> None:
+        n = max(1, min(int(n), 500))
+        print(f"\nAS5600 stats: sampling {n}x (hold beam still)...")
+
+        # Keep terminal readable: suppress the individual AS5600_DIAG lines while capturing.
+        prev = set(self._suppress_print_prefixes)
+        self._suppress_print_prefixes.add("AS5600_DIAG,")
+        try:
+            rows: list[dict[str, object]] = []
+            for i in range(n):
+                self._send("as5600 diag", echo=False, log_sent=False)
+                line = self._wait_for_line(0.6, prefixes=("AS5600_DIAG,",))
+                if line is None:
+                    continue
+                parsed = _parse_as5600_diag(line)
+                if parsed is None:
+                    continue
+                rows.append(parsed)
+                if (i + 1) % 10 == 0 or (i + 1) == n:
+                    print(f"  {i + 1}/{n}...")
+                time.sleep(0.10)
+        finally:
+            self._suppress_print_prefixes = prev
+
+        ok_rows = [r for r in rows if bool(r.get("ok"))]
+        raw_vals = [float(r["raw_deg"]) for r in ok_rows if "raw_deg" in r]
+        theta_vals = [float(r["theta_deg"]) for r in ok_rows if "theta_deg" in r]
+        err_vals = [int(r["err_cnt"]) for r in rows if "err_cnt" in r]
+
+        raw_mean, raw_std, raw_min, raw_max = _mean_std_min_max(raw_vals)
+        th_mean, th_std, th_min, th_max = _mean_std_min_max(theta_vals)
+
+        if err_vals:
+            err_delta = err_vals[-1] - err_vals[0]
+            err_last = err_vals[-1]
+        else:
+            err_delta = 0
+            err_last = -1
+
+        wrap_suspect = False
+        if raw_vals and (raw_min < 20.0 and raw_max > 340.0):
+            wrap_suspect = True
+
+        print("\nAS5600_STATS_RESULT")
+        print(f"  samples_ok = {len(ok_rows)}/{max(1, len(rows))} (parsed {len(rows)} lines)")
+        print(f"  err_cnt    = {err_last} (delta {err_delta})")
+        print(f"  raw_deg    = mean {raw_mean:.2f}  std {raw_std:.2f}  min {raw_min:.2f}  max {raw_max:.2f}")
+        print(f"  theta_deg  = mean {th_mean:.2f}  std {th_std:.2f}  min {th_min:.2f}  max {th_max:.2f}")
+        if wrap_suspect:
+            print("  hint       = wrap suspected (raw_deg spans near 0/360). This is OK if handled via wrap math.")
+        print("")
+
+    def _cmd_sonar_stats(self, n: int) -> None:
+        n = max(1, min(int(n), 300))
+        print(f"\nSONAR stats: sampling {n}x (hold target still if testing stability)...")
+
+        prev = set(self._suppress_print_prefixes)
+        self._suppress_print_prefixes.add("SONAR_DIAG,")
+        try:
+            diags: list[dict[str, object]] = []
+            for i in range(n):
+                self._send("sonar diag", echo=False, log_sent=False)
+                line = self._wait_for_line(0.6, prefixes=("SONAR_DIAG,",))
+                if line is None:
+                    continue
+                parsed = _parse_sonar_diag(line)
+                if parsed is None:
+                    continue
+                diags.append(parsed)
+                if (i + 1) % 10 == 0 or (i + 1) == n:
+                    print(f"  {i + 1}/{n}...")
+                time.sleep(0.12)
+        finally:
+            self._suppress_print_prefixes = prev
+
+        good = [d for d in diags if d.get("has_sample") and d.get("fresh") and not d.get("timeout")]
+        fresh = [d for d in diags if d.get("fresh")]
+        timeouts = [d for d in diags if d.get("timeout")]
+
+        filt_vals = [float(d["filt_cm"]) for d in good if isinstance(d.get("filt_cm"), float)]
+        mean_f, std_f, min_f, max_f = _mean_std_min_max(filt_vals)
+
+        print("\nSONAR_STATS_RESULT")
+        print(f"  samples_parsed = {len(diags)}/{n}")
+        print(f"  fresh          = {len(fresh)}/{len(diags) if diags else 1}")
+        print(f"  timeout        = {len(timeouts)}/{len(diags) if diags else 1}")
+        print(f"  good(fresh&no-timeout) = {len(good)}/{len(diags) if diags else 1}")
+        if filt_vals:
+            print(f"  filt_cm (good) = mean {mean_f:.2f}  std {std_f:.2f}  min {min_f:.2f}  max {max_f:.2f}")
+        print("")
+
+    def _cmd_bringup(self) -> None:
+        print(
+            "\nGUIDED BRING-UP (/bringup)\n"
+            "Follow the prompts. Do NOT type device commands unless asked.\n"
+            "Type 'q' + Enter at any prompt to abort.\n"
+        )
+
+        prev_suppress = self._suppress_snapshots
+        self._suppress_snapshots = True
+
+        try:
+            print("Safety stop: sending k, then e 0 ...")
+            self._send("k")
+            time.sleep(0.05)
+            self._send("e 0")
+
+            resp = self._prompt_user("\nStep 1/6: Place a FLAT board in front of the sonar and hold it steady. Press Enter when ready.")
+            if resp is None or resp.strip().lower() == "q":
+                print("Bring-up aborted.")
+                return
+
+            print("Checking sonar stability (need >=3 good out of last 5)...")
+            prev = set(self._suppress_print_prefixes)
+            self._suppress_print_prefixes.add("SONAR_DIAG,")
+            try:
+                window: "deque[bool]" = deque(maxlen=5)
+                start = time.time()
+                ok = False
+                while (time.time() - start) < 10.0:
+                    self._send("sonar diag", echo=False, log_sent=False)
+                    line = self._wait_for_line(0.8, prefixes=("SONAR_DIAG,",))
+                    diag = _parse_sonar_diag(line) if line else None
+                    good = bool(diag and diag.get("has_sample") and diag.get("fresh") and not diag.get("timeout"))
+                    window.append(good)
+                    if diag:
+                        print(
+                            f"  sonar: fresh={1 if diag.get('fresh') else 0} timeout={1 if diag.get('timeout') else 0} "
+                            f"age_ms={diag.get('age_ms')} filt_cm={float(diag.get('filt_cm', 0.0)):.2f}"
+                        )
+                    else:
+                        print("  sonar: no diag response")
+                    if len(window) == 5 and sum(1 for v in window if v) >= 3:
+                        ok = True
+                        break
+                    time.sleep(0.20)
+            finally:
+                self._suppress_print_prefixes = prev
+
+            if not ok:
+                print("FAIL: sonar not stable. Stop and fix target/wiring, then re-run /bringup.")
+                return
+            print("OK: sonar stable.\n")
+
+            resp = self._prompt_user("Step 2/6: Move the flat board to BEAM CENTER under the sonar. Press Enter when ready.")
+            if resp is None or resp.strip().lower() == "q":
+                print("Bring-up aborted.")
+                return
+
+            print("Capturing sonar center (sending p)...")
+            self._send("p")
+            line = self._wait_for_line(3.0, prefixes=("OK,cal_zero_position_set=", "ERR,sonar_not_ready"))
+            if not line or line.startswith("ERR,"):
+                print("FAIL: sonar center capture failed. Check sonar diag and target, then retry /bringup.")
+                return
+            print("OK: sonar center captured.")
+            self._send("z")
+            zline = self._wait_for_line(1.5, prefixes=("CAL_ZERO,",))
+            zkv = _parse_keyvals("CAL_ZERO,", zline or "")
+            if zkv:
+                print(f"  sonar_center_cm = {zkv.get('sonar_center_cm','?')}")
+
+            resp = self._prompt_user("\nStep 3/6: Level the beam (horizontal). Hold it still. Press Enter when ready.")
+            if resp is None or resp.strip().lower() == "q":
+                print("Bring-up aborted.")
+                return
+
+            print("Capturing angle zero (sending a)...")
+            self._send("a")
+            line = self._wait_for_line(3.0, prefixes=("OK,cal_zero_angle_set=", "ERR,angle_not_ready"))
+            if not line or line.startswith("ERR,"):
+                print("FAIL: angle zero capture failed. Run 'as5600 diag' and check wiring.")
+                print("TIP: To bypass AS5600, use stepper-count angle mode: type y, then use p + run (sonar target required).")
+                return
+            print("OK: angle zero captured.")
+            self._send("z")
+            zline = self._wait_for_line(1.5, prefixes=("CAL_ZERO,",))
+            zkv = _parse_keyvals("CAL_ZERO,", zline or "")
+            if zkv:
+                print(f"  as5600_zero_deg = {zkv.get('as5600_zero_deg','?')}")
+
+            # Capture limits with retry.
+            for attempt in range(1, 4):
+                resp = self._prompt_user(
+                    f"\nStep 4/6 (attempt {attempt}/3): Move beam to physical DOWN hard stop. Hold it still. Press Enter when ready."
+                )
+                if resp is None or resp.strip().lower() == "q":
+                    print("Bring-up aborted.")
+                    return
+                print("Capturing DOWN limit (sending l)...")
+                self._send("l")
+                down_line = self._wait_for_line(2.0, prefixes=("OK,cal_limit_down_set=", "ERR,angle_not_ready"))
+                if not down_line or down_line.startswith("ERR,"):
+                    print("FAIL: down limit capture failed (angle not ready).")
+                    print("TIP: To bypass AS5600, use stepper-count angle mode: type y, then use p + run (sonar target required).")
+                    continue
+
+                resp = self._prompt_user(
+                    "Step 5/6: Move beam to physical UP hard stop. Hold it still. Press Enter when ready."
+                )
+                if resp is None or resp.strip().lower() == "q":
+                    print("Bring-up aborted.")
+                    return
+                print("Capturing UP limit (sending u)...")
+                self._send("u")
+                up_line = self._wait_for_line(2.0, prefixes=("OK,cal_limit_up_set=", "ERR,limit_span_too_small", "ERR,angle_not_ready"))
+                if not up_line or up_line.startswith("ERR,"):
+                    print("FAIL: up limit capture failed (span too small or angle not ready).")
+                    print("TIP: To bypass AS5600, use stepper-count angle mode: type y, then use p + run (sonar target required).")
+                    continue
+
+                self._send("m")
+                mline = self._wait_for_line(1.5, prefixes=("CAL_LIMITS,",))
+                mkv = _parse_keyvals("CAL_LIMITS,", mline or "")
+                try:
+                    lower = float(mkv.get("lower_deg", "nan"))
+                    upper = float(mkv.get("upper_deg", "nan"))
+                    ok_limits = mkv.get("limits_calibrated", "no") == "yes" and upper > lower and (upper - lower) >= 2.0
+                except ValueError:
+                    ok_limits = False
+                    lower = float("nan")
+                    upper = float("nan")
+
+                print(f"  limits: lower_deg={lower:.2f} upper_deg={upper:.2f} calibrated={mkv.get('limits_calibrated','?')}")
+                if ok_limits:
+                    break
+                print("FAIL: limits not valid. Re-do DOWN then UP with a wider span.")
+            else:
+                print("FAIL: could not capture valid limits after 3 attempts. No save performed.")
+                return
+
+            print("\nStep 6/6: Saving calibration (sending v)...")
+            self._send("v")
+            vline = self._wait_for_line(2.0, prefixes=("OK,cal_saved", "ERR,cal_save_failed"))
+            if not vline or vline.startswith("ERR,"):
+                print("FAIL: save failed.")
+                return
+
+            print(
+                "\nBRING-UP COMPLETE\n"
+                "Next steps:\n"
+                "  0) If AS5600 is flaky: type y (stepper-angle mode). This zeros step position at the current angle.\n"
+                "  1) Motor test (even if sonar later goes stale):\n"
+                "     e 1\n"
+                "     j 120 500\n"
+                "     k\n"
+                "  2) Closed-loop run (keep a detectable target present continuously):\n"
+                "     e 1\n"
+                "     r\n"
+                "     k\n"
+            )
+        finally:
+            self._suppress_snapshots = prev_suppress
 
     def run(self) -> None:
         self._rx_thread.start()
@@ -329,17 +697,16 @@ class SerialLogger:
         # Force a status snapshot into logs without changing telemetry state.
         self._send("s")
 
-        next_snap = time.time() + (1.0 / self.snapshot_hz)
+        next_snap: Optional[float]
+        if self.snapshot_hz > 0.0:
+            next_snap = time.time() + (1.0 / self.snapshot_hz)
+        else:
+            next_snap = None
 
         try:
             while not self.stop_event.is_set():
                 # Drain queued RX lines.
-                while True:
-                    try:
-                        s = self.rx_q.get_nowait()
-                    except queue.Empty:
-                        break
-                    self._handle_device_line(s)
+                self._drain_rx_nonblock()
 
                 now = time.time()
                 if (
@@ -358,7 +725,7 @@ class SerialLogger:
                     print(msg)
                     self._log_event(msg)
                     self._protocol_warned = True
-                if now >= next_snap:
+                if next_snap is not None and (not self._suppress_snapshots) and now >= next_snap:
                     self._print_snapshot()
                     next_snap = now + (1.0 / self.snapshot_hz)
 
@@ -398,6 +765,26 @@ class SerialLogger:
                         for c in ("s", "as5600 diag", "sonar diag", "x"):
                             self._send(c)
                             time.sleep(0.05)
+                    elif cmd == "/bringup":
+                        self._cmd_bringup()
+                    elif cmd == "/as5600_stats":
+                        n = 50
+                        if len(parts) == 2:
+                            try:
+                                n = int(parts[1])
+                            except ValueError:
+                                print("usage: /as5600_stats [N]")
+                                continue
+                        self._cmd_as5600_stats(n)
+                    elif cmd == "/sonar_stats":
+                        n = 30
+                        if len(parts) == 2:
+                            try:
+                                n = int(parts[1])
+                            except ValueError:
+                                print("usage: /sonar_stats [N]")
+                                continue
+                        self._cmd_sonar_stats(n)
                     else:
                         print(f"Unknown local command: {parts[0]} (try /help)")
                     continue
@@ -426,7 +813,7 @@ def main() -> None:
         default=Path(__file__).resolve().parents[1] / "data" / "runs",
         help="Output directory (default: data/runs)",
     )
-    parser.add_argument("--snapshot-hz", type=float, default=1.0, help="Snapshot print rate (Hz)")
+    parser.add_argument("--snapshot-hz", type=float, default=1.0, help="Snapshot print rate (Hz). Use 0 to disable.")
     parser.add_argument("--print-tel", type=int, default=0, help="Print TEL rows to terminal (0/1)")
     parser.add_argument("--no-input", type=int, default=0, help="Read-only mode (0/1)")
     args = parser.parse_args()

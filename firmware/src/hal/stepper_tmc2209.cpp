@@ -22,13 +22,15 @@ StepperTMC2209::StepperTMC2209(uint8_t step_pin, uint8_t dir_pin, uint8_t en_pin
       step_level_(false),
       pulse_active_(false),
       direction_positive_(true),
+      step_dir_sign_(1),
       signed_rate_sps_(0.0f),
       abs_rate_sps_(0.0f),
       half_period_ticks_(0),
       ticks_until_toggle_(0),
       jog_steps_remaining_(0),
       jog_mode_(false),
-      jog_finished_flag_(false) {}
+      jog_finished_flag_(false),
+      position_steps_(0) {}
 
 void StepperTMC2209::begin() {
   pinMode(step_pin_, OUTPUT);
@@ -131,6 +133,7 @@ void StepperTMC2209::setSignedStepRate(float signed_rate_sps) {
       signed_rate_sps_ * static_cast<float>(runtimeCalStepperDirSign());
   direction_positive_ = (hardware_dir_reference >= 0.0f);
   setDirPinFast(direction_positive_);
+  step_dir_sign_ = direction_positive_ ? 1 : -1;
 
   const uint16_t half_period_ticks = rateToHalfPeriodTicks(abs_rate_sps_);
 
@@ -149,6 +152,20 @@ void StepperTMC2209::setSignedStepRate(float signed_rate_sps) {
 }
 
 float StepperTMC2209::targetSignedStepRate() const { return signed_rate_sps_; }
+
+int32_t StepperTMC2209::positionSteps() const {
+  int32_t steps = 0;
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+    steps = position_steps_;
+  }
+  return steps;
+}
+
+void StepperTMC2209::resetPositionSteps(int32_t steps) {
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+    position_steps_ = steps;
+  }
+}
 
 void StepperTMC2209::requestJogSteps(long signed_steps, float abs_rate_sps) {
   if (signed_steps == 0) {
@@ -212,6 +229,9 @@ void StepperTMC2209::handleTimerCompareIsr() {
   }
 
   // Count only rising edges as actual steps.
+  if (step_level_) {
+    position_steps_ += step_dir_sign_;
+  }
   if (step_level_ && jog_mode_ && jog_steps_remaining_ > 0) {
     --jog_steps_remaining_;
     if (jog_steps_remaining_ == 0) {

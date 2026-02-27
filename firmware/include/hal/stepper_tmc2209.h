@@ -19,6 +19,11 @@ class StepperTMC2209 {
   void setSignedStepRate(float signed_rate_sps);
   float targetSignedStepRate() const;
 
+  // Integrated signed position in STEP pulses. Increments/decrements on each
+  // rising edge according to the DIR state actually driven to the motor.
+  int32_t positionSteps() const;
+  void resetPositionSteps(int32_t steps = 0);
+
   void requestJogSteps(long signed_steps, float abs_rate_sps);
   bool jogActive() const;
 
@@ -44,6 +49,7 @@ class StepperTMC2209 {
   volatile bool step_level_;
   volatile bool pulse_active_;
   volatile bool direction_positive_;
+  volatile int8_t step_dir_sign_;
 
   float signed_rate_sps_;
   float abs_rate_sps_;
@@ -54,6 +60,8 @@ class StepperTMC2209 {
   volatile int32_t jog_steps_remaining_;
   volatile bool jog_mode_;
   volatile bool jog_finished_flag_;
+
+  volatile int32_t position_steps_;
 
   uint16_t rateToHalfPeriodTicks(float abs_rate_sps) const;
   void setStepPinLevelFast(bool high);
