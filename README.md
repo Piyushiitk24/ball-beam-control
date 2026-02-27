@@ -304,6 +304,53 @@ All logs are saved under `data/runs/` as:
 - `run_<stamp>_events.txt`
 - `run_<stamp>_telemetry.csv` (BallBeam firmware only; AS5600 checker emits AS5600_* lines instead)
 
+## TFMini A/B Workflow (Backup Variant)
+
+Use this to test Benewake TFMini v1.7 against HC-SR04 while keeping the same host commands/protocol.
+
+Wiring (Nano):
+- TFMini `TX` -> Nano `D10` (`PIN_TFMINI_RX`)
+- TFMini `RX` -> Nano `D11` (`PIN_TFMINI_TX`)
+- Common `GND`
+- Sensor power per TFMini spec
+
+Switch to TFMini firmware:
+
+```bash
+cd /Users/piyush/code/ball-beam-control
+./.venv/bin/python analysis/switch_firmware_main.py --mode tfmini
+cd firmware
+pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
+```
+
+Run (same logger commands as HC-SR04):
+
+```bash
+cd /Users/piyush/code/ball-beam-control
+./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1
+```
+
+Then in logger:
+
+```text
+/diag
+sonar diag
+s
+e 1
+r
+k
+/quit
+```
+
+Restore default HC-SR04 firmware:
+
+```bash
+cd /Users/piyush/code/ball-beam-control
+./.venv/bin/python analysis/switch_firmware_main.py --mode ballbeam
+cd firmware
+pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
+```
+
 ## Run Workflow (Recommended, Using Serial Logger)
 
 1. Power on the Nano and connect USB.
@@ -496,6 +543,7 @@ Use the Tasks panel (`Terminal -> Run Task...`) with:
 - `Firmware: Monitor (115200)`
 - `Firmware: Serial Logger (CSV+Events)`
 - `Firmware: Switch Main -> AS5600 Check`
+- `Firmware: Switch Main -> TFMini`
 - `Firmware: Switch Main -> BallBeam`
 - `Model: Design Gains`
 - `Model: Export Gains`

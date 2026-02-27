@@ -78,6 +78,14 @@ constexpr uint32_t kSensorInvalidFaultMsRunning = 300;
 #define SONAR_MAX_VALID_MM 650.0f
 #endif
 
+// Benewake TFMini (UART) tuning.
+#ifndef TFMINI_UART_BAUD
+#define TFMINI_UART_BAUD 115200UL
+#endif
+#ifndef TFMINI_READ_STALE_MS
+#define TFMINI_READ_STALE_MS SONAR_POS_SAMPLE_FRESH_MS
+#endif
+
 // AS5600 tuning (noise rejection + calibration stability).
 #ifndef AS5600_EMA_ALPHA
 #define AS5600_EMA_ALPHA 0.3f
@@ -102,6 +110,8 @@ constexpr uint32_t kSonarTriggerPeriodUs = SONAR_TRIGGER_PERIOD_US;
 constexpr uint32_t kSonarEchoTimeoutUs = SONAR_ECHO_TIMEOUT_US;
 constexpr uint32_t kPosSampleFreshMs = SONAR_POS_SAMPLE_FRESH_MS;
 constexpr float kSonarEmaAlpha = SONAR_EMA_ALPHA;
+constexpr uint32_t kTfminiUartBaud = TFMINI_UART_BAUD;
+constexpr uint32_t kTfminiReadStaleMs = TFMINI_READ_STALE_MS;
 
 constexpr float kAs5600EmaAlpha = AS5600_EMA_ALPHA;
 constexpr float kAs5600MaxJumpDeg = AS5600_MAX_JUMP_DEG;

@@ -57,6 +57,15 @@
       "problemMatcher": []
     },
     {
+      "label": "Firmware: Switch Main -> TFMini",
+      "type": "shell",
+      "command": "./.venv/bin/python analysis/switch_firmware_main.py --mode tfmini",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "Firmware: Switch Main -> BallBeam",
       "type": "shell",
       "command": "./.venv/bin/python analysis/switch_firmware_main.py --mode ballbeam",

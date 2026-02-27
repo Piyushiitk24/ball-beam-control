@@ -16,5 +16,6 @@ __pycache__/
 /firmware/.vscode/
 /firmware/src/main.cpp.bak
 /firmware/src/main.cpp.as5600_*.bak
+/firmware/src/main.cpp.tfmini_*.bak
 /model/first_principles/*.json
 /model/first_principles/*.png

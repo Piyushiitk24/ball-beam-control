@@ -11,6 +11,14 @@ def _stamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
+def _ensure_main_backup(src_main: Path, bak_main: Path) -> None:
+    if bak_main.exists():
+        print(f"NOTE: backup already exists: {bak_main}")
+        return
+    print(f"Backing up {src_main} -> {bak_main}")
+    src_main.rename(bak_main)
+
+
 def switch_to_as5600_check(repo: Path) -> None:
     src_main = repo / "firmware" / "src" / "main.cpp"
     bak_main = repo / "firmware" / "src" / "main.cpp.bak"
@@ -21,16 +29,32 @@ def switch_to_as5600_check(repo: Path) -> None:
     if not src_main.exists() and not bak_main.exists():
         raise SystemExit(f"Missing firmware main.cpp: {src_main}")
 
-    if bak_main.exists():
-        print(f"NOTE: backup already exists: {bak_main}")
-    else:
-        print(f"Backing up {src_main} -> {bak_main}")
-        src_main.rename(bak_main)
+    _ensure_main_backup(src_main, bak_main)
 
     print(f"Installing AS5600 check firmware: {exp_main} -> {src_main}")
     shutil.copyfile(exp_main, src_main)
 
     print("OK: main.cpp is now AS5600 check.")
+    print("Next:")
+    print("  cd firmware && pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1")
+
+
+def switch_to_tfmini(repo: Path) -> None:
+    src_main = repo / "firmware" / "src" / "main.cpp"
+    bak_main = repo / "firmware" / "src" / "main.cpp.bak"
+    exp_main = repo / "firmware" / "experiments" / "main_tfmini.cpp.bak"
+
+    if not exp_main.exists():
+        raise SystemExit(f"Missing experiment source: {exp_main}")
+    if not src_main.exists() and not bak_main.exists():
+        raise SystemExit(f"Missing firmware main.cpp: {src_main}")
+
+    _ensure_main_backup(src_main, bak_main)
+
+    print(f"Installing TFMini firmware: {exp_main} -> {src_main}")
+    shutil.copyfile(exp_main, src_main)
+
+    print("OK: main.cpp is now TFMini firmware.")
     print("Next:")
     print("  cd firmware && pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1")
 
@@ -43,7 +67,16 @@ def restore_ballbeam(repo: Path) -> None:
         raise SystemExit(f"Backup not found: {bak_main}")
 
     if src_main.exists():
-        keep = repo / "firmware" / "src" / f"main.cpp.as5600_{_stamp()}.bak"
+        mode_tag = "custom"
+        try:
+            content = src_main.read_text(encoding="utf-8", errors="ignore")
+            if "main_as5600_check.cpp" in content or "AS5600_CHECK_BOOT" in content:
+                mode_tag = "as5600"
+            elif "tfmini_sensor.h" in content or "PIN_TFMINI_RX" in content:
+                mode_tag = "tfmini"
+        except Exception:
+            mode_tag = "custom"
+        keep = repo / "firmware" / "src" / f"main.cpp.{mode_tag}_{_stamp()}.bak"
         print(f"Keeping current main as: {keep}")
         src_main.rename(keep)
 
@@ -54,12 +87,15 @@ def restore_ballbeam(repo: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Swap firmware/src/main.cpp between BallBeam and AS5600 check.")
+    parser = argparse.ArgumentParser(
+        description="Swap firmware/src/main.cpp between BallBeam, AS5600 check, and TFMini variants."
+    )
     parser.add_argument(
         "--mode",
         required=True,
-        choices=["as5600_check", "ballbeam"],
+        choices=["as5600_check", "tfmini", "ballbeam"],
         help="as5600_check backs up main.cpp -> main.cpp.bak and installs the AS5600 checker. "
+        "tfmini installs the TFMini backup main. "
         "ballbeam restores main.cpp.bak -> main.cpp.",
     )
     args = parser.parse_args()
@@ -67,10 +103,11 @@ def main() -> None:
     repo = Path(__file__).resolve().parents[1]
     if args.mode == "as5600_check":
         switch_to_as5600_check(repo)
+    elif args.mode == "tfmini":
+        switch_to_tfmini(repo)
     else:
         restore_ballbeam(repo)
 
 
 if __name__ == "__main__":
     main()
-

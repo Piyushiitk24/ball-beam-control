@@ -4,7 +4,7 @@
 
 Two subsystems that must stay in sync:
 
-- **Firmware** (`firmware/`) — C++/Arduino, ATmega328P, PlatformIO. Cascade PID loop at 50 Hz, Timer1 ISR step-pulse generation, PCINT ISR for HC-SR04 echo capture. All code lives in `namespace bb`.
+- **Firmware** (`firmware/`) — C++/Arduino, ATmega328P, PlatformIO. Cascade PID loop at 50 Hz, Timer1 ISR step-pulse generation, PCINT ISR for HC-SR04 echo capture. TFMini UART variant is available as a switchable backup `main.cpp` template. All code lives in `namespace bb`.
 - **Model** (`model/first_principles/`) — Python. First-principles plant + gain design. Output is `firmware/include/generated/controller_gains.h`, which is **auto-generated — never edit by hand**.
 - **Analysis** (`analysis/`) — Python scripts to parse, clean, and plot serial telemetry CSVs from `data/runs/`.
 
@@ -12,6 +12,11 @@ State machine (see [firmware/include/app/state_machine.h](../firmware/include/ap
 `SAFE_DISABLED → CALIB_SIGN → READY ⇄ CALIB_SCALE → RUNNING → FAULT`
 
 `CALIB_SCALE` is reached from `READY` during scale/runtime calibration; `requestStop()` from either `RUNNING` or `CALIB_SCALE` returns to `READY`.
+
+Angle-source runtime mode:
+- `g_angle_src=0` (default): AS5600-based angle
+- `g_angle_src=1` (`y` key): stepper-count angle (reference-style fallback when AS5600 is unreliable)
+- Guided wizard commands (`w/n/c/q`) are no longer in firmware; guided calibration is host-side via `analysis/serial_logger.py` `/bringup`.
 
 ## Build & Test
 
@@ -82,6 +87,12 @@ VS Code tasks in `.vscode/tasks.json` wrap the common commands above.
 | `docs/SonarSphere.FCMacro` | FreeCAD macro — hollow rolling sphere + optional faceted "sonar belt" (recommended for V-groove runners) |
 | `docs/SonarCylinder.FCMacro` | FreeCAD macro — hollow rolling cylinder/tube A/B test target (optionally faceted); also supports `TARGET_GEOMETRY="ball_belt"` (default, V-groove recommended) |
 | `docs/SonarTargets.FCMacro` | FreeCAD macro — combined/experimental generator (sphere+belt / cylinder / spool) |
+| `analysis/serial_logger.py` | Primary host workflow (`/bringup`, `/diag`, `/as5600_stats`, `/sonar_stats`), per-run raw/events/telemetry logs |
+| `analysis/switch_firmware_main.py` | Swap `firmware/src/main.cpp` between BallBeam / AS5600-check / TFMini variants |
+| `firmware/experiments/main_as5600_check.cpp` | AS5600-only isolation firmware for L/C/U capture and stability/span checks |
+| `firmware/experiments/main_tfmini.cpp.bak` | Backup `main.cpp` variant using Benewake TFMini as the position sensor backend |
+| `firmware/include/sensors/tfmini_sensor.h` | TFMini sensor interface (`sonar`-compatible runtime API) |
+| `firmware/src/sensors/tfmini_sensor.cpp` | TFMini UART parser + filtering (median/EMA/hold/stale policy) |
 
 ## Telemetry & Analysis
 
@@ -113,15 +124,25 @@ LATEST="$(ls -t data/runs/run_*_telemetry.csv | head -n 1)"
 ## HC-SR04 Sonar — Known Behaviours
 
 - **Jump-filter deadlock**: `kSonarMaxJumpCm` (in `hcsr04_sensor.cpp`) gates large position steps. If many echoes are missed (e.g. ball at far end), `last_distance_cm_` freezes; every subsequent valid echo is then rejected. The fix: on rejection the baseline slides toward the new reading by `kSonarMaxJumpCm`, so recovery takes at most 2 pings (≈70 ms).
-- **`e 1` returns `driver_disabled`**: driver enable is blocked whenever `hasAnyFault()` is true (including `sonar_timeout`). Fix the sonar first — `s` and `sonar diag` will tell you which fault is active.
+- **`e 1` behavior**: manual enable is blocked by angle faults (`i2c_error`, `angle_oob`, invalid angle), but not by sonar timeout. This allows motor/jog tests even when sonar is stale.
 - **Curved targets**: HC-SR04 backscatter from a sphere is ~34× weaker than a same-size flat disc. For bring-up and calibration, use a flat board. For runtime, use a target with planar facets aimed along the sonar axis.
 - **Reflector geometry**: `docs/SonarSphere.FCMacro` generates a hollow rolling sphere with an optional faceted belt that provides a strong along-beam echo without changing rolling contact. Use `BELT_ENABLE=True` and `BELT_FACETS >= 24` (default 48). Set `BELT_ENABLE=False` for a pure sphere baseline.
 - **Cylinder option**: `docs/SonarCylinder.FCMacro` also supports `TARGET_GEOMETRY="spool"` for a wheel/flanged spool. Set `BODY_PROFILE="faceted"` with `BODY_FACETS >= 24` for stronger echo. Default (`"ball_belt"`) is recommended for V-groove runners.
 - **Combined macro**: `docs/SonarTargets.FCMacro` contains the earlier combined generator (sphere+belt / cylinder / spool) if you want all options in one file.
 
+## Stepper-Count Angle Mode
+
+- Toggle with quick key: `y`
+- Firmware response: `OK,angle_src=0|1` (`0=AS5600`, `1=STEPPER`)
+- In stepper mode:
+  - Angle = `position_steps * kStepperDegPerStep`
+  - Safety limit uses fixed travel in steps: `kStepperPosLimitSteps = STEPPER_LIMIT_FULL_STEPS * STEPPER_MICROSTEPS`
+  - Jog limits are enforced by step counts (`WARN,jog_stopped_upper_limit` / `WARN,jog_stopped_lower_limit`)
+  - `run` bypasses AS5600 calibration requirements (`sign/limits`), but still requires sonar validity and position zero capture (`p`)
+
 ## Flash Budget
 
-ATmega328P: 30,720 bytes flash, 2,048 bytes RAM. The firmware currently sits near the limit (~30,710 bytes). When adding code:
+ATmega328P: 30,720 bytes flash, 2,048 bytes RAM. Current baseline is ~29,818 bytes flash. Headroom is still limited; when adding code:
 - Prefer reusing existing buffers over new allocations.
 - `F()` macro for all `Serial.print` string literals (saves RAM).
 - Avoid new virtual functions or `std::` containers.
@@ -151,7 +172,7 @@ ball_radius_m: <CYL_RADIUS / 1000>
 cd firmware && pio run -e nano_new -t upload
 ```
 
-Then redo the full calibration wizard (`w`) since `sonar_center_cm` changes with the new reflector height.
+Then re-capture runtime calibration (recommended host flow: `analysis/serial_logger.py` + `/bringup`) since `sonar_center_cm` changes with reflector height.
 
 ## Common Pitfalls
 
@@ -160,4 +181,4 @@ Then redo the full calibration wizard (`w`) since `sonar_center_cm` changes with
 - Using `nano_old` profile to upload to a new-bootloader Nano (upload will hang or fail).
 - Forgetting to re-export gains after changing `params_measured_v1.yaml` or design bandwidth targets.
 - Calibrating with a proxy object (phone, board) for sonar — always recalibrate with the real reflector in place on the actual beam.
-- After any power cycle, load calibration with `o` before `r` — or run the wizard again.
+- Forgetting runtime mode: if AS5600 is flaky, switch to stepper-angle mode with `y` and continue bring-up using sonar.
