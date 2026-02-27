@@ -10,7 +10,7 @@ namespace bb {
 namespace {
 
 constexpr float kSonarMaxJumpCm = 25.0f;
-constexpr uint8_t kSonarMinValidStreak = 2;
+constexpr uint8_t kSonarMinValidStreak = 1;
 constexpr float kSonarMinDistanceCm = 2.0f;
 constexpr float kSonarMaxDistanceCm = 0.1f * SONAR_MAX_VALID_MM;
 

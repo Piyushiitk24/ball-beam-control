@@ -237,11 +237,14 @@ bool sampleAngleNow(uint32_t now_ms,
   }
   theta_deg = runtimeMapThetaDeg(theta_raw_deg);
 
-  // Glitch/jump reject (common with noisy I2C or loose magnets).
+  // Glitch/jump handling (common with noisy I2C, loose magnets, or mechanical wobble):
+  // Slew-limit the delta rather than rejecting the sample. Rejecting makes the angle go "stale"
+  // on a single spike, which then cascades into faults/driver-disable.
   if (g_as5600_last_initialized) {
-    const float delta = wrapAngleDeltaDeg(theta_deg - g_as5600_theta_last_deg);
+    float delta = wrapAngleDeltaDeg(theta_deg - g_as5600_theta_last_deg);
     if (fabsf(delta) > kAs5600MaxJumpDeg) {
-      return false;
+      delta = (delta >= 0.0f) ? kAs5600MaxJumpDeg : -kAs5600MaxJumpDeg;
+      theta_deg = g_as5600_theta_last_deg + delta;
     }
   }
   g_as5600_theta_last_deg = theta_deg;
@@ -409,8 +412,8 @@ void maybeStopJogAtLimits() {
 
 void printHelp() {
   Serial.println(F("HELP,keys"));
-  // Keep on-device help minimal to save flash; use the host-side bring-up monitor
-  // for full guidance and prerequisites.
+  // Keep on-device help minimal to save flash; use the host-side serial logger
+  // (analysis/serial_logger.py) for run logs and copy/paste workflows.
 }
 
 void printStatus() {
@@ -758,7 +761,8 @@ bool captureSonarCalDistanceCm(float& out_cm) {
     SonarDiag diag;
     g_hcsr04.getDiag(now_ms, diag);
 
-    if (diag.fresh && diag.has_sample) {
+    // Only accept true fresh samples (reject "held" values after a timeout).
+    if (diag.fresh && diag.has_sample && !diag.timeout) {
       const float v = (diag.filt_cm > 0.0f) ? diag.filt_cm : diag.raw_cm;
       if (v > 0.0f) {
         if (!ema_init) {

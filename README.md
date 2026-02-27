@@ -69,10 +69,10 @@ Defaults (chosen to match the working standalone sketch feel):
 
 - Trigger period: `SONAR_TRIGGER_PERIOD_US=40000` (about `delay(40)`)
 - Echo timeout: `SONAR_ECHO_TIMEOUT_US=25000`
-- Median window: `SONAR_MEDIAN_WINDOW=7` (try 9 if still noisy; avoid 11 unless motion is slow)
-- Min valid in window: `SONAR_MIN_VALID_IN_WINDOW=5`
+- Median window: `SONAR_MEDIAN_WINDOW=11` (matches `ping_median(11)` intent; reduce to 7/9 if you want less lag)
+- Min valid in window: `SONAR_MIN_VALID_IN_WINDOW=1` (curved targets often need this; raise to 3..5 if you see garbage)
 - EMA alpha: `SONAR_EMA_ALPHA=0.6` (0.6 responsive; try 0.3 for smoother)
-- Fresh/hold window: `SONAR_POS_SAMPLE_FRESH_MS=160` (try 180 or 200 if you want more "hold")
+- Fresh/hold window: `SONAR_POS_SAMPLE_FRESH_MS=200` (roughly `MAX_BAD=5` at 40 ms)
 - Max valid distance clamp: `SONAR_MAX_VALID_MM=650.0f` (set to ~1.2x your beam's usable distance span)
 
 Note on window sizing vs NewPing:
@@ -85,12 +85,28 @@ To override quickly in PlatformIO, add `-D` flags under `build_flags`:
 ```ini
 ; firmware/platformio.ini
 build_flags =
-  -D SONAR_MEDIAN_WINDOW=9
-  -D SONAR_MIN_VALID_IN_WINDOW=6
-  -D SONAR_POS_SAMPLE_FRESH_MS=180
+  -D SONAR_MEDIAN_WINDOW=7
+  -D SONAR_MIN_VALID_IN_WINDOW=3
+  -D SONAR_POS_SAMPLE_FRESH_MS=200
   -D SONAR_MAX_VALID_MM=500.0f
   -D SONAR_EMA_ALPHA=0.3f
 ```
+
+## AS5600 Filtering Tuning
+
+The AS5600 angle reading is filtered in firmware to tolerate occasional glitches/jumps:
+
+- Each sample uses a wrap-safe median-of-3 raw reads (cheap outlier rejection).
+- Large per-sample jumps are **slew-limited** (not rejected) so a single spike does not make angle stale.
+- Then an EMA is applied.
+
+Key tuning macros (in `firmware/include/config.h`, override via PlatformIO `-D` flags):
+
+- `AS5600_EMA_ALPHA` (default `0.3f`): lower is smoother but adds lag (try `0.2f..0.4f`).
+- `AS5600_MAX_JUMP_DEG` (default `25.0f`): maximum per-sample delta allowed before slew limiting.
+
+Calibration capture is also filtered (multi-sample + jump reject + EMA):
+- `AS5600_CAL_NEED_GOOD`, `AS5600_CAL_TIMEOUT_MS`, `AS5600_CAL_MAX_JUMP_DEG`
 
 ## Serial Commands (Primary UX: Quick Keys)
 
@@ -156,7 +172,7 @@ build_flags =
 Preferred workflow:
 
 1. Start guided flow with `w`.
-2. Follow printed `WIZ,...` instructions and press `n` at each physical step (or `Enter` in bring-up monitor).
+2. Follow printed `WIZ,...` instructions and press `n` at each physical step.
 3. At final summary, press `c` to persist calibration.
 4. Use `r` to run after status is healthy.
 
@@ -193,18 +209,33 @@ See `docs/calibration_signs.md`.
 ## Daily Workflow (Short)
 
 1. Upload firmware from VS Code task: `Firmware: Upload (nano_new)` (or `nano_old`).
-2. Open bring-up monitor task: `Firmware: Bring-up Monitor (UX)` (recommended).
+2. Start the serial logger task: `Firmware: Serial Logger (CSV+Events)` (recommended).
    Raw/debug fallback: `Firmware: Monitor (115200)`.
-3. Preferred bring-up run:
+3. If calibration is missing/incomplete, run the guided wizard:
 ```text
 w
+n
+n
+n
+n
+n
+n
+c
 ```
-Then follow `WIZ,...` prompts and press `Enter` each step (sends `n`), finally `c`, then:
+4. Start closed-loop control:
 ```text
 s
+e 1
 r
 ```
-4. Manual equivalent (no wizard):
+Stop any time:
+```text
+k
+e 0
+```
+5. Quit the logger with `/quit` (it sends `k` then `e 0` before exiting).
+
+Manual bring-up (no wizard) stays available using quick keys:
 ```text
 telemetry 0
 cal_zero set angle
@@ -220,80 +251,116 @@ telemetry 1
 status
 run
 ```
-5. On next power-up, run `cal_load` only if needed; normally saved calibration auto-loads.
+On next power-up, run `cal_load` only if needed; normally saved calibration auto-loads.
 
-## Run Workflow (Recommended, Using Bring-up Monitor)
+## AS5600 Debug Workflow (Isolation Test)
 
-This is the step-by-step sequence for a normal run using `analysis/bringup_monitor.py`.
+Use this when you see `i2c_error` / `angle_oob` and want to validate the AS5600 reading stability and span.
+
+1. Switch firmware `main.cpp` to the AS5600 checker (backs up the current main):
+
+```bash
+cd /Users/piyush/code/ball-beam-control
+./.venv/bin/python analysis/switch_firmware_main.py --mode as5600_check
+```
+
+2. Upload:
+
+```bash
+cd firmware
+pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
+```
+
+3. Start the serial logger:
+
+```bash
+cd /Users/piyush/code/ball-beam-control
+./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1
+```
+
+4. In the logger, capture three positions (type each key and press Enter):
+
+```text
+L
+C
+U
+P
+```
+
+5. Quit the logger:
+```text
+/quit
+```
+
+6. Restore normal BallBeam firmware:
+```bash
+cd /Users/piyush/code/ball-beam-control
+./.venv/bin/python analysis/switch_firmware_main.py --mode ballbeam
+```
+
+All logs are saved under `data/runs/` as:
+- `run_<stamp>_raw.log`
+- `run_<stamp>_events.txt`
+- `run_<stamp>_telemetry.csv` (BallBeam firmware only; AS5600 checker emits AS5600_* lines instead)
+
+## Run Workflow (Recommended, Using Serial Logger)
 
 1. Power on the Nano and connect USB.
-2. Start the bring-up monitor:
+2. Start the serial logger:
 
 ```bash
 cd /Users/piyush/code/ball-beam-control
-./.venv/bin/python analysis/bringup_monitor.py
+./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1
 ```
 
-If auto-detect finds multiple ports:
+3. Capture a diagnostic snapshot into your logs:
 
-```bash
-./.venv/bin/python analysis/bringup_monitor.py --port /dev/cu.usbserial-A10N20X1
+```text
+/diag
 ```
 
-3. Check the Status panel:
-- `Store: loaded` means calibration was loaded from EEPROM at boot (normal).
-- `Store: defaults/uninitialized` means EEPROM calibration is missing/corrupt.
+4. If calibration is missing/incomplete, run the guided wizard:
 
-4. If calibration is missing or incomplete, run guided wizard (recommended):
-- Press `w` (start wizard).
-- Follow the on-screen step text (or firmware `WIZ,...` prompts).
-- At each step, do the physical action first, then press `Enter`/`n`.
-  Step 1: level the beam (horizontal) -> Enter
-  Step 2: place a strong reflector at beam center under sonar (flat board is best for bring-up) -> Enter
-  Step 3: move beam to physical DOWN stop -> Enter
-  Step 4: move beam to physical UP stop -> Enter
-  Step 5: move target near reference end -> Enter (auto jog)
-  Step 6: move target to far +X end -> Enter
-  Step 7: press `c` to save calibration to EEPROM
+```text
+w
+n
+n
+n
+n
+n
+n
+c
+```
 
-5. Verify sensors are OK:
-- If `Sensors: ... BAD`, use diagnostics:
-  - Press `D` for `sonar diag` and use a flat reflector.
-  - Press `A` for `as5600 diag`.
-- Fix wiring/mechanics first; then press `s` to refresh.
+5. Ensure device telemetry is ON (needed for `*_telemetry.csv`):
 
-6. Ensure telemetry is ON if you want logs:
-- Status shows `Tel: ON`. If it is OFF, press `t` to enable (`telemetry 1`).
-- The bring-up monitor hides `TEL,...` spam by default, but still uses it for the live snapshot and logging.
-  - Press `Tab` (or `V`) to toggle the bottom panel between `Events` and a live `Telemetry Stream`.
+```text
+telemetry 1
+```
 
-7. Start the run:
-- Put the rolling target on the runner and keep hands clear.
-- Press `r` (start closed-loop control).
-- The monitor will auto-create a raw log file when RUNNING starts and will print the path in Events.
+6. Start a run:
 
-8. Stop the run:
-- Press `k` (stop).
-- If a fault occurs, fix the issue shown in Status, then press `f` (clear fault), then `s`.
+```text
+s
+f          # only if faults are active
+e 1
+r
+```
 
-9. Exit safely:
-- Press `Q` to quit the bring-up monitor (it sends `k` then `e 0` before exiting).
-  - Press `q` to abort the wizard if a wizard is active; otherwise `q` is ignored (use `Q` to quit).
+7. Stop and quit safely:
 
-10. Analyze the captured log:
-- The log file path is shown in Events as `run_YYYYMMDD_HHMMSS_raw.log`.
+```text
+k
+/quit
+```
+
+8. Plot the latest telemetry file:
 
 ```bash
 cd /Users/piyush/code/ball-beam-control
-LATEST="$(ls -t data/runs/*_raw.log | head -n 1)"
-echo "Latest log: $LATEST"
-python analysis/parse_log.py --input "$LATEST"
-python analysis/plot_run.py --input "${LATEST%_raw.log}_clean.csv"
+LATEST="$(ls -t data/runs/run_*_telemetry.csv | head -n 1)"
+./.venv/bin/python analysis/plot_run.py --input "$LATEST"
 ```
-
-Notes:
-- After changing the rolling target (new ball/cylinder/reflector), re-run the wizard. `sonar_center_cm` and limits can shift.
-- If you only need to reload calibration at runtime (rare), press `o` (`cal_load`). Firmware already auto-loads at boot.
 
 ## First Hardware Bring-Up Checklist
 
@@ -339,22 +406,14 @@ pio device list
 
 4. Open serial monitor:
 
-Recommended monitor (less clutter, hides `TEL,...` spam by default, shows a live snapshot,
-and auto-captures a raw log while RUNNING):
+Recommended monitor (simple, logs every run to `data/runs/` as raw log + events.txt + telemetry.csv):
 
 ```bash
 cd /Users/piyush/code/ball-beam-control
-./.venv/bin/python analysis/bringup_monitor.py
+./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1
 ```
 
-Tip: press `?` for in-app help, and `:` to type any full command.
-Tip: press `Tab` (or `V`) to switch the bottom panel to the live telemetry stream.
-
-If auto-detect finds multiple ports, pass one explicitly:
-
-```bash
-./.venv/bin/python analysis/bringup_monitor.py --port /dev/cu.usbserial-A10N20X1
-```
+Tip: type `/help` for local commands, `/diag` to capture a diagnostic burst, `/quit` to exit safely.
 
 Raw/debug fallback (PlatformIO monitor):
 
@@ -375,7 +434,7 @@ status
 w
 ```
 
-Then follow the printed `WIZ,...` instructions and press `n` (or `Enter` in bring-up monitor) for each step:
+Then follow the printed `WIZ,...` instructions and press `n` for each step:
 
 ```text
 n
@@ -435,9 +494,8 @@ r
 
 ```bash
 cd /Users/piyush/code/ball-beam-control
-python analysis/capture_serial.py --port <SERIAL_PORT> --seconds 30
-python analysis/parse_log.py --input data/runs/<run>_raw.log
-python analysis/plot_run.py --input data/runs/<run>_clean.csv
+LATEST="$(ls -t data/runs/run_*_telemetry.csv | head -n 1)"
+./.venv/bin/python analysis/plot_run.py --input "$LATEST"
 ```
 
 ## Modeling and Analysis
@@ -452,5 +510,8 @@ Use the Tasks panel (`Terminal -> Run Task...`) with:
 - `Firmware: Upload (nano_new)`
 - `Firmware: Upload (nano_old)`
 - `Firmware: Monitor (115200)`
+- `Firmware: Serial Logger (CSV+Events)`
+- `Firmware: Switch Main -> AS5600 Check`
+- `Firmware: Switch Main -> BallBeam`
 - `Model: Design Gains`
 - `Model: Export Gains`

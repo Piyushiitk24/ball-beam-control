@@ -39,6 +39,11 @@ cd firmware && pio run -e nano_new -t upload
 cd firmware && pio device monitor -b 115200 --echo --filter send_on_enter --eol LF
 ```
 
+Recommended host-side logger (raw + telemetry.csv + events.txt per run):
+```bash
+./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1
+```
+
 VS Code tasks in `.vscode/tasks.json` wrap the common commands above.
 
 **macOS USB serial port** — PlatformIO uses glob `/dev/cu.usbserial-*` for upload and monitor. If upload hangs, confirm the correct port and bootloader environment (`nano_new` vs `nano_old`).
@@ -88,11 +93,15 @@ Columns map directly to `parse_log.py`'s `COLUMNS` list: `t_ms`, `state`, `x_cm`
 
 **Analysis workflow:**
 ```bash
-# Capture live serial to a raw log file
-cd firmware && pio device monitor -b 115200 --echo --filter send_on_enter --eol LF > ../data/runs/<name>_raw.txt
+# Recommended: run the simple logger (creates raw log + events + telemetry CSV)
+./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1
 
-# Parse raw log → clean CSV
-./.venv/bin/python analysis/parse_log.py --input data/runs/<name>_raw.txt --output data/runs/<name>_clean.csv
+# Plot latest telemetry CSV
+LATEST="$(ls -t data/runs/run_*_telemetry.csv | head -n 1)"
+./.venv/bin/python analysis/plot_run.py --input "$LATEST"
+
+# Optional: parse a raw log → clean CSV (if you only have raw logs)
+./.venv/bin/python analysis/parse_log.py --input data/runs/<name>_raw.log --output data/runs/<name>_clean.csv
 
 # Plot clean CSV (4-panel: position, angle, step rate, fault)
 ./.venv/bin/python analysis/plot_run.py --input data/runs/<name>_clean.csv

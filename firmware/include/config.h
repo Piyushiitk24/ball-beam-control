@@ -46,16 +46,16 @@ constexpr uint32_t kSensorInvalidFaultMsRunning = 300;
 #define SONAR_ECHO_TIMEOUT_US 25000UL
 #endif
 #ifndef SONAR_POS_SAMPLE_FRESH_MS
-#define SONAR_POS_SAMPLE_FRESH_MS 160UL
+#define SONAR_POS_SAMPLE_FRESH_MS 200UL
 #endif
 #ifndef SONAR_EMA_ALPHA
 #define SONAR_EMA_ALPHA 0.6f
 #endif
 #ifndef SONAR_MEDIAN_WINDOW
-#define SONAR_MEDIAN_WINDOW 7
+#define SONAR_MEDIAN_WINDOW 11
 #endif
 #ifndef SONAR_MIN_VALID_IN_WINDOW
-#define SONAR_MIN_VALID_IN_WINDOW 5
+#define SONAR_MIN_VALID_IN_WINDOW 1
 #endif
 #ifndef SONAR_MAX_VALID_MM
 #define SONAR_MAX_VALID_MM 650.0f
@@ -63,7 +63,7 @@ constexpr uint32_t kSensorInvalidFaultMsRunning = 300;
 
 // AS5600 tuning (noise rejection + calibration stability).
 #ifndef AS5600_EMA_ALPHA
-#define AS5600_EMA_ALPHA 0.5f
+#define AS5600_EMA_ALPHA 0.3f
 #endif
 #ifndef AS5600_MAX_JUMP_DEG
 #define AS5600_MAX_JUMP_DEG 25.0f

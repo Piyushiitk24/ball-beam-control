@@ -7,11 +7,14 @@ __pycache__/
 .DS_Store
 /data/runs/*.log
 /data/runs/*.csv
+/data/runs/*_events.txt
 /data/runs/*.png
 /data/runs/*.pdf
 /data/calibration/*.csv
 /data/calibration/*.log
 /firmware/.pio/
 /firmware/.vscode/
+/firmware/src/main.cpp.bak
+/firmware/src/main.cpp.as5600_*.bak
 /model/first_principles/*.json
 /model/first_principles/*.png

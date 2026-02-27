@@ -39,9 +39,27 @@
       "problemMatcher": []
     },
     {
-      "label": "Firmware: Bring-up Monitor (UX)",
+      "label": "Firmware: Serial Logger (CSV+Events)",
       "type": "shell",
-      "command": "./.venv/bin/python analysis/bringup_monitor.py",
+      "command": "./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Firmware: Switch Main -> AS5600 Check",
+      "type": "shell",
+      "command": "./.venv/bin/python analysis/switch_firmware_main.py --mode as5600_check",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Firmware: Switch Main -> BallBeam",
+      "type": "shell",
+      "command": "./.venv/bin/python analysis/switch_firmware_main.py --mode ballbeam",
       "options": {
         "cwd": "${workspaceFolder}"
       },
