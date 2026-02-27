@@ -32,7 +32,9 @@ class HCSR04Sensor {
   void handleEchoEdgeIsr(uint32_t now_us, bool level_high);
 
  private:
-  static constexpr uint8_t kWindow = 5;
+  // Median filter window for sonar distance. 9 provides good robustness for
+  // weak/curved reflectors while staying lightweight on AVR.
+  static constexpr uint8_t kWindow = 9;
 
   uint8_t trig_pin_;
   uint8_t echo_pin_;
@@ -57,6 +59,8 @@ class HCSR04Sensor {
   uint32_t last_trigger_us_;
   bool waiting_echo_;
 
+  // Only accept echo edges after we sent a trigger pulse.
+  volatile bool echo_armed_;
   volatile uint32_t rise_us_;
   volatile uint32_t pulse_width_us_;
   volatile bool awaiting_fall_;

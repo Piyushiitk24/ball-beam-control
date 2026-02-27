@@ -120,7 +120,7 @@ pio run -e nano_old
 Preferred workflow:
 
 1. Start guided flow with `w`.
-2. Follow printed `WIZ,...` instructions and press `n` at each physical step.
+2. Follow printed `WIZ,...` instructions and press `n` at each physical step (or `Enter` in bring-up monitor).
 3. At final summary, press `c` to persist calibration.
 4. Use `r` to run after status is healthy.
 
@@ -157,12 +157,13 @@ See `docs/calibration_signs.md`.
 ## Daily Workflow (Short)
 
 1. Upload firmware from VS Code task: `Firmware: Upload (nano_new)` (or `nano_old`).
-2. Open monitor task: `Firmware: Monitor (115200)`.
+2. Open bring-up monitor task: `Firmware: Bring-up Monitor (UX)` (recommended).
+   Raw/debug fallback: `Firmware: Monitor (115200)`.
 3. Preferred bring-up run:
 ```text
 w
 ```
-Then follow `WIZ,...` prompts and press `n` each step, finally `c`, then:
+Then follow `WIZ,...` prompts and press `Enter` each step (sends `n`), finally `c`, then:
 ```text
 s
 r
@@ -184,6 +185,79 @@ status
 run
 ```
 5. On next power-up, run `cal_load` only if needed; normally saved calibration auto-loads.
+
+## Run Workflow (Recommended, Using Bring-up Monitor)
+
+This is the step-by-step sequence for a normal run using `analysis/bringup_monitor.py`.
+
+1. Power on the Nano and connect USB.
+2. Start the bring-up monitor:
+
+```bash
+cd /Users/piyush/code/ball-beam-control
+./.venv/bin/python analysis/bringup_monitor.py
+```
+
+If auto-detect finds multiple ports:
+
+```bash
+./.venv/bin/python analysis/bringup_monitor.py --port /dev/cu.usbserial-A10N20X1
+```
+
+3. Check the Status panel:
+- `Store: loaded` means calibration was loaded from EEPROM at boot (normal).
+- `Store: defaults/uninitialized` means EEPROM calibration is missing/corrupt.
+
+4. If calibration is missing or incomplete, run guided wizard (recommended):
+- Press `w` (start wizard).
+- Follow the on-screen step text (or firmware `WIZ,...` prompts).
+- At each step, do the physical action first, then press `Enter`/`n`.
+  Step 1: level the beam (horizontal) -> Enter
+  Step 2: place a strong reflector at beam center under sonar (flat board is best for bring-up) -> Enter
+  Step 3: move beam to physical DOWN stop -> Enter
+  Step 4: move beam to physical UP stop -> Enter
+  Step 5: move target near reference end -> Enter (auto jog)
+  Step 6: move target to far +X end -> Enter
+  Step 7: press `c` to save calibration to EEPROM
+
+5. Verify sensors are OK:
+- If `Sensors: ... BAD`, use diagnostics:
+  - Press `D` for `sonar diag` and use a flat reflector.
+  - Press `A` for `as5600 diag`.
+- Fix wiring/mechanics first; then press `s` to refresh.
+
+6. Ensure telemetry is ON if you want logs:
+- Status shows `Tel: ON`. If it is OFF, press `t` to enable (`telemetry 1`).
+- The bring-up monitor hides `TEL,...` spam by default, but still uses it for the live snapshot and logging.
+  - Press `Tab` (or `V`) to toggle the bottom panel between `Events` and a live `Telemetry Stream`.
+
+7. Start the run:
+- Put the rolling target on the runner and keep hands clear.
+- Press `r` (start closed-loop control).
+- The monitor will auto-create a raw log file when RUNNING starts and will print the path in Events.
+
+8. Stop the run:
+- Press `k` (stop).
+- If a fault occurs, fix the issue shown in Status, then press `f` (clear fault), then `s`.
+
+9. Exit safely:
+- Press `Q` to quit the bring-up monitor (it sends `k` then `e 0` before exiting).
+  - Press `q` to abort the wizard if a wizard is active; otherwise `q` also quits.
+
+10. Analyze the captured log:
+- The log file path is shown in Events as `run_YYYYMMDD_HHMMSS_raw.log`.
+
+```bash
+cd /Users/piyush/code/ball-beam-control
+LATEST="$(ls -t data/runs/*_raw.log | head -n 1)"
+echo "Latest log: $LATEST"
+python analysis/parse_log.py --input "$LATEST"
+python analysis/plot_run.py --input "${LATEST%_raw.log}_clean.csv"
+```
+
+Notes:
+- After changing the rolling target (new ball/cylinder/reflector), re-run the wizard. `sonar_center_cm` and limits can shift.
+- If you only need to reload calibration at runtime (rare), press `o` (`cal_load`). Firmware already auto-loads at boot.
 
 ## First Hardware Bring-Up Checklist
 
@@ -229,6 +303,25 @@ pio device list
 
 4. Open serial monitor:
 
+Recommended monitor (less clutter, hides `TEL,...` spam by default, shows a live snapshot,
+and auto-captures a raw log while RUNNING):
+
+```bash
+cd /Users/piyush/code/ball-beam-control
+./.venv/bin/python analysis/bringup_monitor.py
+```
+
+Tip: press `?` for in-app help, and `:` to type any full command.
+Tip: press `Tab` (or `V`) to switch the bottom panel to the live telemetry stream.
+
+If auto-detect finds multiple ports, pass one explicitly:
+
+```bash
+./.venv/bin/python analysis/bringup_monitor.py --port /dev/cu.usbserial-A10N20X1
+```
+
+Raw/debug fallback (PlatformIO monitor):
+
 ```bash
 pio device monitor -b 115200 --echo --filter send_on_enter --eol LF
 ```
@@ -246,7 +339,7 @@ status
 w
 ```
 
-Then follow the printed `WIZ,...` instructions and press `n` for each step:
+Then follow the printed `WIZ,...` instructions and press `n` (or `Enter` in bring-up monitor) for each step:
 
 ```text
 n

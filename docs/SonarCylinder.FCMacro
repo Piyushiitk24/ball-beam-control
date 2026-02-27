@@ -2,55 +2,27 @@
 """
 SonarCylinder.FCMacro
 =====================
-Generates a rolling sonar target for the ball-beam system.
+Generates a hollow rolling cylinder (tube) as an A/B test sonar target for the
+ball-beam system (HC-SR04 measures along the beam).
 
 COORDINATE CONVENTION (matches beam assembly orientation):
   X  = along beam (position axis; HC-SR04 measures along +X in this build)
-  Y  = roller spin axis (across beam)
+  Y  = cylinder spin axis (across beam)
   Z  = vertical (up)
 
-TARGET OPTIONS:
-
-1) TARGET_GEOMETRY="ball_belt" (recommended for a V-groove runner)
-   - Rolling contact stays ball-like (low friction, smooth).
-   - A narrow faceted "sonar belt" near Y=0 provides a strong, near-planar reflector
-     toward +X without touching the runner.
-
-2) TARGET_GEOMETRY="spool"
-   - A wheel/spool spanning the beam width with optional flanges.
-   - Useful if you want hard lateral constraint, but has more contact area than a ball.
-
-SENSOR REFLECTION NOTE (HC-SR04):
-  A sphere has very weak backscatter because most energy reflects away.
-  A planar face normal to the beam returns much more energy.
-  The faceted belt approximates a planar face in +X for all spin angles.
-
-SPOOL GEOMETRY OVERVIEW (TARGET_GEOMETRY="spool"):
-
-  Y axis (across beam / spin axis)
-  ←─────────────────────────────────────────────────────→
-
-        │  T_FL │       L_BODY        │  T_FL │
-        │◄─────►│◄───────────────────►│◄─────►│
-   ─────┤       ├─────────────────────┤       ├─────  ← Z = +R_FLANGE (flange rim)
-        │flange1│       body          │flange2│
-   ─────┤       ├─────────────────────┤       ├─────  ← Z = +R_BODY (body rim / rolling surface)
-        │       ├─────────────────────┤       │
-   ─────┼───────┼─────────────────────┼───────┼─────  ← Z = −R_BODY (beam surface when placed)
-                │     beam width      │
-        ↑                                     ↑
-     flange overhangs beam edge       flange overhangs beam edge
-     by FLANGE_OVERHANG mm            by FLANGE_OVERHANG mm
-
-Reflector surface for along-beam sonar:
-- A smooth cylinder works better than a sphere, but still behaves like a curved target.
-- A faceted barrel ("polygon cylinder") presents an almost-flat reflector to the sonar at all times.
+REFLECTION NOTE (HC-SR04):
+  Compared to a sphere, a cylinder presents a longer strip of near-normal surface
+  to an along-beam ultrasonic wave, often producing a stronger and more stable
+  return.
+  If you choose CYL_PROFILE="faceted", the many-sided polygon approximates planar
+  patches that can further stabilize the echo. With high facet counts (>= 24),
+  the "polygon wheel" rolling error is small.
 
 Model origin:
 - The macro creates the part centered at (0, 0, 0).
 - When placed on a flat surface, the contact plane is at Z = −R_ROLL:
-  - R_ROLL = R_BALL for TARGET_GEOMETRY="ball_belt"
-  - R_ROLL = R_BODY for TARGET_GEOMETRY="spool"
+  - R_ROLL = CYL_RADIUS for CYL_PROFILE="cylinder"
+  - R_ROLL ≈ CYL_RADIUS for CYL_PROFILE="faceted" (CYL_RADIUS is the inradius)
 """
 
 import FreeCAD as App
@@ -62,68 +34,58 @@ import math
 #  PARAMETERS  —  adjust to your hardware before running
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# ── Select which target to generate ────────────────────────────────────────────
-TARGET_GEOMETRY = "ball_belt"  # "ball_belt" (recommended) or "spool"
+# ── Sonar convention ───────────────────────────────────────────────────────────
+SONAR_AXIS       = "X"    # documented convention: HC-SR04 measures along +X (along beam)
 
-# ── Beam geometry ──────────────────────────────────────────────────────────────
-BEAM_WIDTH_MM    = 30.0   # ← SET THIS to your actual beam width [mm]
-                           #   (measure the face the spool rolls on)
-BEAM_V_ANGLE_DEG = 90.0   # V-groove included angle [deg] (used for belt clearance hint)
+# ── Beam geometry (used for default cylinder length) ───────────────────────────
+BEAM_WIDTH_MM    = 30.0   # runner width [mm] (axis Y in the model)
 
 # ── Hollowing / weight ─────────────────────────────────────────────────────────
 HOLLOW_ENABLE    = True
 SHELL_THICKNESS  = 1.2    # wall thickness [mm] (FDM typical: 1.2..2.0)
 
-# ── Ball + sonar belt (TARGET_GEOMETRY="ball_belt") ───────────────────────────
-R_BALL           = 25.0   # rolling radius [mm] (sphere)
-BELT_WIDTH_Y     = 8.0    # belt width along Y [mm] (keep well below runner contact Y)
-BELT_PROTRUSION  = 0.8    # belt extra radius beyond sphere [mm] (makes belt the first echo)
-BELT_PROFILE     = "faceted"  # "faceted" or "cylinder"
-BELT_FACETS      = 48     # even, >= 24 recommended for stable distance
-BELT_FACET_PHASE_DEG = (-180.0 / float(BELT_FACETS)) if BELT_FACETS else 0.0
-
-# ── Spool geometry (TARGET_GEOMETRY="spool") ───────────────────────────────────
-R_BODY           = 25.0   # rolling radius [mm]
-                           #   for BODY_PROFILE="faceted" this is the facet-to-center radius (apothem)
-FLANGE_OVERHANG  =  7.0   # flange extends this far beyond body radius [mm]
-                           #   must be > 0; catches beam edge if spool drifts sideways
-T_FLANGE         =  4.0   # axial thickness of each flange disc [mm]
-ENABLE_FLANGES   = True   # flanges help keep a wheel from drifting off the runner edges
+# ── Cylinder target (axis along +Y) ────────────────────────────────────────────
+CYL_RADIUS       = 25.0   # radius [mm]
+                           #   for CYL_PROFILE="faceted", this is the facet-to-center radius (inradius)
+CYL_LENGTH_Y     = None   # None -> (BEAM_WIDTH_MM - CYL_CLEARANCE_MM)
+CYL_CLEARANCE_MM = 0.6    # side clearance vs BEAM_WIDTH_MM [mm]
+CYL_PROFILE      = "faceted"  # "faceted" (better echo) or "cylinder" (smoothest rolling)
+CYL_FACETS       = 48     # even, >= 24 recommended
+CYL_FACET_PHASE_DEG = (-180.0 / float(CYL_FACETS)) if CYL_FACETS else 0.0
+                           # rotate polygon so a face normal aligns with +X
+CYL_END_CAP_T    = 0.0    # [mm] end wall thickness along Y (0 = open tube)
 
 # ── Optional features ──────────────────────────────────────────────────────────
-CENTER_BORE_D    =  0.0   # through-bore diameter for axle/shaft [mm]; 0 = solid
-FILLET_SHOULDER  =  1.5   # fillet at body–flange shoulder junction [mm]; 0 = skip
-                           #   adds printability and removes stress concentration
-
-# ── Sonar + reflector configuration ────────────────────────────────────────────
-SONAR_AXIS       = "X"    # documented convention: HC-SR04 measures along +X (along beam)
-BODY_PROFILE     = "faceted"  # "faceted" (recommended) or "cylinder"
-BODY_FACETS      = 48     # even, >= 24 recommended for near-continuous echo
-BODY_FACET_PHASE_DEG = (-180.0 / float(BODY_FACETS)) if BODY_FACETS else 0.0
-                           # rotate polygon so a face normal aligns with +X
+CENTER_BORE_D    = 0.0    # through-bore diameter for axle/shaft [mm]; 0 = none
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  DERIVED DIMENSIONS  (do not edit unless you know what you are changing)
+#  HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 Y_AXIS = App.Vector(0, 1, 0)
-X_AXIS = App.Vector(1, 0, 0)
-Z_AXIS = App.Vector(0, 0, 1)
 
 
 def cyl_y(radius, height, y_start):
     """Solid cylinder with axis along +Y, base circle centred at (0, y_start, 0)."""
-    return Part.makeCylinder(radius, height, App.Vector(0, y_start, 0), Y_AXIS)
+    return Part.makeCylinder(float(radius), float(height), App.Vector(0, float(y_start), 0), Y_AXIS)
+
 
 def prism_y(circumradius, height, y_start, n_sides, phase_rad):
     """Regular N-gon prism with axis along +Y, defined by circumradius in the XZ plane."""
     pts = []
-    for i in range(n_sides):
-        theta = phase_rad + (2.0 * math.pi * float(i) / float(n_sides))
-        pts.append(App.Vector(circumradius * math.cos(theta), y_start, circumradius * math.sin(theta)))
+    for i in range(int(n_sides)):
+        theta = float(phase_rad) + (2.0 * math.pi * float(i) / float(n_sides))
+        pts.append(
+            App.Vector(
+                float(circumradius) * math.cos(theta),
+                float(y_start),
+                float(circumradius) * math.sin(theta),
+            )
+        )
     pts.append(pts[0])  # close
     wire = Part.makePolygon(pts)
     face = Part.Face(wire)
-    return face.extrude(App.Vector(0, height, 0))
+    return face.extrude(App.Vector(0, float(height), 0))
+
 
 def _sanitize_facets(name, facets, phase_deg, default_phase_deg):
     """Return (facets_even_int, phase_deg_float) with warnings."""
@@ -144,215 +106,95 @@ def _sanitize_facets(name, facets, phase_deg, default_phase_deg):
         App.Console.PrintWarning(f"SonarCylinder: {name}={facets_i} is OK, but >=24 is recommended.\n")
     return facets_i, phase_f
 
+
 def _circumradius_from_inradius(inradius, n_sides):
     return float(inradius) / math.cos(math.pi / float(n_sides))
 
-def build_spool():
-    # Derived spool dimensions.
-    l_body = float(BEAM_WIDTH_MM)
-    half_l = l_body / 2.0
-    total_span = l_body + (2.0 * float(T_FLANGE) if ENABLE_FLANGES else 0.0)
 
-    # Sanitize body profile.
-    body_profile = str(BODY_PROFILE).strip().lower()
-    if body_profile not in ("cylinder", "faceted"):
-        App.Console.PrintWarning(
-            f"SonarCylinder: BODY_PROFILE={BODY_PROFILE!r} not recognized; using 'faceted'.\n"
-        )
-        body_profile = "faceted"
-
-    body_facets, phase_deg = _sanitize_facets(
-        "BODY_FACETS", BODY_FACETS, BODY_FACET_PHASE_DEG,
-        (-180.0 / float(BODY_FACETS)) if BODY_FACETS else 0.0
-    )
-
-    if body_profile == "faceted":
-        phase_rad = math.radians(phase_deg)
-        body_circumradius = _circumradius_from_inradius(R_BODY, body_facets)
-        body_max_radius = body_circumradius
-        body = prism_y(body_circumradius, l_body, -half_l, body_facets, phase_rad)
+def build_cylinder():
+    # Determine length along Y.
+    if CYL_LENGTH_Y is None:
+        length_y = float(BEAM_WIDTH_MM) - float(CYL_CLEARANCE_MM)
+        length_y = max(1.0, length_y)
     else:
-        phase_rad = 0.0
-        body_max_radius = float(R_BODY)
-        body = cyl_y(R_BODY, l_body, -half_l)
+        length_y = max(1.0, float(CYL_LENGTH_Y))
 
-    r_flange = body_max_radius + float(FLANGE_OVERHANG)
+    half_l = 0.5 * length_y
 
-    if ENABLE_FLANGES and float(T_FLANGE) > 0:
-        flange1 = cyl_y(r_flange, T_FLANGE, -(half_l + float(T_FLANGE)))
-        flange2 = cyl_y(r_flange, T_FLANGE, half_l)
-        outer = flange1.fuse(body).fuse(flange2)
-    else:
-        outer = body
-
-    # Optional shoulder fillet (cylinder-only).
-    if FILLET_SHOULDER > 0 and body_profile == "cylinder" and ENABLE_FLANGES and float(T_FLANGE) > 0:
-        try:
-            shoulder_edges = []
-            tol_r = 0.1   # radius tolerance [mm]
-            tol_y = 0.5   # Y-position tolerance [mm]
-            for edge in outer.Edges:
-                c = edge.Curve
-                if not hasattr(c, 'Radius'):
-                    continue
-                if abs(c.Radius - float(R_BODY)) > tol_r:
-                    continue
-                pts = [v.Point for v in edge.Vertexes]
-                if not pts:
-                    continue
-                y_pos = pts[0].y
-                if abs(abs(y_pos) - half_l) < tol_y:
-                    shoulder_edges.append(edge)
-            if shoulder_edges:
-                outer = outer.makeFillet(FILLET_SHOULDER, shoulder_edges)
-            else:
-                App.Console.PrintWarning(
-                    "SonarCylinder: shoulder edges not found — fillet skipped.\n"
-                )
-        except Exception as exc:
-            App.Console.PrintWarning(f"SonarCylinder: fillet failed ({exc}) — continuing without.\n")
-    elif FILLET_SHOULDER > 0 and body_profile == "faceted":
+    # Profile selection.
+    cyl_profile = str(CYL_PROFILE).strip().lower()
+    if cyl_profile not in ("cylinder", "faceted"):
         App.Console.PrintWarning(
-            "SonarCylinder: FILLET_SHOULDER skipped for faceted spool.\n"
+            f"SonarCylinder: CYL_PROFILE={CYL_PROFILE!r} not recognized; using 'faceted'.\n"
         )
+        cyl_profile = "faceted"
 
-    # Hollowing: subtract an inner body, leaving flanges as end-caps (if enabled).
+    # Outer body.
+    if cyl_profile == "faceted":
+        cyl_facets, cyl_phase_deg = _sanitize_facets(
+            "CYL_FACETS", CYL_FACETS, CYL_FACET_PHASE_DEG,
+            (-180.0 / float(CYL_FACETS)) if CYL_FACETS else 0.0
+        )
+        cyl_phase_rad = math.radians(float(cyl_phase_deg))
+        outer_circum = _circumradius_from_inradius(CYL_RADIUS, cyl_facets)
+        outer = prism_y(outer_circum, length_y, -half_l, cyl_facets, cyl_phase_rad)
+        r_roll = float(CYL_RADIUS)
+        r_max = float(outer_circum)
+        facets = int(cyl_facets)
+        phase_deg_out = float(cyl_phase_deg)
+    else:
+        cyl_phase_rad = 0.0
+        outer = cyl_y(CYL_RADIUS, length_y, -half_l)
+        r_roll = float(CYL_RADIUS)
+        r_max = float(CYL_RADIUS)
+        facets = 0
+        phase_deg_out = 0.0
+
     shape = outer
-    if HOLLOW_ENABLE and SHELL_THICKNESS > 0:
+
+    # Hollowing: subtract an inner body, leaving open ends or end caps.
+    if HOLLOW_ENABLE and float(SHELL_THICKNESS) > 0:
         t = float(SHELL_THICKNESS)
-        if float(R_BODY) <= t:
+        if float(CYL_RADIUS) <= t:
             App.Console.PrintWarning("SonarCylinder: SHELL_THICKNESS too large; hollow skipped.\n")
         else:
-            inner_r_body = float(R_BODY) - t
-            if body_profile == "faceted":
-                inner_circum = _circumradius_from_inradius(inner_r_body, body_facets)
-                inner_body = prism_y(inner_circum, l_body, -half_l, body_facets, phase_rad)
-            else:
-                inner_body = cyl_y(inner_r_body, l_body, -half_l)
-            shape = outer.cut(inner_body)
+            inner_r = float(CYL_RADIUS) - t
+            end_cap_t = max(0.0, float(CYL_END_CAP_T))
+            inner_len = max(0.0, length_y - 2.0 * end_cap_t)
+            if inner_len > 0.0:
+                inner_y0 = -half_l + end_cap_t
+                if cyl_profile == "faceted":
+                    inner_circum = _circumradius_from_inradius(inner_r, int(facets))
+                    inner = prism_y(inner_circum, inner_len, inner_y0, int(facets), cyl_phase_rad)
+                else:
+                    inner = cyl_y(inner_r, inner_len, inner_y0)
+                shape = outer.cut(inner)
 
-    # Optional centre bore (cuts through everything).
-    if CENTER_BORE_D > 0:
-        bore = cyl_y(float(CENTER_BORE_D) / 2.0, total_span if total_span > 0 else l_body, -(half_l + float(T_FLANGE)))
+    # Optional center bore (cuts through everything).
+    if float(CENTER_BORE_D) > 0:
+        bore = cyl_y(0.5 * float(CENTER_BORE_D), length_y, -half_l)
         shape = shape.cut(bore)
 
     meta = dict(
-        geometry="spool",
-        body_profile=body_profile,
-        facets=body_facets if body_profile == "faceted" else 0,
-        l_body=l_body,
-        r_roll=float(R_BODY),
-        r_body_max=body_max_radius,
-        r_flange=r_flange,
-        total_span=total_span if total_span > 0 else l_body,
-        phase_deg=phase_deg,
-    )
-    return shape.removeSplitter(), meta
-
-def build_ball_belt():
-    # Outer solid sphere (rolling contact).
-    outer_sphere = Part.makeSphere(float(R_BALL))
-
-    belt_profile = str(BELT_PROFILE).strip().lower()
-    if belt_profile not in ("faceted", "cylinder"):
-        App.Console.PrintWarning(
-            f"SonarCylinder: BELT_PROFILE={BELT_PROFILE!r} not recognized; using 'faceted'.\n"
-        )
-        belt_profile = "faceted"
-
-    belt_facets, belt_phase_deg = _sanitize_facets(
-        "BELT_FACETS", BELT_FACETS, BELT_FACET_PHASE_DEG,
-        (-180.0 / float(BELT_FACETS)) if BELT_FACETS else 0.0
-    )
-
-    belt_inradius = float(R_BALL) + float(BELT_PROTRUSION)
-    belt_half_w = 0.5 * float(BELT_WIDTH_Y)
-    if belt_half_w <= 0:
-        App.Console.PrintWarning("SonarCylinder: BELT_WIDTH_Y <= 0; belt disabled.\n")
-        belt_outer = None
-        belt_circum = belt_inradius
-        belt_phase_rad = 0.0
-    else:
-        if belt_profile == "faceted":
-            belt_phase_rad = math.radians(float(belt_phase_deg))
-            belt_circum = _circumradius_from_inradius(belt_inradius, belt_facets)
-            belt_outer = prism_y(belt_circum, 2.0 * belt_half_w, -belt_half_w, belt_facets, belt_phase_rad)
-        else:
-            belt_phase_rad = 0.0
-            belt_circum = belt_inradius
-            belt_outer = cyl_y(belt_inradius, 2.0 * belt_half_w, -belt_half_w)
-
-    if belt_outer is None:
-        outer = outer_sphere
-    else:
-        outer = outer_sphere.fuse(belt_outer)
-
-    shape = outer
-    if HOLLOW_ENABLE and SHELL_THICKNESS > 0:
-        t = float(SHELL_THICKNESS)
-        if float(R_BALL) <= t:
-            App.Console.PrintWarning("SonarCylinder: SHELL_THICKNESS too large; hollow skipped.\n")
-        else:
-            inner = Part.makeSphere(float(R_BALL) - t)
-            if belt_outer is not None and (belt_inradius > t):
-                inner_belt_inradius = belt_inradius - t
-                if belt_profile == "faceted":
-                    inner_belt_circum = _circumradius_from_inradius(inner_belt_inradius, belt_facets)
-                    inner_belt = prism_y(inner_belt_circum, 2.0 * belt_half_w, -belt_half_w, belt_facets, belt_phase_rad)
-                else:
-                    inner_belt = cyl_y(inner_belt_inradius, 2.0 * belt_half_w, -belt_half_w)
-                inner = inner.fuse(inner_belt)
-            shape = outer.cut(inner)
-
-    # Clearance hint: ensure belt stays far from runner contact points on a V-groove.
-    # For a symmetric V-groove, the contact points are near Y = ±R_BALL*sin(V/2).
-    # The belt must satisfy |belt_half_w| < |y_contact| (belt never reaches contact circle).
-    # A 3 mm safety margin is used; reduce only if groove is very narrow.
-    BELT_GROOVE_MARGIN_MM = 3.0
-    v_half = 0.5 * float(BEAM_V_ANGLE_DEG)
-    y_contact = float(R_BALL) * math.sin(math.radians(v_half))
-    clearance_ok = (belt_half_w <= max(0.0, y_contact - BELT_GROOVE_MARGIN_MM))
-    if belt_half_w > 0 and not clearance_ok:
-        App.Console.PrintWarning(
-            f"SonarCylinder: BELT_WIDTH_Y may be too wide for V-groove contact.\n"
-            f"  For V={BEAM_V_ANGLE_DEG:.0f}° and R_BALL={R_BALL:.1f} mm, contact is around |Y|≈{y_contact:.1f} mm.\n"
-            f"  Consider BELT_WIDTH_Y <= {max(0.0, 2.0 * (y_contact - 2.0)):.1f} mm.\n"
-        )
-
-    meta = dict(
-        geometry="ball_belt",
-        belt_profile=belt_profile,
-        belt_facets=belt_facets if belt_profile == "faceted" else 0,
-        r_ball=float(R_BALL),
-        belt_inradius=belt_inradius,
-        belt_circumradius=belt_circum,
-        belt_width_y=2.0 * belt_half_w,
-        y_contact=y_contact,
+        geometry="cylinder",
+        cyl_profile=cyl_profile,
+        cyl_facets=int(facets),
+        cyl_phase_deg=float(phase_deg_out),
+        r_roll=float(r_roll),
+        r_max=float(r_max),
+        length_y=float(length_y),
+        end_cap_t=float(CYL_END_CAP_T) if HOLLOW_ENABLE else 0.0,
     )
     return shape.removeSplitter(), meta
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  BUILD GEOMETRY (selected)
+#  BUILD + ADD TO FREECAD DOCUMENT
 # ═══════════════════════════════════════════════════════════════════════════════
 
-target_geometry = str(TARGET_GEOMETRY).strip().lower()
-if target_geometry not in ("ball_belt", "spool"):
-    App.Console.PrintWarning(
-        f"SonarCylinder: TARGET_GEOMETRY={TARGET_GEOMETRY!r} not recognized; using 'ball_belt'.\n"
-    )
-    target_geometry = "ball_belt"
+shape, meta = build_cylinder()
+obj_name = "SonarTarget_Cylinder"
 
-if target_geometry == "spool":
-    shape, meta = build_spool()
-    obj_name = "SonarTarget_Spool"
-else:
-    shape, meta = build_ball_belt()
-    obj_name = "SonarTarget_BallBelt"
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  ADD TO FREECAD DOCUMENT
-# ═══════════════════════════════════════════════════════════════════════════════
 doc = App.activeDocument()
 if doc is None:
     doc = App.newDocument("SonarCylinder")
@@ -362,7 +204,6 @@ if feature is None:
     feature = doc.addObject("Part::Feature", obj_name)
 feature.Shape = shape
 
-# Colour the part distinctly so it stands out in the scene.
 try:
     Gui.ActiveDocument.getObject(obj_name).ShapeColor = (0.8, 0.8, 0.8)
 except Exception:
@@ -378,45 +219,30 @@ except Exception:
 # ═══════════════════════════════════════════════════════════════════════════════
 #  CONSOLE SUMMARY
 # ═══════════════════════════════════════════════════════════════════════════════
-vol_mm3   = shape.Volume
-vol_cm3   = vol_mm3 / 1000.0
-mass_solid = vol_cm3 * 1.24          # PLA density g/cm³
-mass_20pct = mass_solid * 0.24        # rough 20% infill + perimeter walls
+vol_mm3 = shape.Volume
+vol_cm3 = vol_mm3 / 1000.0
+mass_solid = vol_cm3 * 1.24     # PLA density g/cm³
+mass_20pct = mass_solid * 0.24  # rough 20% infill + perimeter walls
 
-facets = 0
-max_face_normal_error_deg = 0.0
-reflected_ray_deviation_deg = 0.0
-if meta.get("geometry") == "spool" and meta.get("body_profile") == "faceted":
-    facets = int(meta.get("facets", 0))
-elif meta.get("geometry") == "ball_belt" and meta.get("belt_profile") == "faceted":
-    facets = int(meta.get("belt_facets", 0))
+facets = int(meta.get("cyl_facets", 0)) if meta.get("cyl_profile") == "faceted" else 0
+max_face_normal_error_deg = (180.0 / float(facets)) if facets > 0 else 0.0
+reflected_ray_deviation_deg = 2.0 * max_face_normal_error_deg if facets > 0 else 0.0
 
-if facets > 0:
-    max_face_normal_error_deg = 180.0 / float(facets)
-    reflected_ray_deviation_deg = 2.0 * max_face_normal_error_deg
-
-if meta.get("geometry") == "ball_belt":
-    details = (
-        f"  BALL RADIUS  = {meta.get('r_ball', 0.0):.2f} mm; BELT width(Y) = {meta.get('belt_width_y', 0.0):.2f} mm; BELT inradius = {meta.get('belt_inradius', 0.0):.2f} mm\n"
-        f"  V-GROOVE HINT: for V={BEAM_V_ANGLE_DEG:.0f}° contact is around |Y|≈{meta.get('y_contact', 0.0):.1f} mm (keep belt narrower than this)\n"
-    )
-else:
-    details = (
-        f"  SPOOL: R_BODY={meta.get('r_roll', 0.0):.2f} mm; R_FLANGE={meta.get('r_flange', 0.0):.2f} mm; L_BODY={meta.get('l_body', 0.0):.1f} mm\n"
-    )
-
-msg = (
-    f"\n┌── Sonar Target ─────────────────────────────────────────────┐\n"
-    f"│  Geometry                     : {meta.get('geometry', '?'):>10s}            │\n"
-    f"│  Shell thickness              : {SHELL_THICKNESS if HOLLOW_ENABLE else 0.0:6.2f} mm              │\n"
+App.Console.PrintMessage(
+    "\n┌── Sonar Cylinder Target ────────────────────────────────────┐\n"
+    f"│  Profile                     : {meta.get('cyl_profile', '?'):>8s}                 │\n"
+    f"│  CYL_RADIUS (inradius)        : {meta.get('r_roll', 0.0):6.2f} mm              │\n"
+    f"│  Max radius (vertex)          : {meta.get('r_max', 0.0):6.2f} mm              │\n"
+    f"│  Length along Y               : {meta.get('length_y', 0.0):6.2f} mm              │\n"
+    f"│  Shell thickness              : {(float(SHELL_THICKNESS) if HOLLOW_ENABLE else 0.0):6.2f} mm              │\n"
+    f"│  End cap thickness (each)     : {(float(CYL_END_CAP_T) if HOLLOW_ENABLE else 0.0):6.2f} mm              │\n"
+    f"│  Center bore diameter         : {float(CENTER_BORE_D):6.2f} mm              │\n"
     f"│  Volume (solid)               : {vol_cm3:6.1f} cm³              │\n"
     f"│  Mass: PLA solid              : {mass_solid:6.1f} g                │\n"
     f"│  Mass: PLA ~20% infill est.   : {mass_20pct:6.1f} g                │\n"
-    f"└────────────────────────────────────────────────────────────┘\n"
+    "└────────────────────────────────────────────────────────────┘\n"
     f"\n  SONAR AXIS   = +{SONAR_AXIS} (along beam)\n"
-    f"  REFLECTOR    = faceted surface (max normal error {max_face_normal_error_deg:.2f}°; deviation ~{reflected_ray_deviation_deg:.2f}°)\n"
-    f"{details}"
+    f"  FACETS       = {facets} (max normal error {max_face_normal_error_deg:.2f}°; deviation ~{reflected_ray_deviation_deg:.2f}°)\n"
     f"\n  PRINT TIP: keep the rolling surface support-free and clean.\n"
 )
 
-App.Console.PrintMessage(msg)

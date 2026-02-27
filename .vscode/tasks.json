@@ -39,6 +39,15 @@
       "problemMatcher": []
     },
     {
+      "label": "Firmware: Bring-up Monitor (UX)",
+      "type": "shell",
+      "command": "./.venv/bin/python analysis/bringup_monitor.py",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "Model: Design Gains",
       "type": "shell",
       "command": "./.venv/bin/python model/first_principles/design_cascade_pid.py --params model/first_principles/params_measured_v1.yaml",

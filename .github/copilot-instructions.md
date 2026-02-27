@@ -9,7 +9,9 @@ Two subsystems that must stay in sync:
 - **Analysis** (`analysis/`) — Python scripts to parse, clean, and plot serial telemetry CSVs from `data/runs/`.
 
 State machine (see [firmware/include/app/state_machine.h](../firmware/include/app/state_machine.h)):
-`SAFE_DISABLED → CALIB_SIGN → READY → RUNNING → FAULT`
+`SAFE_DISABLED → CALIB_SIGN → READY ⇄ CALIB_SCALE → RUNNING → FAULT`
+
+`CALIB_SCALE` is reached from `READY` during scale/runtime calibration; `requestStop()` from either `RUNNING` or `CALIB_SCALE` returns to `READY`.
 
 ## Build & Test
 
@@ -38,6 +40,8 @@ cd firmware && pio device monitor -b 115200 --echo --filter send_on_enter --eol 
 ```
 
 VS Code tasks in `.vscode/tasks.json` wrap the common commands above.
+
+**macOS USB serial port** — PlatformIO uses glob `/dev/cu.usbserial-*` for upload and monitor. If upload hangs, confirm the correct port and bootloader environment (`nano_new` vs `nano_old`).
 
 ## Conventions
 
@@ -70,14 +74,41 @@ VS Code tasks in `.vscode/tasks.json` wrap the common commands above.
 | `model/first_principles/params_measured_v1.yaml` | Plant + design parameters (source of truth) |
 | `docs/modeling_source_of_truth.md` | Modeling conventions and derivation notes |
 | `docs/calibration_signs.md` | Sign convention for sensors and actuators |
-| `docs/SonarCylinder.FCMacro` | FreeCAD macro — builds rolling sonar target (ball+belt or spool) |
+| `docs/SonarSphere.FCMacro` | FreeCAD macro — hollow rolling sphere + optional faceted "sonar belt" (recommended for V-groove runners) |
+| `docs/SonarCylinder.FCMacro` | FreeCAD macro — hollow rolling cylinder/tube A/B test target (optionally faceted); also supports `TARGET_GEOMETRY="ball_belt"` (default, V-groove recommended) |
+| `docs/SonarTargets.FCMacro` | FreeCAD macro — combined/experimental generator (sphere+belt / cylinder / spool) |
+
+## Telemetry & Analysis
+
+**Telemetry line format** (emitted at `kTelemetryHz = 10 Hz` while running):
+```
+TEL,<t_ms>,<state>,<x_cm>,<x_filt_cm>,<theta_deg>,<theta_cmd_deg>,<u_step_rate>,<fault_flags>
+```
+Columns map directly to `parse_log.py`'s `COLUMNS` list: `t_ms`, `state`, `x_cm`, `x_filt_cm`, `theta_deg`, `theta_cmd_deg`, `u_step_rate`, `fault_flags` (uint8 bitmask: bit0=sonar_timeout, bit1=i2c_error, bit2=angle_oob, bit3=pos_oob).
+
+**Analysis workflow:**
+```bash
+# Capture live serial to a raw log file
+cd firmware && pio device monitor -b 115200 --echo --filter send_on_enter --eol LF > ../data/runs/<name>_raw.txt
+
+# Parse raw log → clean CSV
+./.venv/bin/python analysis/parse_log.py --input data/runs/<name>_raw.txt --output data/runs/<name>_clean.csv
+
+# Plot clean CSV (4-panel: position, angle, step rate, fault)
+./.venv/bin/python analysis/plot_run.py --input data/runs/<name>_clean.csv
+
+# Compare two runs
+./.venv/bin/python analysis/compare_runs.py --a data/runs/<a>_clean.csv --b data/runs/<b>_clean.csv
+```
 
 ## HC-SR04 Sonar — Known Behaviours
 
 - **Jump-filter deadlock**: `kSonarMaxJumpCm` (in `hcsr04_sensor.cpp`) gates large position steps. If many echoes are missed (e.g. ball at far end), `last_distance_cm_` freezes; every subsequent valid echo is then rejected. The fix: on rejection the baseline slides toward the new reading by `kSonarMaxJumpCm`, so recovery takes at most 2 pings (≈70 ms).
 - **`e 1` returns `driver_disabled`**: driver enable is blocked whenever `hasAnyFault()` is true (including `sonar_timeout`). Fix the sonar first — `s` and `sonar diag` will tell you which fault is active.
 - **Curved targets**: HC-SR04 backscatter from a sphere is ~34× weaker than a same-size flat disc. For bring-up and calibration, use a flat board. For runtime, use a target with planar facets aimed along the sonar axis.
-- **Reflector geometry**: `docs/SonarCylinder.FCMacro` supports `TARGET_GEOMETRY="ball_belt"` (recommended for V-groove runners): a hollow rolling sphere with a narrow faceted belt that provides a strong along-beam echo without changing rolling contact. Use `BELT_FACETS >= 24` (default 48). `TARGET_GEOMETRY="spool"` remains available if you want wheel-like guidance.
+- **Reflector geometry**: `docs/SonarSphere.FCMacro` generates a hollow rolling sphere with an optional faceted belt that provides a strong along-beam echo without changing rolling contact. Use `BELT_ENABLE=True` and `BELT_FACETS >= 24` (default 48). Set `BELT_ENABLE=False` for a pure sphere baseline.
+- **Cylinder option**: `docs/SonarCylinder.FCMacro` also supports `TARGET_GEOMETRY="spool"` for a wheel/flanged spool. Set `BODY_PROFILE="faceted"` with `BODY_FACETS >= 24` for stronger echo. Default (`"ball_belt"`) is recommended for V-groove runners.
+- **Combined macro**: `docs/SonarTargets.FCMacro` contains the earlier combined generator (sphere+belt / cylinder / spool) if you want all options in one file.
 
 ## Flash Budget
 
@@ -89,18 +120,20 @@ ATmega328P: 30,720 bytes flash, 2,048 bytes RAM. The firmware currently sits nea
 
 ## Rolling Reflector — Model Update Checklist
 
-When switching rolling targets (`docs/SonarCylinder.FCMacro`), update `params_measured_v1.yaml` and regenerate:
+When switching rolling targets (`docs/SonarSphere.FCMacro` / `docs/SonarCylinder.FCMacro`), update `params_measured_v1.yaml` and regenerate:
 
 ```yaml
 ball_mass_kg:  <weigh printed target>
 
-# If using TARGET_GEOMETRY="spool":
-ball_inertia_ratio: 0.5        # solid cylinder approx (spool)
-ball_radius_m: <R_BODY / 1000> # rolling radius in metres
-
-# If using TARGET_GEOMETRY="ball_belt":
+# If using SonarSphere (hollow sphere, optional belt):
 ball_inertia_ratio: 0.6667     # thin-shell sphere approx (hollow ball; belt adds small deviation)
 ball_radius_m: <R_BALL / 1000> # rolling radius in metres
+
+# If using SonarCylinder (hollow tube):
+# Hollow cylinder k = I/(m r^2) = 0.5 * (1 + (r_inner/r_outer)^2)
+# Example: R=25mm, shell=1.2mm -> k ~= 0.95
+ball_inertia_ratio: 0.95
+ball_radius_m: <CYL_RADIUS / 1000>
 ```
 
 ```bash

@@ -11,6 +11,8 @@ namespace {
 
 constexpr float kSonarMaxJumpCm = 25.0f;
 constexpr uint8_t kSonarMinValidStreak = 2;
+constexpr float kSonarMinDistanceCm = 2.0f;
+constexpr float kSonarMaxDistanceCm = 200.0f;
 
 }  // namespace
 
@@ -33,6 +35,7 @@ HCSR04Sensor::HCSR04Sensor(uint8_t trig_pin, uint8_t echo_pin)
       timeout_flag_(false),
       last_trigger_us_(0),
       waiting_echo_(false),
+      echo_armed_(false),
       rise_us_(0),
       pulse_width_us_(0),
       awaiting_fall_(false),
@@ -45,11 +48,24 @@ void HCSR04Sensor::begin() {
   digitalWrite(trig_pin_, LOW);
   delayMicroseconds(5);
 
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+    echo_armed_ = false;
+    awaiting_fall_ = false;
+    sample_ready_ = false;
+  }
+
   last_trigger_us_ = micros() - kSonarTriggerPeriodUs;
 }
 
 void HCSR04Sensor::service(uint32_t now_us, uint32_t now_ms) {
   if (!waiting_echo_ && static_cast<uint32_t>(now_us - last_trigger_us_) >= kSonarTriggerPeriodUs) {
+    // Arm echo capture only for the upcoming ping (ignore unrelated PCINT noise).
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+      echo_armed_ = true;
+      awaiting_fall_ = false;
+      sample_ready_ = false;
+    }
+
     digitalWrite(trig_pin_, LOW);
     delayMicroseconds(2);
     digitalWrite(trig_pin_, HIGH);
@@ -72,52 +88,62 @@ void HCSR04Sensor::service(uint32_t now_us, uint32_t now_ms) {
 
   if (sample_ready) {
     waiting_echo_ = false;
-    if (pulse_width_us > 0 && pulse_width_us <= kSonarEchoTimeoutUs) {
-      const float distance_cm = static_cast<float>(pulse_width_us) * 0.0343f * 0.5f;
-      if (has_sample_ && fabsf(distance_cm - last_distance_cm_) > kSonarMaxJumpCm) {
-        ++jump_reject_count_;
-        valid_streak_ = 0;
+    // Treat saturated pulse widths as invalid (discard).
+    if (pulse_width_us > 0 && pulse_width_us < kSonarEchoTimeoutUs) {
+      const float raw_cm = static_cast<float>(pulse_width_us) * 0.0343f * 0.5f;
+      if (raw_cm < kSonarMinDistanceCm || raw_cm > kSonarMaxDistanceCm) {
         timeout_flag_ = true;
-        last_distance_cm_ += (distance_cm > last_distance_cm_) ? kSonarMaxJumpCm : -kSonarMaxJumpCm;
+        if (timeout_count_ < 0xFFFFu) {
+          ++timeout_count_;
+        }
+        return;
+      }
+
+      // Slew-rate limit large jumps instead of rejecting (helps reacquire curved targets).
+      float cm = raw_cm;
+      if (has_sample_ && fabsf(cm - last_distance_cm_) > kSonarMaxJumpCm) {
+        ++jump_reject_count_;
+        cm = last_distance_cm_ + ((cm > last_distance_cm_) ? kSonarMaxJumpCm : -kSonarMaxJumpCm);
+      }
+
+      last_distance_cm_ = cm;
+
+      pushHistory(cm);
+      const float median_cm = medianHistory();
+
+      if (!ema_initialized_) {
+        ema_cm_ = median_cm;
+        ema_initialized_ = true;
       } else {
-        last_distance_cm_ = distance_cm;
-
-        pushHistory(distance_cm);
-        const float median_cm = medianHistory();
-
-        if (!ema_initialized_) {
-          ema_cm_ = median_cm;
-          ema_initialized_ = true;
-        } else {
-          ema_cm_ = (kSonarEmaAlpha * median_cm) + ((1.0f - kSonarEmaAlpha) * ema_cm_);
-        }
-
-        last_x_cm_ = runtimeMapBallPosCm(last_distance_cm_);
-        last_x_filt_cm_ = runtimeMapBallPosCm(ema_cm_);
-        last_sample_ms_ = now_ms;
-        has_sample_ = true;
-        timeout_flag_ = false;
-        if (valid_streak_ < 0xFFFFu) {
-          ++valid_streak_;
-        }
+        ema_cm_ = (kSonarEmaAlpha * median_cm) + ((1.0f - kSonarEmaAlpha) * ema_cm_);
       }
-    } else {
-      timeout_flag_ = true;
-      valid_streak_ = 0;
-      if (timeout_count_ < 0xFFFFu) {
-        ++timeout_count_;
+
+      last_x_cm_ = runtimeMapBallPosCm(last_distance_cm_);
+      last_x_filt_cm_ = runtimeMapBallPosCm(ema_cm_);
+      last_sample_ms_ = now_ms;
+      has_sample_ = true;
+      timeout_flag_ = false;
+      if (valid_streak_ < 0xFFFFu) {
+        ++valid_streak_;
       }
+      return;
+    }
+
+    // Invalid reading: mark timeout, but keep last-good sample (freshness is age-based).
+    timeout_flag_ = true;
+    if (timeout_count_ < 0xFFFFu) {
+      ++timeout_count_;
     }
   }
 
   if (waiting_echo_ && static_cast<uint32_t>(now_us - last_trigger_us_) > kSonarEchoTimeoutUs) {
     waiting_echo_ = false;
     timeout_flag_ = true;
-    valid_streak_ = 0;
     if (timeout_count_ < 0xFFFFu) {
       ++timeout_count_;
     }
     ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+      echo_armed_ = false;
       awaiting_fall_ = false;
       sample_ready_ = false;
     }
@@ -167,6 +193,10 @@ void HCSR04Sensor::getDiag(uint32_t now_ms, SonarDiag& diag) const {
 }
 
 void HCSR04Sensor::handleEchoEdgeIsr(uint32_t now_us, bool level_high) {
+  if (!echo_armed_) {
+    return;
+  }
+
   if (level_high) {
     rise_us_ = now_us;
     awaiting_fall_ = true;
@@ -180,6 +210,7 @@ void HCSR04Sensor::handleEchoEdgeIsr(uint32_t now_us, bool level_high) {
   pulse_width_us_ = static_cast<uint32_t>(now_us - rise_us_);
   sample_ready_ = true;
   awaiting_fall_ = false;
+  echo_armed_ = false;
 }
 
 void HCSR04Sensor::pushHistory(float sample_cm) {

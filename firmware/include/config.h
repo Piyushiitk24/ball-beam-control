@@ -35,8 +35,11 @@ constexpr float kBallPosHardLimitM = kBallPosHardLimitCm * kCmToM;
 constexpr uint32_t kSensorInvalidFaultMsBringup = 1000;
 constexpr uint32_t kSensorInvalidFaultMsRunning = 300;
 
-constexpr uint32_t kSonarEchoTimeoutUs = 25000;
-constexpr uint32_t kSonarTriggerPeriodUs = 35000;
+// Sonar timing:
+// - Use a conservative trigger period to reduce ghost echoes on cheap HC-SR04 clones.
+// - Keep echo waits bounded (no pulseIn()); 30ms corresponds to ~5m round-trip max.
+constexpr uint32_t kSonarEchoTimeoutUs = 30000;
+constexpr uint32_t kSonarTriggerPeriodUs = 60000;
 constexpr uint32_t kPosSampleFreshMs = 120;
 constexpr float kSonarEmaAlpha = 0.35f;
 

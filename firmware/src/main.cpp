@@ -201,9 +201,6 @@ bool sampleSonarNow(uint32_t now_ms,
   if (!has_pos_sample) {
     g_sensor.valid_pos = false;
     g_fault_flags.pos_oob = false;
-    if (g_hcsr04.hasTimeout()) {
-      g_fault_flags.sonar_timeout = true;
-    }
     return false;
   }
 
@@ -214,16 +211,14 @@ bool sampleSonarNow(uint32_t now_ms,
   g_sensor.sonar_distance_raw_cm = dist_cm;
 
   const bool fresh = g_hcsr04.hasFreshSample(now_ms);
-  const bool timeout = g_hcsr04.hasTimeout();
-  g_sensor.valid_pos = fresh && !timeout;
+  g_sensor.valid_pos = fresh;
 
   if (g_sensor.valid_pos) {
-    g_last_valid_pos_ms = now_ms;
+    // Track time of the last accepted sonar sample (not "last time we checked"),
+    // so stale/fault timing is consistent even when we hold last-good on timeouts.
+    g_last_valid_pos_ms = static_cast<uint32_t>(now_ms - g_hcsr04.sampleAgeMs(now_ms));
     g_fault_flags.sonar_timeout = false;
     g_fault_flags.pos_oob = fabsf(g_sensor.ball_pos_filt_m) > kBallPosHardLimitM;
-  } else if (timeout) {
-    g_fault_flags.sonar_timeout = true;
-    g_fault_flags.pos_oob = false;
   } else {
     g_fault_flags.pos_oob = false;
   }
@@ -256,10 +251,6 @@ void updateFaultState(uint32_t now_ms) {
   }
 
   if (static_cast<uint32_t>(now_ms - g_last_valid_pos_ms) > stale_threshold_ms) {
-    g_fault_flags.sonar_timeout = true;
-  }
-
-  if (g_hcsr04.hasTimeout()) {
     g_fault_flags.sonar_timeout = true;
   }
 
@@ -316,10 +307,8 @@ void maybeStopJogAtLimits() {
 
 void printHelp() {
   Serial.println(F("HELP,keys"));
-  Serial.println(F("HELP,core=?/h s t e j a p z [ ] m b g v o d i x r k f"));
-  Serial.println(F("HELP,wiz=w n c q"));
-  Serial.println(F("HELP,limits=[ ] (l/u/1/2)"));
-  Serial.println(F("HELP,diag=sonar diag|as5600 diag"));
+  // Keep on-device help minimal to save flash; use the host-side bring-up monitor
+  // for full guidance and prerequisites.
 }
 
 void printStatus() {
@@ -625,10 +614,8 @@ void printBringupMenu() {
   Serial.print(g_sensor.valid_angle ? F("yes") : F("no"));
   Serial.print(F(",sonar_ok="));
   Serial.println(g_sensor.valid_pos ? F("yes") : F("no"));
-  Serial.println(F("MENU,flow=t->a->p->[down]->](up)->b->(g|sonar_sign)->v->r"));
-  Serial.println(F("MENU,down_up=physical; auto_normalized"));
   if (!g_sensor.valid_pos) {
-    Serial.println(F("MENU,sonar=use_flat_target+sonar_diag"));
+    Serial.println(F("MENU,sonar=flat_target_then_sonar_diag"));
   }
 }
 

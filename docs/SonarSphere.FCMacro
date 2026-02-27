@@ -1,0 +1,264 @@
+# -*- coding: utf-8 -*-
+"""
+SonarSphere.FCMacro
+===================
+Generates a hollow rolling sphere for the ball-beam system, with an optional
+ultrasonic-reflector "belt" optimized for along-beam HC-SR04 sensing.
+
+COORDINATE CONVENTION (matches beam assembly orientation):
+  X  = along beam (position axis; HC-SR04 measures along +X in this build)
+  Y  = across beam
+  Z  = vertical (up)
+
+REFLECTION NOTE (HC-SR04):
+  A smooth sphere is a poor specular reflector along the beam because most
+  energy reflects away from the transducer.
+  The optional "sonar belt" adds a narrow band near Y=0 with near-planar facets
+  facing +X so the sensor sees a strong return over all spin angles.
+  This is intended for V-groove runners where rolling contact points sit away
+  from Y=0. On a flat surface, any protruding belt can become the contact patch.
+
+Model origin:
+- The macro creates the part centered at (0, 0, 0).
+- When placed on a flat surface, the contact plane is at Z = −R_BALL.
+"""
+
+import FreeCAD as App
+import FreeCADGui as Gui
+import Part
+import math
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PARAMETERS  —  adjust to your hardware before running
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── Sonar convention ───────────────────────────────────────────────────────────
+SONAR_AXIS       = "X"    # documented convention: HC-SR04 measures along +X (along beam)
+
+# ── Beam geometry (used for belt clearance hint only) ──────────────────────────
+BEAM_V_ANGLE_DEG = 90.0   # V-groove included angle [deg]
+
+# ── Hollowing / weight ─────────────────────────────────────────────────────────
+HOLLOW_ENABLE    = True
+SHELL_THICKNESS  = 1.2    # wall thickness [mm] (FDM typical: 1.2..2.0)
+
+# ── Sphere target ──────────────────────────────────────────────────────────────
+R_BALL           = 25.0   # rolling radius [mm] (sphere)
+
+# ── Optional sonar belt (recommended) ─────────────────────────────────────────
+BELT_ENABLE      = False  # set True to add the sonar belt (recommended for V-groove runners)
+BELT_WIDTH_Y     = 8.0    # belt width along Y [mm] (keep well below runner contact Y)
+BELT_PROTRUSION  = 0.8    # belt extra radius beyond sphere [mm] (belt becomes first echo)
+BELT_PROFILE     = "faceted"  # "faceted" (stronger echo) or "cylinder" (smooth)
+BELT_FACETS      = 48     # even, >= 24 recommended for stable distance
+BELT_FACET_PHASE_DEG = (-180.0 / float(BELT_FACETS)) if BELT_FACETS else 0.0
+                           # rotate polygon so a face normal aligns with +X
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  HELPERS
+# ═══════════════════════════════════════════════════════════════════════════════
+Y_AXIS = App.Vector(0, 1, 0)
+
+
+def cyl_y(radius, height, y_start):
+    """Solid cylinder with axis along +Y, base circle centred at (0, y_start, 0)."""
+    return Part.makeCylinder(float(radius), float(height), App.Vector(0, float(y_start), 0), Y_AXIS)
+
+
+def prism_y(circumradius, height, y_start, n_sides, phase_rad):
+    """Regular N-gon prism with axis along +Y, defined by circumradius in the XZ plane."""
+    pts = []
+    for i in range(int(n_sides)):
+        theta = float(phase_rad) + (2.0 * math.pi * float(i) / float(n_sides))
+        pts.append(
+            App.Vector(
+                float(circumradius) * math.cos(theta),
+                float(y_start),
+                float(circumradius) * math.sin(theta),
+            )
+        )
+    pts.append(pts[0])  # close
+    wire = Part.makePolygon(pts)
+    face = Part.Face(wire)
+    return face.extrude(App.Vector(0, float(height), 0))
+
+
+def _sanitize_facets(name, facets, phase_deg, default_phase_deg):
+    """Return (facets_even_int, phase_deg_float) with warnings."""
+    facets_i = int(facets)
+    phase_f = float(phase_deg)
+    is_default = abs(phase_f - float(default_phase_deg)) < 1e-9
+    if facets_i < 3:
+        App.Console.PrintWarning(f"SonarSphere: {name} < 3 invalid; clamping to 3.\n")
+        facets_i = 3
+    if (facets_i % 2) != 0:
+        App.Console.PrintWarning(f"SonarSphere: {name}={facets_i} is odd; bumping to {facets_i + 1}.\n")
+        facets_i += 1
+        if is_default:
+            phase_f = -180.0 / float(facets_i)
+    if facets_i < 12:
+        App.Console.PrintWarning(f"SonarSphere: {name}={facets_i} is low; echo may be intermittent.\n")
+    elif facets_i < 24:
+        App.Console.PrintWarning(f"SonarSphere: {name}={facets_i} is OK, but >=24 is recommended.\n")
+    return facets_i, phase_f
+
+
+def _circumradius_from_inradius(inradius, n_sides):
+    return float(inradius) / math.cos(math.pi / float(n_sides))
+
+
+def build_sphere_with_belt():
+    # Outer solid sphere (rolling contact).
+    outer_sphere = Part.makeSphere(float(R_BALL))
+
+    belt_enable = bool(BELT_ENABLE) and (float(BELT_WIDTH_Y) > 0.0) and (float(BELT_PROTRUSION) > 0.0)
+    if not belt_enable:
+        outer = outer_sphere
+        belt_meta = dict(enabled=False, profile="none", facets=0, width_y=0.0, inradius=float(R_BALL))
+    else:
+        belt_profile = str(BELT_PROFILE).strip().lower()
+        if belt_profile not in ("faceted", "cylinder"):
+            App.Console.PrintWarning(
+                f"SonarSphere: BELT_PROFILE={BELT_PROFILE!r} not recognized; using 'faceted'.\n"
+            )
+            belt_profile = "faceted"
+
+        belt_facets, belt_phase_deg = _sanitize_facets(
+            "BELT_FACETS", BELT_FACETS, BELT_FACET_PHASE_DEG,
+            (-180.0 / float(BELT_FACETS)) if BELT_FACETS else 0.0
+        )
+
+        belt_inradius = float(R_BALL) + float(BELT_PROTRUSION)
+        belt_half_w = 0.5 * float(BELT_WIDTH_Y)
+
+        if belt_profile == "faceted":
+            belt_phase_rad = math.radians(float(belt_phase_deg))
+            belt_circum = _circumradius_from_inradius(belt_inradius, belt_facets)
+            belt_outer = prism_y(belt_circum, 2.0 * belt_half_w, -belt_half_w, belt_facets, belt_phase_rad)
+            belt_facets_out = belt_facets
+        else:
+            belt_phase_rad = 0.0
+            belt_circum = belt_inradius
+            belt_outer = cyl_y(belt_inradius, 2.0 * belt_half_w, -belt_half_w)
+            belt_facets_out = 0
+
+        outer = outer_sphere.fuse(belt_outer)
+        belt_meta = dict(
+            enabled=True,
+            profile=belt_profile,
+            facets=belt_facets_out,
+            width_y=2.0 * belt_half_w,
+            inradius=belt_inradius,
+            circumradius=belt_circum,
+            phase_deg=float(belt_phase_deg),
+        )
+
+        # Clearance hint: ensure belt stays far from runner contact points on a V-groove.
+        # For a symmetric V-groove, the contact points are near Y = ±R_BALL*sin(V/2).
+        BELT_GROOVE_MARGIN_MM = 3.0
+        y_contact = float(R_BALL) * math.sin(math.radians(0.5 * float(BEAM_V_ANGLE_DEG)))
+        if belt_half_w > max(0.0, y_contact - BELT_GROOVE_MARGIN_MM):
+            max_w = max(0.0, 2.0 * (y_contact - BELT_GROOVE_MARGIN_MM))
+            App.Console.PrintWarning(
+                "SonarSphere: belt may be too wide for V-groove rolling contact.\n"
+                f"  For V={float(BEAM_V_ANGLE_DEG):.0f}° and R_BALL={float(R_BALL):.1f} mm, contact is around |Y|≈{y_contact:.1f} mm.\n"
+                f"  Consider BELT_WIDTH_Y <= {max_w:.1f} mm.\n"
+            )
+
+    # Hollowing: subtract an inner sphere (+ optional inner belt), leaving a closed shell.
+    shape = outer
+    if HOLLOW_ENABLE and float(SHELL_THICKNESS) > 0:
+        t = float(SHELL_THICKNESS)
+        if float(R_BALL) <= t:
+            App.Console.PrintWarning("SonarSphere: SHELL_THICKNESS too large; hollow skipped.\n")
+        else:
+            inner = Part.makeSphere(float(R_BALL) - t)
+            if belt_meta.get("enabled") and (float(belt_meta.get("inradius", 0.0)) > t):
+                inner_belt_inradius = float(belt_meta["inradius"]) - t
+                belt_half_w = 0.5 * float(belt_meta["width_y"])
+                if belt_meta.get("profile") == "faceted":
+                    belt_facets_used = int(belt_meta.get("facets", 0))
+                    belt_phase_rad = math.radians(float(belt_meta.get("phase_deg", 0.0)))
+                    if belt_facets_used < 3:
+                        App.Console.PrintWarning("SonarSphere: inner belt facets invalid; hollow belt skipped.\n")
+                        belt_facets_used = 0
+                    if belt_facets_used > 0:
+                        inner_belt_circum = _circumradius_from_inradius(inner_belt_inradius, belt_facets_used)
+                        inner_belt = prism_y(
+                            inner_belt_circum,
+                            2.0 * belt_half_w,
+                            -belt_half_w,
+                            belt_facets_used,
+                            belt_phase_rad,
+                        )
+                    else:
+                        inner_belt = None
+                else:
+                    inner_belt = cyl_y(inner_belt_inradius, 2.0 * belt_half_w, -belt_half_w)
+                if inner_belt is not None:
+                    inner = inner.fuse(inner_belt)
+            shape = outer.cut(inner)
+
+    meta = dict(
+        geometry="sphere",
+        r_ball=float(R_BALL),
+        belt=belt_meta,
+    )
+    return shape.removeSplitter(), meta
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  BUILD + ADD TO FREECAD DOCUMENT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+shape, meta = build_sphere_with_belt()
+obj_name = "SonarTarget_Sphere"
+
+doc = App.activeDocument()
+if doc is None:
+    doc = App.newDocument("SonarSphere")
+
+feature = doc.getObject(obj_name)
+if feature is None:
+    feature = doc.addObject("Part::Feature", obj_name)
+feature.Shape = shape
+
+try:
+    Gui.ActiveDocument.getObject(obj_name).ShapeColor = (0.8, 0.8, 0.8)
+except Exception:
+    pass
+
+doc.recompute()
+try:
+    Gui.SendMsgToActiveView("ViewFit")
+    Gui.activeDocument().activeView().viewIsometric()
+except Exception:
+    pass
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  CONSOLE SUMMARY
+# ═══════════════════════════════════════════════════════════════════════════════
+vol_mm3 = shape.Volume
+vol_cm3 = vol_mm3 / 1000.0
+mass_solid = vol_cm3 * 1.24    # PLA density g/cm³
+mass_20pct = mass_solid * 0.24  # rough 20% infill + perimeter walls
+
+belt = meta.get("belt", {}) or {}
+facets = int(belt.get("facets", 0)) if belt.get("enabled") else 0
+max_face_normal_error_deg = (180.0 / float(facets)) if facets > 0 else 0.0
+reflected_ray_deviation_deg = 2.0 * max_face_normal_error_deg if facets > 0 else 0.0
+
+App.Console.PrintMessage(
+    "\n┌── Sonar Sphere Target ──────────────────────────────────────┐\n"
+    f"│  R_BALL                      : {float(R_BALL):6.2f} mm              │\n"
+    f"│  Hollow shell thickness       : {(float(SHELL_THICKNESS) if HOLLOW_ENABLE else 0.0):6.2f} mm              │\n"
+    f"│  Volume (solid)               : {vol_cm3:6.1f} cm³              │\n"
+    f"│  Mass: PLA solid              : {mass_solid:6.1f} g                │\n"
+    f"│  Mass: PLA ~20% infill est.   : {mass_20pct:6.1f} g                │\n"
+    "└────────────────────────────────────────────────────────────┘\n"
+    f"\n  SONAR AXIS   = +{SONAR_AXIS} (along beam)\n"
+    f"  BELT         = {'enabled' if belt.get('enabled') else 'disabled'}\n"
+    f"  BELT PROFILE = {belt.get('profile', 'none')}\n"
+    f"  BELT FACETS  = {facets} (max normal error {max_face_normal_error_deg:.2f}°; deviation ~{reflected_ray_deviation_deg:.2f}°)\n"
+    f"\n  PRINT TIP: keep the rolling surface support-free and clean.\n"
+)
