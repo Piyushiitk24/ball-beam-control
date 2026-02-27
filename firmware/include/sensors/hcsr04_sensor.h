@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+#include "config.h"
+
 namespace bb {
 
 struct SonarDiag {
@@ -32,16 +34,17 @@ class HCSR04Sensor {
   void handleEchoEdgeIsr(uint32_t now_us, bool level_high);
 
  private:
-  // Median filter window for sonar distance. 9 provides good robustness for
-  // weak/curved reflectors while staying lightweight on AVR.
-  static constexpr uint8_t kWindow = 9;
+  // Rolling "NewPing-like" window across time (not a burst).
+  static constexpr uint8_t kWindow = SONAR_MEDIAN_WINDOW;
 
   uint8_t trig_pin_;
   uint8_t echo_pin_;
 
   float history_[kWindow];
+  uint8_t valid_flags_[kWindow];
   uint8_t history_count_;
   uint8_t history_index_;
+  uint8_t valid_count_;
 
   bool ema_initialized_;
   float ema_cm_;
@@ -66,7 +69,7 @@ class HCSR04Sensor {
   volatile bool awaiting_fall_;
   volatile bool sample_ready_;
 
-  void pushHistory(float sample_cm);
+  void pushAttempt(bool valid, float sample_cm);
   float medianHistory() const;
 };
 

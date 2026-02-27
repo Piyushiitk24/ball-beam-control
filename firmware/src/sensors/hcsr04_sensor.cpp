@@ -12,7 +12,7 @@ namespace {
 constexpr float kSonarMaxJumpCm = 25.0f;
 constexpr uint8_t kSonarMinValidStreak = 2;
 constexpr float kSonarMinDistanceCm = 2.0f;
-constexpr float kSonarMaxDistanceCm = 200.0f;
+constexpr float kSonarMaxDistanceCm = 0.1f * SONAR_MAX_VALID_MM;
 
 }  // namespace
 
@@ -20,8 +20,10 @@ HCSR04Sensor::HCSR04Sensor(uint8_t trig_pin, uint8_t echo_pin)
     : trig_pin_(trig_pin),
       echo_pin_(echo_pin),
       history_(),
+      valid_flags_(),
       history_count_(0),
       history_index_(0),
+      valid_count_(0),
       ema_initialized_(false),
       ema_cm_(0.0f),
       has_sample_(false),
@@ -91,7 +93,17 @@ void HCSR04Sensor::service(uint32_t now_us, uint32_t now_ms) {
     // Treat saturated pulse widths as invalid (discard).
     if (pulse_width_us > 0 && pulse_width_us < kSonarEchoTimeoutUs) {
       const float raw_cm = static_cast<float>(pulse_width_us) * 0.0343f * 0.5f;
-      if (raw_cm < kSonarMinDistanceCm || raw_cm > kSonarMaxDistanceCm) {
+      const bool range_ok = (raw_cm >= kSonarMinDistanceCm) && (raw_cm <= kSonarMaxDistanceCm);
+
+      // Slew-rate limit large jumps instead of rejecting (helps reacquire curved targets).
+      float cm = raw_cm;
+      if (range_ok && has_sample_ && fabsf(cm - last_distance_cm_) > kSonarMaxJumpCm) {
+        ++jump_reject_count_;
+        cm = last_distance_cm_ + ((cm > last_distance_cm_) ? kSonarMaxJumpCm : -kSonarMaxJumpCm);
+      }
+
+      pushAttempt(range_ok, cm);
+      if (!range_ok) {
         timeout_flag_ = true;
         if (timeout_count_ < 0xFFFFu) {
           ++timeout_count_;
@@ -99,16 +111,12 @@ void HCSR04Sensor::service(uint32_t now_us, uint32_t now_ms) {
         return;
       }
 
-      // Slew-rate limit large jumps instead of rejecting (helps reacquire curved targets).
-      float cm = raw_cm;
-      if (has_sample_ && fabsf(cm - last_distance_cm_) > kSonarMaxJumpCm) {
-        ++jump_reject_count_;
-        cm = last_distance_cm_ + ((cm > last_distance_cm_) ? kSonarMaxJumpCm : -kSonarMaxJumpCm);
+      if (valid_count_ < static_cast<uint8_t>(SONAR_MIN_VALID_IN_WINDOW)) {
+        // Too many recent failures; don't trust a median yet.
+        timeout_flag_ = true;
+        return;
       }
 
-      last_distance_cm_ = cm;
-
-      pushHistory(cm);
       const float median_cm = medianHistory();
 
       if (!ema_initialized_) {
@@ -118,6 +126,7 @@ void HCSR04Sensor::service(uint32_t now_us, uint32_t now_ms) {
         ema_cm_ = (kSonarEmaAlpha * median_cm) + ((1.0f - kSonarEmaAlpha) * ema_cm_);
       }
 
+      last_distance_cm_ = median_cm;
       last_x_cm_ = runtimeMapBallPosCm(last_distance_cm_);
       last_x_filt_cm_ = runtimeMapBallPosCm(ema_cm_);
       last_sample_ms_ = now_ms;
@@ -130,6 +139,7 @@ void HCSR04Sensor::service(uint32_t now_us, uint32_t now_ms) {
     }
 
     // Invalid reading: mark timeout, but keep last-good sample (freshness is age-based).
+    pushAttempt(false, 0.0f);
     timeout_flag_ = true;
     if (timeout_count_ < 0xFFFFu) {
       ++timeout_count_;
@@ -138,6 +148,7 @@ void HCSR04Sensor::service(uint32_t now_us, uint32_t now_ms) {
 
   if (waiting_echo_ && static_cast<uint32_t>(now_us - last_trigger_us_) > kSonarEchoTimeoutUs) {
     waiting_echo_ = false;
+    pushAttempt(false, 0.0f);
     timeout_flag_ = true;
     if (timeout_count_ < 0xFFFFu) {
       ++timeout_count_;
@@ -213,26 +224,39 @@ void HCSR04Sensor::handleEchoEdgeIsr(uint32_t now_us, bool level_high) {
   echo_armed_ = false;
 }
 
-void HCSR04Sensor::pushHistory(float sample_cm) {
-  history_[history_index_] = sample_cm;
-  history_index_ = (history_index_ + 1) % kWindow;
-  if (history_count_ < kWindow) {
+void HCSR04Sensor::pushAttempt(bool valid, float sample_cm) {
+  const uint8_t idx = history_index_;
+  if (history_count_ == kWindow) {
+    if (valid_flags_[idx]) {
+      --valid_count_;
+    }
+  } else {
     ++history_count_;
   }
+
+  valid_flags_[idx] = valid ? 1U : 0U;
+  if (valid) {
+    history_[idx] = sample_cm;
+    ++valid_count_;
+  }
+
+  history_index_ = (idx + 1) % kWindow;
 }
 
 float HCSR04Sensor::medianHistory() const {
-  if (history_count_ == 0) {
+  float tmp[kWindow];
+  uint8_t n = 0;
+  for (uint8_t i = 0; i < history_count_; ++i) {
+    if (valid_flags_[i]) {
+      tmp[n++] = history_[i];
+    }
+  }
+  if (n == 0) {
     return 0.0f;
   }
 
-  float tmp[kWindow];
-  for (uint8_t i = 0; i < history_count_; ++i) {
-    tmp[i] = history_[i];
-  }
-
-  for (uint8_t i = 0; i + 1 < history_count_; ++i) {
-    for (uint8_t j = 0; j + 1 < history_count_ - i; ++j) {
+  for (uint8_t i = 0; i + 1 < n; ++i) {
+    for (uint8_t j = 0; j + 1 < n - i; ++j) {
       if (tmp[j] > tmp[j + 1]) {
         const float swap = tmp[j];
         tmp[j] = tmp[j + 1];
@@ -241,8 +265,8 @@ float HCSR04Sensor::medianHistory() const {
     }
   }
 
-  const uint8_t mid = history_count_ / 2;
-  if ((history_count_ % 2U) == 0U) {
+  const uint8_t mid = n / 2;
+  if ((n % 2U) == 0U) {
     return 0.5f * (tmp[mid - 1] + tmp[mid]);
   }
   return tmp[mid];

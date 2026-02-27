@@ -35,13 +35,39 @@ constexpr float kBallPosHardLimitM = kBallPosHardLimitCm * kCmToM;
 constexpr uint32_t kSensorInvalidFaultMsBringup = 1000;
 constexpr uint32_t kSensorInvalidFaultMsRunning = 300;
 
-// Sonar timing:
-// - Use a conservative trigger period to reduce ghost echoes on cheap HC-SR04 clones.
-// - Keep echo waits bounded (no pulseIn()); 30ms corresponds to ~5m round-trip max.
-constexpr uint32_t kSonarEchoTimeoutUs = 30000;
-constexpr uint32_t kSonarTriggerPeriodUs = 60000;
-constexpr uint32_t kPosSampleFreshMs = 120;
-constexpr float kSonarEmaAlpha = 0.35f;
+// Sonar tuning (NewPing-style: rolling median + hold + EMA).
+//
+// Note: Unlike NewPing's ping_median(N) (a short burst), this firmware uses a
+// rolling window across time, so defaults are kept modest to reduce lag.
+#ifndef SONAR_TRIGGER_PERIOD_US
+#define SONAR_TRIGGER_PERIOD_US 40000UL
+#endif
+#ifndef SONAR_ECHO_TIMEOUT_US
+#define SONAR_ECHO_TIMEOUT_US 25000UL
+#endif
+#ifndef SONAR_POS_SAMPLE_FRESH_MS
+#define SONAR_POS_SAMPLE_FRESH_MS 160UL
+#endif
+#ifndef SONAR_EMA_ALPHA
+#define SONAR_EMA_ALPHA 0.6f
+#endif
+#ifndef SONAR_MEDIAN_WINDOW
+#define SONAR_MEDIAN_WINDOW 7
+#endif
+#ifndef SONAR_MIN_VALID_IN_WINDOW
+#define SONAR_MIN_VALID_IN_WINDOW 5
+#endif
+#ifndef SONAR_MAX_VALID_MM
+#define SONAR_MAX_VALID_MM 650.0f
+#endif
+
+static_assert(SONAR_MIN_VALID_IN_WINDOW <= SONAR_MEDIAN_WINDOW,
+              "SONAR_MIN_VALID_IN_WINDOW must be <= SONAR_MEDIAN_WINDOW");
+
+constexpr uint32_t kSonarTriggerPeriodUs = SONAR_TRIGGER_PERIOD_US;
+constexpr uint32_t kSonarEchoTimeoutUs = SONAR_ECHO_TIMEOUT_US;
+constexpr uint32_t kPosSampleFreshMs = SONAR_POS_SAMPLE_FRESH_MS;
+constexpr float kSonarEmaAlpha = SONAR_EMA_ALPHA;
 
 constexpr float kDefaultBallSetpointCm = 0.0f;
 

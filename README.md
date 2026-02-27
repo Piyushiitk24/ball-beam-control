@@ -56,6 +56,42 @@ pio run -e nano_old
 - Current hardware note: HC-SR04 calibration steps use a flat target for stable echoes.
 - Closed-loop mode is blocked until runtime zero, limits, and sign calibration are complete.
 
+## Sonar Filtering Tuning (HC-SR04)
+
+The firmware uses a non-blocking PCINT echo-capture ISR and then applies:
+
+- Rolling median across time (not a NewPing "burst")
+- Minimum-valid-in-window gating (reject medians dominated by failures)
+- EMA smoothing on top
+- "Hold last-good until stale": intermittent timeouts do not instantly make `pos=bad`
+
+Defaults (chosen to match the working standalone sketch feel):
+
+- Trigger period: `SONAR_TRIGGER_PERIOD_US=40000` (about `delay(40)`)
+- Echo timeout: `SONAR_ECHO_TIMEOUT_US=25000`
+- Median window: `SONAR_MEDIAN_WINDOW=7` (try 9 if still noisy; avoid 11 unless motion is slow)
+- Min valid in window: `SONAR_MIN_VALID_IN_WINDOW=5`
+- EMA alpha: `SONAR_EMA_ALPHA=0.6` (0.6 responsive; try 0.3 for smoother)
+- Fresh/hold window: `SONAR_POS_SAMPLE_FRESH_MS=160` (try 180 or 200 if you want more "hold")
+- Max valid distance clamp: `SONAR_MAX_VALID_MM=650.0f` (set to ~1.2x your beam's usable distance span)
+
+Note on window sizing vs NewPing:
+- `NewPing::ping_median(11)` is a fast burst of 11 pings in a short time.
+- This firmware's median window is spread over time (e.g., 7 samples at 40 ms is ~280 ms of history),
+  so increasing the window adds noticeable lag while the ball is moving.
+
+To override quickly in PlatformIO, add `-D` flags under `build_flags`:
+
+```ini
+; firmware/platformio.ini
+build_flags =
+  -D SONAR_MEDIAN_WINDOW=9
+  -D SONAR_MIN_VALID_IN_WINDOW=6
+  -D SONAR_POS_SAMPLE_FRESH_MS=180
+  -D SONAR_MAX_VALID_MM=500.0f
+  -D SONAR_EMA_ALPHA=0.3f
+```
+
 ## Serial Commands (Primary UX: Quick Keys)
 
 ### Quick Keys

@@ -127,6 +127,59 @@ float clampf(float value, float min_value, float max_value) {
   return value;
 }
 
+// Tiny float parser to avoid pulling in strtod()/atof() (saves significant flash).
+// Supported: optional whitespace, optional +/- sign, digits, optional .digits.
+// Not supported: exponent notation.
+float parseFloatFast(const char* s) {
+  if (s == nullptr) {
+    return 0.0f;
+  }
+
+  // Skip leading spaces/tabs.
+  while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') {
+    ++s;
+  }
+
+  float sign = 1.0f;
+  if (*s == '-') {
+    sign = -1.0f;
+    ++s;
+  } else if (*s == '+') {
+    ++s;
+  }
+
+  bool any = false;
+  uint32_t int_part = 0;
+  while (*s >= '0' && *s <= '9') {
+    any = true;
+    int_part = (int_part * 10u) + static_cast<uint32_t>(*s - '0');
+    ++s;
+  }
+
+  uint32_t frac_part = 0;
+  uint32_t frac_div = 1;
+  if (*s == '.') {
+    ++s;
+    // Limit fractional digits to keep code small and bounded.
+    for (uint8_t i = 0; i < 4; ++i) {
+      if (*s < '0' || *s > '9') {
+        break;
+      }
+      any = true;
+      frac_part = (frac_part * 10u) + static_cast<uint32_t>(*s - '0');
+      frac_div *= 10u;
+      ++s;
+    }
+  }
+
+  if (!any) {
+    return 0.0f;
+  }
+
+  const float frac = (frac_div > 1u) ? (static_cast<float>(frac_part) / static_cast<float>(frac_div)) : 0.0f;
+  return sign * (static_cast<float>(int_part) + frac);
+}
+
 uint32_t activeStaleThresholdMs() {
   return (g_state_machine.state() == AppState::RUNNING)
              ? kSensorInvalidFaultMsRunning
@@ -1131,7 +1184,7 @@ void handleCommand(char* line) {
         }
 
         const long steps = atol(steps_arg);
-        const float rate = atof(rate_arg);
+        const float rate = parseFloatFast(rate_arg);
         if (steps == 0 || rate <= 0.0f) {
           Serial.println(F("ERR,invalid_jog_args"));
           return;
@@ -1333,7 +1386,7 @@ void handleCommand(char* line) {
     }
 
     const long steps = atol(steps_arg);
-    const float rate = atof(rate_arg);
+    const float rate = parseFloatFast(rate_arg);
     if (steps == 0 || rate <= 0.0f) {
       Serial.println(F("ERR,invalid_jog_args"));
       return;
