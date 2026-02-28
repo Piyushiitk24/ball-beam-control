@@ -18,6 +18,28 @@ Angle-source runtime mode:
 - `g_angle_src=1` (`y` key): stepper-count angle (reference-style fallback when AS5600 is unreliable)
 - Guided wizard commands (`w/n/c/q`) are no longer in firmware; guided calibration is host-side via `analysis/serial_logger.py` `/bringup`.
 
+## Firmware Main Variants (Current)
+
+`firmware/src/main.cpp` is intentionally switchable:
+
+- **BallBeam default**: HC-SR04 + AS5600 + stepper-count fallback (`y`).
+- **AS5600 checker**: `firmware/experiments/main_as5600_check.cpp`.
+- **TFMini backup**: `firmware/experiments/main_tfmini.cpp.bak`.
+
+Use only this switch script:
+
+```bash
+./.venv/bin/python analysis/switch_firmware_main.py --mode as5600_check
+./.venv/bin/python analysis/switch_firmware_main.py --mode tfmini
+./.venv/bin/python analysis/switch_firmware_main.py --mode ballbeam
+```
+
+Switch script behavior:
+- First switch creates baseline backup: `firmware/src/main.cpp.bak`.
+- `--mode ballbeam` restores from `main.cpp.bak`.
+- Current switched main is preserved as timestamped backup:
+  `main.cpp.as5600_<stamp>.bak`, `main.cpp.tfmini_<stamp>.bak`, or `main.cpp.custom_<stamp>.bak`.
+
 ## Build & Test
 
 All Python commands use the project venv:
@@ -49,6 +71,32 @@ Recommended host-side logger (raw + telemetry.csv + events.txt per run):
 ./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1
 ```
 
+Quick A/B sensor test sequence:
+```bash
+# 1) HC-SR04 default
+cd firmware
+pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
+
+# 2) Switch to TFMini and upload
+cd /Users/piyush/code/ball-beam-control
+./.venv/bin/python analysis/switch_firmware_main.py --mode tfmini
+cd firmware
+pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
+
+# 3) Restore default BallBeam and upload
+cd /Users/piyush/code/ball-beam-control
+./.venv/bin/python analysis/switch_firmware_main.py --mode ballbeam
+cd firmware
+pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
+```
+
+Primary logger local commands (current UX):
+- `/bringup` guided calibration flow
+- `/diag` send `s`, `as5600 diag`, `sonar diag`, `x`
+- `/as5600_stats N` and `/sonar_stats N` for noise/stability checks
+- `/print_tel 0|1` toggle raw `TEL,...` terminal printing
+- `/quit` sends `k` then `e 0` and exits safely
+
 VS Code tasks in `.vscode/tasks.json` wrap the common commands above.
 
 **macOS USB serial port** — PlatformIO uses glob `/dev/cu.usbserial-*` for upload and monitor. If upload hangs, confirm the correct port and bootloader environment (`nano_new` vs `nano_old`).
@@ -74,6 +122,11 @@ VS Code tasks in `.vscode/tasks.json` wrap the common commands above.
 
 **PlatformIO layout** — repo root has a wrapper `platformio.ini`; the real config is `firmware/platformio.ini`. Two environments: `nano_new` (new ATmega328P bootloader) and `nano_old` (original).
 
+TFMini build caveat (intentional):
+- `firmware/platformio.ini` excludes `src/sensors/tfmini_sensor.cpp` from default builds.
+- Reason: avoids AVR ISR vector collisions between `SoftwareSerial` PCINT ISR and HC-SR04 PCINT ISR.
+- In tfmini mode, `main_tfmini.cpp.bak` includes `sensors/tfmini_sensor.cpp` directly so switched builds still succeed.
+
 ## Key Files
 
 | File | Purpose |
@@ -89,10 +142,26 @@ VS Code tasks in `.vscode/tasks.json` wrap the common commands above.
 | `docs/SonarTargets.FCMacro` | FreeCAD macro — combined/experimental generator (sphere+belt / cylinder / spool) |
 | `analysis/serial_logger.py` | Primary host workflow (`/bringup`, `/diag`, `/as5600_stats`, `/sonar_stats`), per-run raw/events/telemetry logs |
 | `analysis/switch_firmware_main.py` | Swap `firmware/src/main.cpp` between BallBeam / AS5600-check / TFMini variants |
+| `firmware/platformio.ini` | Build flags + source filter (excludes `tfmini_sensor.cpp` in default HC-SR04 builds) |
 | `firmware/experiments/main_as5600_check.cpp` | AS5600-only isolation firmware for L/C/U capture and stability/span checks |
 | `firmware/experiments/main_tfmini.cpp.bak` | Backup `main.cpp` variant using Benewake TFMini as the position sensor backend |
 | `firmware/include/sensors/tfmini_sensor.h` | TFMini sensor interface (`sonar`-compatible runtime API) |
 | `firmware/src/sensors/tfmini_sensor.cpp` | TFMini UART parser + filtering (median/EMA/hold/stale policy) |
+
+## Sensor Backend Compatibility Contract
+
+HC-SR04 and TFMini backends must remain host-compatible:
+
+- Keep command names: `sonar diag`, `sonar sign ...`, `p`.
+- Keep diagnostic prefix: `SONAR_DIAG,...`.
+- Keep telemetry format unchanged:
+  `TEL,<t_ms>,<state>,<x_cm>,<x_filt_cm>,<theta_deg>,<theta_cmd_deg>,<u_step_rate>,<fault_flags>`.
+- `analysis/serial_logger.py` should continue working without backend-specific parsing changes.
+
+TFMini wiring defaults:
+- TFMini TX -> Nano D10 (`PIN_TFMINI_RX`)
+- TFMini RX -> Nano D11 (`PIN_TFMINI_TX`)
+- Common GND and module-spec power.
 
 ## Telemetry & Analysis
 
@@ -142,7 +211,12 @@ LATEST="$(ls -t data/runs/run_*_telemetry.csv | head -n 1)"
 
 ## Flash Budget
 
-ATmega328P: 30,720 bytes flash, 2,048 bytes RAM. Current baseline is ~29,818 bytes flash. Headroom is still limited; when adding code:
+ATmega328P: 30,720 bytes flash, 2,048 bytes RAM.
+Current verified builds:
+- BallBeam/HC-SR04 main: ~29,818 bytes flash.
+- TFMini switched main: ~30,406 bytes flash.
+
+Headroom is limited; when adding code:
 - Prefer reusing existing buffers over new allocations.
 - `F()` macro for all `Serial.print` string literals (saves RAM).
 - Avoid new virtual functions or `std::` containers.
