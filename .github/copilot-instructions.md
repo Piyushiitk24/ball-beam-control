@@ -23,12 +23,14 @@ Angle-source runtime mode:
 `firmware/src/main.cpp` is intentionally switchable:
 
 - **BallBeam default**: HC-SR04 + AS5600 + stepper-count fallback (`y`).
+- **HC-SR04 checker**: `firmware/experiments/main_hcsr04_check.cpp`.
 - **AS5600 checker**: `firmware/experiments/main_as5600_check.cpp`.
 - **TFMini backup**: `firmware/experiments/main_tfmini.cpp.bak`.
 
 Use only this switch script:
 
 ```bash
+./.venv/bin/python analysis/switch_firmware_main.py --mode hcsr04_check
 ./.venv/bin/python analysis/switch_firmware_main.py --mode as5600_check
 ./.venv/bin/python analysis/switch_firmware_main.py --mode tfmini
 ./.venv/bin/python analysis/switch_firmware_main.py --mode ballbeam
@@ -38,7 +40,7 @@ Switch script behavior:
 - First switch creates baseline backup: `firmware/src/main.cpp.bak`.
 - `--mode ballbeam` restores from `main.cpp.bak`.
 - Current switched main is preserved as timestamped backup:
-  `main.cpp.as5600_<stamp>.bak`, `main.cpp.tfmini_<stamp>.bak`, or `main.cpp.custom_<stamp>.bak`.
+  `main.cpp.as5600_<stamp>.bak`, `main.cpp.hcsr04_<stamp>.bak`, `main.cpp.tfmini_<stamp>.bak`, or `main.cpp.custom_<stamp>.bak`.
 
 ## Build & Test
 
@@ -143,6 +145,7 @@ TFMini build caveat (intentional):
 | `analysis/serial_logger.py` | Primary host workflow (`/bringup`, `/diag`, `/as5600_stats`, `/sonar_stats`), per-run raw/events/telemetry logs |
 | `analysis/switch_firmware_main.py` | Swap `firmware/src/main.cpp` between BallBeam / AS5600-check / TFMini variants |
 | `firmware/platformio.ini` | Build flags + source filter (excludes `tfmini_sensor.cpp` in default HC-SR04 builds) |
+| `firmware/experiments/main_hcsr04_check.cpp` | HC-SR04-only isolation firmware: PCINT vs pulseIn cross-check, Timer1 stress test |
 | `firmware/experiments/main_as5600_check.cpp` | AS5600-only isolation firmware for L/C/U capture and stability/span checks |
 | `firmware/experiments/main_tfmini.cpp.bak` | Backup `main.cpp` variant using Benewake TFMini as the position sensor backend |
 | `firmware/include/sensors/tfmini_sensor.h` | TFMini sensor interface (`sonar`-compatible runtime API) |
@@ -213,7 +216,7 @@ LATEST="$(ls -t data/runs/run_*_telemetry.csv | head -n 1)"
 
 ATmega328P: 30,720 bytes flash, 2,048 bytes RAM.
 Current verified builds:
-- BallBeam/HC-SR04 main: ~29,818 bytes flash.
+- BallBeam/HC-SR04 main: ~30,662 bytes flash.
 - TFMini switched main: ~30,406 bytes flash.
 
 Headroom is limited; when adding code:

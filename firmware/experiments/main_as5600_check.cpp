@@ -10,6 +10,9 @@ namespace {
 constexpr uint8_t kAs5600Addr = 0x36;
 constexpr uint8_t kRawAngleHighReg = 0x0C;
 constexpr uint8_t kRawAngleLowReg = 0x0D;
+constexpr uint8_t kStatusReg = 0x0B;
+constexpr uint8_t kAgcReg = 0x1A;
+constexpr uint8_t kMagnitudeHighReg = 0x1B;
 
 constexpr uint16_t kCountsPerRev = 4096;
 constexpr float kCountsToDeg = 360.0f / 4096.0f;
@@ -142,6 +145,58 @@ bool readRawMedian3(uint16_t& out_raw) {
 }
 
 float rawToDeg(uint16_t raw) { return static_cast<float>(raw) * kCountsToDeg; }
+
+bool readRegByte(uint8_t reg, uint8_t& out) {
+  Wire.beginTransmission(kAs5600Addr);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) {
+    return false;
+  }
+  if (Wire.requestFrom(kAs5600Addr, static_cast<uint8_t>(1)) != 1) {
+    return false;
+  }
+  out = Wire.read();
+  return true;
+}
+
+bool readRegWord(uint8_t reg, uint16_t& out) {
+  Wire.beginTransmission(kAs5600Addr);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) {
+    return false;
+  }
+  if (Wire.requestFrom(kAs5600Addr, static_cast<uint8_t>(2)) < 2) {
+    return false;
+  }
+  const uint8_t high = Wire.read();
+  const uint8_t low = Wire.read();
+  out = static_cast<uint16_t>((high << 8) | low);
+  return true;
+}
+
+void printMagnetStatus() {
+  uint8_t status_byte = 0;
+  uint8_t agc = 0;
+  uint16_t mag = 0;
+  const bool s_ok = readRegByte(kStatusReg, status_byte);
+  const bool a_ok = readRegByte(kAgcReg, agc);
+  const bool m_ok = readRegWord(kMagnitudeHighReg, mag);
+
+  Serial.print(F("AS5600_MAG,status_ok="));
+  Serial.print(s_ok ? F("1") : F("0"));
+  if (s_ok) {
+    Serial.print(F(",md="));
+    Serial.print((status_byte & 0x20) ? F("1") : F("0"));
+    Serial.print(F(",mh="));
+    Serial.print((status_byte & 0x08) ? F("1") : F("0"));
+    Serial.print(F(",ml="));
+    Serial.print((status_byte & 0x10) ? F("1") : F("0"));
+  }
+  Serial.print(F(",agc="));
+  Serial.print(a_ok ? static_cast<int>(agc) : -1);
+  Serial.print(F(",mag="));
+  Serial.println(m_ok ? static_cast<int>(mag & 0x0FFF) : -1);
+}
 
 void sortFloats(float* a, uint16_t n) {
   // Insertion sort (n is small; avoids pulling in qsort).
@@ -298,6 +353,7 @@ void printHelp() {
   Serial.println(F("  U  capture UPPER"));
   Serial.println(F("  P  print summary"));
   Serial.println(F("  R  reset captures"));
+  Serial.println(F("  m  magnet status (STATUS/AGC/MAG)"));
 }
 
 void printOneSample() {
@@ -432,6 +488,10 @@ void handleCommand(const char* line) {
     case 'r':
       resetCaptures();
       return;
+    case 'm':
+    case 'M':
+      printMagnetStatus();
+      return;
     default:
       break;
   }
@@ -505,6 +565,8 @@ void setup() {
   Serial.print(rawToDeg(raw), 4);
   Serial.print(F(",i2c_err="));
   Serial.println(g_i2c_err);
+
+  printMagnetStatus();
 
   printHelp();
 }

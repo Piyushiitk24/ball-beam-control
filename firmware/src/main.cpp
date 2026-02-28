@@ -86,6 +86,7 @@ void printSonarDiag();
 void printAs5600Diag();
 bool captureSonarCalDistanceCm(float& out_cm);
 bool readAs5600RawMedianDeg(float& out_raw_deg);
+bool readAs5600RawMedianCounts(uint16_t& out_counts);
 bool captureAs5600CalRawDeg(float& out_raw_deg);
 void serviceControl(uint32_t now_ms);
 
@@ -437,9 +438,7 @@ void maybeStopJogAtLimits() {
 }
 
 void printHelp() {
-  Serial.println(F("HELP,keys"));
-  // Keep on-device help minimal to save flash; use the host-side serial logger
-  // (analysis/serial_logger.py) for run logs and copy/paste workflows.
+  Serial.println(F("HELP,keys,stepper:y p e1 r"));
 }
 
 void printStatus() {
@@ -752,6 +751,20 @@ void printAs5600Diag() {
   Serial.print(g_as5600.errorCount());
   Serial.print(',');
   Serial.println(read_hz, 2);
+
+  const AS5600Status mag = g_as5600.readStatus();
+  Serial.print(F("AS5600_MAG,ok="));
+  Serial.print(mag.read_ok ? F("1") : F("0"));
+  Serial.print(F(",md="));
+  Serial.print(mag.magnet_detected ? F("1") : F("0"));
+  Serial.print(F(",mh="));
+  Serial.print(mag.too_strong ? F("1") : F("0"));
+  Serial.print(F(",ml="));
+  Serial.print(mag.too_weak ? F("1") : F("0"));
+  Serial.print(F(",agc="));
+  Serial.print(mag.agc);
+  Serial.print(F(",mag="));
+  Serial.println(mag.magnitude);
 }
 
 bool captureSonarCalDistanceCm(float& out_cm) {
@@ -803,8 +816,8 @@ bool captureSonarCalDistanceCm(float& out_cm) {
   return true;
 }
 
-bool readAs5600RawMedianDeg(float& out_raw_deg) {
-  // Cheap outlier rejection for calibration: median-of-3 raw samples, with wrap handling.
+bool readAs5600RawMedianCounts(uint16_t& out_counts) {
+  // Median-of-3 raw samples with wrap handling at 0/4095 boundary.
   uint16_t a = 0, b = 0, c = 0;
   if (!g_as5600.readRaw(a)) {
     return false;
@@ -818,86 +831,94 @@ bool readAs5600RawMedianDeg(float& out_raw_deg) {
     return false;
   }
 
-  // Unwrap around 'a' so values near 0/4095 don't break the median.
   int16_t ai = static_cast<int16_t>(a);
   int16_t bi = static_cast<int16_t>(b);
   int16_t ci = static_cast<int16_t>(c);
 
   int16_t d = static_cast<int16_t>(bi - ai);
-  if (d > 2048) {
-    bi = static_cast<int16_t>(bi - 4096);
-  } else if (d < -2048) {
-    bi = static_cast<int16_t>(bi + 4096);
-  }
+  if (d > 2048) { bi = static_cast<int16_t>(bi - 4096); }
+  else if (d < -2048) { bi = static_cast<int16_t>(bi + 4096); }
 
   d = static_cast<int16_t>(ci - ai);
-  if (d > 2048) {
-    ci = static_cast<int16_t>(ci - 4096);
-  } else if (d < -2048) {
-    ci = static_cast<int16_t>(ci + 4096);
-  }
+  if (d > 2048) { ci = static_cast<int16_t>(ci - 4096); }
+  else if (d < -2048) { ci = static_cast<int16_t>(ci + 4096); }
 
-  // Median-of-3 on int16.
-  if (ai > bi) {
-    const int16_t t = ai;
-    ai = bi;
-    bi = t;
-  }
-  if (bi > ci) {
-    const int16_t t = bi;
-    bi = ci;
-    ci = t;
-  }
-  if (ai > bi) {
-    const int16_t t = ai;
-    ai = bi;
-    bi = t;
-  }
+  if (ai > bi) { int16_t t = ai; ai = bi; bi = t; }
+  if (bi > ci) { int16_t t = bi; bi = ci; ci = t; }
+  if (ai > bi) { int16_t t = ai; ai = bi; bi = t; }
 
   int16_t med = bi;
-  if (med < 0) {
-    med = static_cast<int16_t>(med + 4096);
-  } else if (med >= 4096) {
-    med = static_cast<int16_t>(med - 4096);
-  }
+  if (med < 0) { med = static_cast<int16_t>(med + 4096); }
+  else if (med >= 4096) { med = static_cast<int16_t>(med - 4096); }
+  out_counts = static_cast<uint16_t>(med);
+  return true;
+}
 
-  out_raw_deg = (static_cast<float>(med) * 360.0f) / 4096.0f;
+bool readAs5600RawMedianDeg(float& out_raw_deg) {
+  uint16_t counts = 0;
+  if (!readAs5600RawMedianCounts(counts)) {
+    return false;
+  }
+  out_raw_deg = (static_cast<float>(counts) * 360.0f) / 4096.0f;
   return true;
 }
 
 bool captureAs5600CalRawDeg(float& out_raw_deg) {
-  // Calibration capture needs to be stable: take multiple median-filtered samples,
-  // ignore large jumps, and smooth with a light EMA.
+  // Calibration capture in raw counts domain to avoid 0/360° boundary corruption.
+  // Uses unwrapped int32_t accumulator for EMA, then wraps back to [0°,360°) at end.
   constexpr uint8_t kNeedGood = AS5600_CAL_NEED_GOOD;
   constexpr uint32_t kTimeoutMs = AS5600_CAL_TIMEOUT_MS;
   constexpr uint8_t kDelayMs = 6;
+  constexpr uint8_t kMaxConsecReject = 5;
+  constexpr int16_t kMaxJumpCounts =
+      static_cast<int16_t>(AS5600_CAL_MAX_JUMP_DEG * (4096.0f / 360.0f));
 
   uint8_t good = 0;
-  float ema = 0.0f;
+  int32_t ema_unwrap = 0;  // unwrapped counts, integer EMA
   bool ema_init = false;
 
-  float last = 0.0f;
+  uint16_t last_counts = 0;
+  int32_t last_unwrap = 0;
   bool last_init = false;
+  uint8_t consec_reject = 0;
 
   const uint32_t start_ms = millis();
   while (good < kNeedGood && static_cast<uint32_t>(millis() - start_ms) < kTimeoutMs) {
-    float v = 0.0f;
-    if (readAs5600RawMedianDeg(v)) {
+    uint16_t counts = 0;
+    if (readAs5600RawMedianCounts(counts)) {
+      // Unwrap: compute shortest-path delta in counts domain.
+      int16_t delta = static_cast<int16_t>(counts) - static_cast<int16_t>(last_counts);
+      if (delta > 2048) { delta = static_cast<int16_t>(delta - 4096); }
+      else if (delta < -2048) { delta = static_cast<int16_t>(delta + 4096); }
+
       if (last_init) {
-        const float delta = wrapAngleDeltaDeg(v - last);
-        if (fabsf(delta) > AS5600_CAL_MAX_JUMP_DEG) {
+        if (abs(delta) > kMaxJumpCounts) {
+          ++consec_reject;
+          if (consec_reject >= kMaxConsecReject) {
+            last_counts = counts;
+            last_unwrap = last_unwrap + static_cast<int32_t>(delta);
+            consec_reject = 0;
+          }
           delay(kDelayMs);
           continue;
         }
       }
-      last = v;
-      last_init = true;
 
+      int32_t unwrap = last_init ? (last_unwrap + static_cast<int32_t>(delta)) : static_cast<int32_t>(counts);
+      last_counts = counts;
+      last_unwrap = unwrap;
+      last_init = true;
+      consec_reject = 0;
+
+      // Integer EMA: ema = alpha * sample + (1-alpha) * ema, using fixed-point (alpha=0.3 ≈ 77/256).
       if (!ema_init) {
-        ema = v;
+        ema_unwrap = unwrap;
         ema_init = true;
       } else {
-        ema = (kAs5600EmaAlpha * v) + ((1.0f - kAs5600EmaAlpha) * ema);
+        // Use float for simplicity (only runs during calibration, not in control loop).
+        ema_unwrap = static_cast<int32_t>(
+            kAs5600EmaAlpha * static_cast<float>(unwrap) +
+            (1.0f - kAs5600EmaAlpha) * static_cast<float>(ema_unwrap));
       }
       ++good;
     }
@@ -907,7 +928,11 @@ bool captureAs5600CalRawDeg(float& out_raw_deg) {
   if (!ema_init || good < kNeedGood) {
     return false;
   }
-  out_raw_deg = ema;
+
+  // Wrap EMA back to [0, 4096) counts, then convert to degrees.
+  int32_t wrapped = ema_unwrap % 4096;
+  if (wrapped < 0) { wrapped += 4096; }
+  out_raw_deg = (static_cast<float>(wrapped) * 360.0f) / 4096.0f;
   return true;
 }
 
@@ -1088,31 +1113,41 @@ void printGuideNextAction() {
 
 void printRunBlockedDetails(const AppConditions& cond) {
   Serial.println(F("ERR,run_blocked"));
+  if (!cond.sign_calibrated) {
+    Serial.println(F("BLOCK,sign,try=a"));
+  }
   if (!cond.zero_calibrated) {
-    Serial.println(F("BLOCK,zero"));
+    Serial.println(F("BLOCK,zero,try=z"));
   }
   if (!cond.limits_calibrated) {
-    Serial.println(F("BLOCK,limits"));
-  }
-  if (!cond.sign_calibrated) {
-    Serial.println(F("BLOCK,sign"));
+    Serial.println(F("BLOCK,limits,try=l/u"));
   }
   if (!cond.sensors_ok) {
-    Serial.println(F("BLOCK,sensors"));
+    if (g_fault_flags.sonar_timeout) {
+      Serial.println(F("BLOCK,sonar_timeout"));
+    }
+    if (g_fault_flags.i2c_error) {
+      Serial.println(F("BLOCK,i2c_err"));
+    }
+    if (!g_sensor.valid_pos) {
+      Serial.println(F("BLOCK,pos,try=p"));
+    }
+    if (!g_sensor.valid_angle && g_angle_src == 0) {
+      Serial.println(F("BLOCK,angle,try=y"));
+    }
   }
   if (cond.faults_active) {
-    Serial.println(F("BLOCK,faults"));
+    if (g_fault_flags.angle_oob) {
+      Serial.println(F("BLOCK,angle_oob"));
+    }
+    if (g_fault_flags.pos_oob) {
+      Serial.println(F("BLOCK,pos_oob"));
+    }
+    printFaultInfo();
   }
   if (!cond.inner_loop_stable) {
     Serial.println(F("BLOCK,inner_loop"));
   }
-  if (cond.faults_active) {
-    printFaultInfo();
-  }
-  if (!cond.sensors_ok) {
-    printSonarDiag();
-  }
-  printGuideNextAction();
 }
 
 void handleCommand(char* line) {

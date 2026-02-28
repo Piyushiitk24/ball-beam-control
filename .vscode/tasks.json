@@ -48,6 +48,15 @@
       "problemMatcher": []
     },
     {
+      "label": "Firmware: Switch Main -> HC-SR04 Check",
+      "type": "shell",
+      "command": "./.venv/bin/python analysis/switch_firmware_main.py --mode hcsr04_check",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "Firmware: Switch Main -> AS5600 Check",
       "type": "shell",
       "command": "./.venv/bin/python analysis/switch_firmware_main.py --mode as5600_check",
