@@ -138,11 +138,25 @@ void StepperTMC2209::setSignedStepRate(float signed_rate_sps) {
   const uint16_t half_period_ticks = rateToHalfPeriodTicks(abs_rate_sps_);
 
   ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-    half_period_ticks_ = half_period_ticks;
-    ticks_until_toggle_ = half_period_ticks;
-    pulse_active_ = (half_period_ticks > 0);
-    if (!pulse_active_) {
+    if (half_period_ticks == 0) {
+      // Rate too low — stop pulsing.
+      half_period_ticks_ = 0;
+      ticks_until_toggle_ = 0;
+      pulse_active_ = false;
       step_level_ = false;
+    } else if (!pulse_active_) {
+      // Starting from idle — full reset.
+      half_period_ticks_ = half_period_ticks;
+      ticks_until_toggle_ = half_period_ticks;
+      pulse_active_ = true;
+    } else {
+      // Already pulsing — update period without resetting countdown so the
+      // current half‑cycle completes naturally.  Clamp the remaining count
+      // to the new period so a large decrease in rate takes effect quickly.
+      half_period_ticks_ = half_period_ticks;
+      if (ticks_until_toggle_ > half_period_ticks) {
+        ticks_until_toggle_ = half_period_ticks;
+      }
     }
   }
 

@@ -7,7 +7,7 @@ namespace bb {
 // Compile-time calibration placeholders. Update after sign/zero calibration.
 constexpr int8_t AS5600_SIGN = +1;
 constexpr int8_t STEPPER_DIR_SIGN = +1;
-constexpr int8_t SONAR_POS_SIGN = +1;
+constexpr int8_t SONAR_POS_SIGN = -1;  // motor UP → ball toward sensor → distance decreases
 
 constexpr float AS5600_ZERO_DEG = 0.0f;
 constexpr float SONAR_CENTER_CM = 20.0f;

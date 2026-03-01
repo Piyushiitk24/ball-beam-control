@@ -8,13 +8,24 @@
 #include "app/state_machine.h"
 #include "calibration.h"
 #include "calibration_runtime.h"
+
+// TFMini + SoftwareSerial at 115200 drops frames when Timer1 40 kHz ISR is
+// active.  Widen the "fresh" window so hasFreshSample() bridges brief gaps.
+#define SONAR_POS_SAMPLE_FRESH_MS 500UL
+
 #include "config.h"
 #include "control/cascade_controller.h"
 #include "hal/stepper_tmc2209.h"
 #include "pins.h"
 #include "sensors/as5600_sensor.h"
-#include "sensors/hcsr04_sensor.h"
+#include "sensors/tfmini_sensor.h"
 #include "types.h"
+
+// NOTE:
+// firmware/platformio.ini excludes sensors/tfmini_sensor.cpp from default builds to avoid
+// SoftwareSerial ISR vector collisions with HC-SR04 PCINT handlers. In the TFMini-switched
+// variant, we compile the implementation here so this file remains self-contained.
+#include "sensors/tfmini_sensor.cpp"
 
 #ifndef SERIAL_BAUD
 #define SERIAL_BAUD 115200
@@ -29,7 +40,7 @@ constexpr float kLimitMinSpanDeg = 2.0f;
 
 StepperTMC2209 g_stepper(PIN_STEP, PIN_DIR, PIN_EN);
 AS5600Sensor g_as5600;
-HCSR04Sensor g_hcsr04(PIN_TRIG, PIN_ECHO);
+TFMiniSensor g_tfmini(PIN_TFMINI_RX, PIN_TFMINI_TX);
 CascadeController g_controller;
 StateMachine g_state_machine;
 
@@ -54,9 +65,6 @@ uint32_t g_last_valid_angle_ms = 0;
 uint32_t g_last_valid_pos_ms = 0;
 uint32_t g_last_angle_read_ms = 0;
 uint32_t g_last_angle_read_dt_ms = 0;
-
-volatile uint8_t* g_echo_pin_reg = nullptr;
-uint8_t g_echo_pin_mask = 0;
 
 char g_cmd_buffer[96];
 size_t g_cmd_len = 0;
@@ -86,7 +94,6 @@ void printSonarDiag();
 void printAs5600Diag();
 bool captureSonarCalDistanceCm(float& out_cm);
 bool readAs5600RawMedianDeg(float& out_raw_deg);
-bool readAs5600RawMedianCounts(uint16_t& out_counts);
 bool captureAs5600CalRawDeg(float& out_raw_deg);
 void serviceControl(uint32_t now_ms);
 
@@ -180,8 +187,9 @@ float parseFloatFast(const char* s) {
 }
 
 uint32_t activeStaleThresholdMs() {
+  // Wider running threshold for SoftwareSerial dropout tolerance.
   return (g_state_machine.state() == AppState::RUNNING)
-             ? kSensorInvalidFaultMsRunning
+             ? 1500UL
              : kSensorInvalidFaultMsBringup;
 }
 
@@ -193,21 +201,6 @@ bool hasAnyFault() {
 void applySafeDisable() {
   g_stepper.stop();
   g_stepper.enable(false);
-}
-
-void setupEchoPcint() {
-  g_echo_pin_reg = portInputRegister(digitalPinToPort(PIN_ECHO));
-  g_echo_pin_mask = digitalPinToBitMask(PIN_ECHO);
-
-  volatile uint8_t* pcicr = digitalPinToPCICR(PIN_ECHO);
-  volatile uint8_t* pcmsk = digitalPinToPCMSK(PIN_ECHO);
-
-  if (pcicr == nullptr || pcmsk == nullptr) {
-    return;
-  }
-
-  *pcicr |= _BV(digitalPinToPCICRbit(PIN_ECHO));
-  *pcmsk |= _BV(digitalPinToPCMSKbit(PIN_ECHO));
 }
 
 bool sampleAngleNow(uint32_t now_ms,
@@ -280,7 +273,7 @@ bool sampleSonarNow(uint32_t now_ms,
   float x_cm = 0.0f;
   float x_filt_cm = 0.0f;
   float dist_cm = 0.0f;
-  const bool has_pos_sample = g_hcsr04.getPosition(x_cm, x_filt_cm, dist_cm);
+  const bool has_pos_sample = g_tfmini.getPosition(x_cm, x_filt_cm, dist_cm);
   if (!has_pos_sample) {
     g_sensor.valid_pos = false;
     g_fault_flags.pos_oob = false;
@@ -293,13 +286,13 @@ bool sampleSonarNow(uint32_t now_ms,
   g_sensor.ball_pos_filt_m = x_filt_cm * kCmToM;
   g_sensor.sonar_distance_raw_cm = dist_cm;
 
-  const bool fresh = g_hcsr04.hasFreshSample(now_ms);
+  const bool fresh = g_tfmini.hasFreshSample(now_ms);
   g_sensor.valid_pos = fresh;
 
   if (g_sensor.valid_pos) {
     // Track time of the last accepted sonar sample (not "last time we checked"),
     // so stale/fault timing is consistent even when we hold last-good on timeouts.
-    g_last_valid_pos_ms = static_cast<uint32_t>(now_ms - g_hcsr04.sampleAgeMs(now_ms));
+    g_last_valid_pos_ms = static_cast<uint32_t>(now_ms - g_tfmini.sampleAgeMs(now_ms));
     g_fault_flags.sonar_timeout = false;
     g_fault_flags.pos_oob = fabsf(g_sensor.ball_pos_filt_m) > kBallPosHardLimitM;
   } else {
@@ -438,7 +431,9 @@ void maybeStopJogAtLimits() {
 }
 
 void printHelp() {
-  Serial.println(F("HELP,keys,stepper:y p e1 r"));
+  Serial.println(F("HELP,keys"));
+  // Keep on-device help minimal to save flash; use the host-side serial logger
+  // (analysis/serial_logger.py) for run logs and copy/paste workflows.
 }
 
 void printStatus() {
@@ -507,11 +502,10 @@ void emitTelemetry(uint32_t now_ms) {
 void runJogBlocking(uint32_t timeout_ms) {
   const uint32_t start_ms = millis();
   while (g_stepper.jogActive()) {
-    const uint32_t now_us = micros();
     const uint32_t now_ms = millis();
 
     g_stepper.processIsrFlags();
-    g_hcsr04.service(now_us, now_ms);
+    g_tfmini.service(now_ms);
     // Enforce limit stops while blocking (used by sign calibration jog).
     serviceControl(now_ms);
 
@@ -710,7 +704,7 @@ void printFaultInfo() {
 
 void printSonarDiag() {
   SonarDiag diag;
-  g_hcsr04.getDiag(millis(), diag);
+  g_tfmini.getDiag(millis(), diag);
   Serial.print(F("SONAR_DIAG,has_sample="));
   Serial.print(diag.has_sample ? F("1") : F("0"));
   Serial.print(F(",fresh="));
@@ -751,20 +745,6 @@ void printAs5600Diag() {
   Serial.print(g_as5600.errorCount());
   Serial.print(',');
   Serial.println(read_hz, 2);
-
-  const AS5600Status mag = g_as5600.readStatus();
-  Serial.print(F("AS5600_MAG,ok="));
-  Serial.print(mag.read_ok ? F("1") : F("0"));
-  Serial.print(F(",md="));
-  Serial.print(mag.magnet_detected ? F("1") : F("0"));
-  Serial.print(F(",mh="));
-  Serial.print(mag.too_strong ? F("1") : F("0"));
-  Serial.print(F(",ml="));
-  Serial.print(mag.too_weak ? F("1") : F("0"));
-  Serial.print(F(",agc="));
-  Serial.print(mag.agc);
-  Serial.print(F(",mag="));
-  Serial.println(mag.magnitude);
 }
 
 bool captureSonarCalDistanceCm(float& out_cm) {
@@ -781,14 +761,13 @@ bool captureSonarCalDistanceCm(float& out_cm) {
 
   const uint32_t start_ms = millis();
   while (good < kNeedGood && static_cast<uint32_t>(millis() - start_ms) < kTimeoutMs) {
-    const uint32_t now_us = micros();
     const uint32_t now_ms = millis();
 
     g_stepper.processIsrFlags();
-    g_hcsr04.service(now_us, now_ms);
+    g_tfmini.service(now_ms);
 
     SonarDiag diag;
-    g_hcsr04.getDiag(now_ms, diag);
+    g_tfmini.getDiag(now_ms, diag);
 
     // Only accept true fresh samples (reject "held" values after a timeout).
     if (diag.fresh && diag.has_sample && !diag.timeout) {
@@ -816,8 +795,8 @@ bool captureSonarCalDistanceCm(float& out_cm) {
   return true;
 }
 
-bool readAs5600RawMedianCounts(uint16_t& out_counts) {
-  // Median-of-3 raw samples with wrap handling at 0/4095 boundary.
+bool readAs5600RawMedianDeg(float& out_raw_deg) {
+  // Cheap outlier rejection for calibration: median-of-3 raw samples, with wrap handling.
   uint16_t a = 0, b = 0, c = 0;
   if (!g_as5600.readRaw(a)) {
     return false;
@@ -831,94 +810,86 @@ bool readAs5600RawMedianCounts(uint16_t& out_counts) {
     return false;
   }
 
+  // Unwrap around 'a' so values near 0/4095 don't break the median.
   int16_t ai = static_cast<int16_t>(a);
   int16_t bi = static_cast<int16_t>(b);
   int16_t ci = static_cast<int16_t>(c);
 
   int16_t d = static_cast<int16_t>(bi - ai);
-  if (d > 2048) { bi = static_cast<int16_t>(bi - 4096); }
-  else if (d < -2048) { bi = static_cast<int16_t>(bi + 4096); }
+  if (d > 2048) {
+    bi = static_cast<int16_t>(bi - 4096);
+  } else if (d < -2048) {
+    bi = static_cast<int16_t>(bi + 4096);
+  }
 
   d = static_cast<int16_t>(ci - ai);
-  if (d > 2048) { ci = static_cast<int16_t>(ci - 4096); }
-  else if (d < -2048) { ci = static_cast<int16_t>(ci + 4096); }
+  if (d > 2048) {
+    ci = static_cast<int16_t>(ci - 4096);
+  } else if (d < -2048) {
+    ci = static_cast<int16_t>(ci + 4096);
+  }
 
-  if (ai > bi) { int16_t t = ai; ai = bi; bi = t; }
-  if (bi > ci) { int16_t t = bi; bi = ci; ci = t; }
-  if (ai > bi) { int16_t t = ai; ai = bi; bi = t; }
+  // Median-of-3 on int16.
+  if (ai > bi) {
+    const int16_t t = ai;
+    ai = bi;
+    bi = t;
+  }
+  if (bi > ci) {
+    const int16_t t = bi;
+    bi = ci;
+    ci = t;
+  }
+  if (ai > bi) {
+    const int16_t t = ai;
+    ai = bi;
+    bi = t;
+  }
 
   int16_t med = bi;
-  if (med < 0) { med = static_cast<int16_t>(med + 4096); }
-  else if (med >= 4096) { med = static_cast<int16_t>(med - 4096); }
-  out_counts = static_cast<uint16_t>(med);
-  return true;
-}
-
-bool readAs5600RawMedianDeg(float& out_raw_deg) {
-  uint16_t counts = 0;
-  if (!readAs5600RawMedianCounts(counts)) {
-    return false;
+  if (med < 0) {
+    med = static_cast<int16_t>(med + 4096);
+  } else if (med >= 4096) {
+    med = static_cast<int16_t>(med - 4096);
   }
-  out_raw_deg = (static_cast<float>(counts) * 360.0f) / 4096.0f;
+
+  out_raw_deg = (static_cast<float>(med) * 360.0f) / 4096.0f;
   return true;
 }
 
 bool captureAs5600CalRawDeg(float& out_raw_deg) {
-  // Calibration capture in raw counts domain to avoid 0/360° boundary corruption.
-  // Uses unwrapped int32_t accumulator for EMA, then wraps back to [0°,360°) at end.
+  // Calibration capture needs to be stable: take multiple median-filtered samples,
+  // ignore large jumps, and smooth with a light EMA.
   constexpr uint8_t kNeedGood = AS5600_CAL_NEED_GOOD;
   constexpr uint32_t kTimeoutMs = AS5600_CAL_TIMEOUT_MS;
   constexpr uint8_t kDelayMs = 6;
-  constexpr uint8_t kMaxConsecReject = 5;
-  constexpr int16_t kMaxJumpCounts =
-      static_cast<int16_t>(AS5600_CAL_MAX_JUMP_DEG * (4096.0f / 360.0f));
 
   uint8_t good = 0;
-  int32_t ema_unwrap = 0;  // unwrapped counts, integer EMA
+  float ema = 0.0f;
   bool ema_init = false;
 
-  uint16_t last_counts = 0;
-  int32_t last_unwrap = 0;
+  float last = 0.0f;
   bool last_init = false;
-  uint8_t consec_reject = 0;
 
   const uint32_t start_ms = millis();
   while (good < kNeedGood && static_cast<uint32_t>(millis() - start_ms) < kTimeoutMs) {
-    uint16_t counts = 0;
-    if (readAs5600RawMedianCounts(counts)) {
-      // Unwrap: compute shortest-path delta in counts domain.
-      int16_t delta = static_cast<int16_t>(counts) - static_cast<int16_t>(last_counts);
-      if (delta > 2048) { delta = static_cast<int16_t>(delta - 4096); }
-      else if (delta < -2048) { delta = static_cast<int16_t>(delta + 4096); }
-
+    float v = 0.0f;
+    if (readAs5600RawMedianDeg(v)) {
       if (last_init) {
-        if (abs(delta) > kMaxJumpCounts) {
-          ++consec_reject;
-          if (consec_reject >= kMaxConsecReject) {
-            last_counts = counts;
-            last_unwrap = last_unwrap + static_cast<int32_t>(delta);
-            consec_reject = 0;
-          }
+        const float delta = wrapAngleDeltaDeg(v - last);
+        if (fabsf(delta) > AS5600_CAL_MAX_JUMP_DEG) {
           delay(kDelayMs);
           continue;
         }
       }
-
-      int32_t unwrap = last_init ? (last_unwrap + static_cast<int32_t>(delta)) : static_cast<int32_t>(counts);
-      last_counts = counts;
-      last_unwrap = unwrap;
+      last = v;
       last_init = true;
-      consec_reject = 0;
 
-      // Integer EMA: ema = alpha * sample + (1-alpha) * ema, using fixed-point (alpha=0.3 ≈ 77/256).
       if (!ema_init) {
-        ema_unwrap = unwrap;
+        ema = v;
         ema_init = true;
       } else {
-        // Use float for simplicity (only runs during calibration, not in control loop).
-        ema_unwrap = static_cast<int32_t>(
-            kAs5600EmaAlpha * static_cast<float>(unwrap) +
-            (1.0f - kAs5600EmaAlpha) * static_cast<float>(ema_unwrap));
+        ema = (kAs5600EmaAlpha * v) + ((1.0f - kAs5600EmaAlpha) * ema);
       }
       ++good;
     }
@@ -928,11 +899,7 @@ bool captureAs5600CalRawDeg(float& out_raw_deg) {
   if (!ema_init || good < kNeedGood) {
     return false;
   }
-
-  // Wrap EMA back to [0, 4096) counts, then convert to degrees.
-  int32_t wrapped = ema_unwrap % 4096;
-  if (wrapped < 0) { wrapped += 4096; }
-  out_raw_deg = (static_cast<float>(wrapped) * 360.0f) / 4096.0f;
+  out_raw_deg = ema;
   return true;
 }
 
@@ -1113,41 +1080,31 @@ void printGuideNextAction() {
 
 void printRunBlockedDetails(const AppConditions& cond) {
   Serial.println(F("ERR,run_blocked"));
-  if (!cond.sign_calibrated) {
-    Serial.println(F("BLOCK,sign,try=a"));
-  }
   if (!cond.zero_calibrated) {
-    Serial.println(F("BLOCK,zero,try=z"));
+    Serial.println(F("BLOCK,zero"));
   }
   if (!cond.limits_calibrated) {
-    Serial.println(F("BLOCK,limits,try=l/u"));
+    Serial.println(F("BLOCK,limits"));
+  }
+  if (!cond.sign_calibrated) {
+    Serial.println(F("BLOCK,sign"));
   }
   if (!cond.sensors_ok) {
-    if (g_fault_flags.sonar_timeout) {
-      Serial.println(F("BLOCK,sonar_timeout"));
-    }
-    if (g_fault_flags.i2c_error) {
-      Serial.println(F("BLOCK,i2c_err"));
-    }
-    if (!g_sensor.valid_pos) {
-      Serial.println(F("BLOCK,pos,try=p"));
-    }
-    if (!g_sensor.valid_angle && g_angle_src == 0) {
-      Serial.println(F("BLOCK,angle,try=y"));
-    }
+    Serial.println(F("BLOCK,sensors"));
   }
   if (cond.faults_active) {
-    if (g_fault_flags.angle_oob) {
-      Serial.println(F("BLOCK,angle_oob"));
-    }
-    if (g_fault_flags.pos_oob) {
-      Serial.println(F("BLOCK,pos_oob"));
-    }
-    printFaultInfo();
+    Serial.println(F("BLOCK,faults"));
   }
   if (!cond.inner_loop_stable) {
     Serial.println(F("BLOCK,inner_loop"));
   }
+  if (cond.faults_active) {
+    printFaultInfo();
+  }
+  if (!cond.sensors_ok) {
+    printSonarDiag();
+  }
+  printGuideNextAction();
 }
 
 void handleCommand(char* line) {
@@ -1782,6 +1739,11 @@ void serviceControl(uint32_t now_ms) {
       return;
     }
 
+    // Brief sonar dropout: hold last motor command instead of disabling.
+    if (!g_sensor.valid_pos) {
+      return;
+    }
+
     g_setpoint.ball_pos_m_target = g_setpoint.ball_pos_cm_target * kCmToM;
 
     float theta_min_rad = -kThetaCmdLimitRad;
@@ -1819,31 +1781,10 @@ void serviceControl(uint32_t now_ms) {
   }
 }
 
-void handleEchoPcintIsr() {
-  if (g_echo_pin_reg == nullptr || g_echo_pin_mask == 0) {
-    return;
-  }
-
-  const bool level_high = ((*g_echo_pin_reg) & g_echo_pin_mask) != 0;
-  g_hcsr04.handleEchoEdgeIsr(micros(), level_high);
-}
-
 }  // namespace
 
 ISR(TIMER1_COMPA_vect) {
   g_stepper.handleTimerCompareIsr();
-}
-
-ISR(PCINT0_vect) {
-  handleEchoPcintIsr();
-}
-
-ISR(PCINT1_vect) {
-  handleEchoPcintIsr();
-}
-
-ISR(PCINT2_vect) {
-  handleEchoPcintIsr();
 }
 
 void setup() {
@@ -1860,8 +1801,7 @@ void setup() {
 
   Wire.begin();
   const bool i2c_ok = g_as5600.begin(Wire, AS5600_I2C_ADDR);
-  g_hcsr04.begin();
-  setupEchoPcint();
+  g_tfmini.begin();
 
   g_fault_flags = FaultFlags{};
   if (!i2c_ok) {
@@ -1883,11 +1823,10 @@ void setup() {
 }
 
 void loop() {
-  const uint32_t now_us = micros();
   const uint32_t now_ms = millis();
 
   g_stepper.processIsrFlags();
-  g_hcsr04.service(now_us, now_ms);
+  g_tfmini.service(now_ms);
   pollSerial();
 
   if (static_cast<uint32_t>(now_ms - g_last_control_ms) >= kControlPeriodMs) {

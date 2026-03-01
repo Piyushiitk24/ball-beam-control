@@ -25,11 +25,13 @@ plant:
 
 limits:
   theta_cmd_deg: 8.0
-  step_rate_sps: 1800.0
+  step_rate_sps: 5000.0
 
 actuator:
   phi_tau_s: 0.08
   torque_limit_nm: 0.35
+  stepper_steps_per_rev: 3200  # 200 full-steps * 16 microsteps
+  linkage_ratio: 0.1475        # r_crank / L_arm = 47.65mm / 323.08mm
 
 calibration:
   theta_from_phi:
@@ -37,7 +39,7 @@ calibration:
     linear:
       phi0_rad: 0.0
       theta0_rad: 0.0
-      gain_theta_per_phi: 1.0
+      gain_theta_per_phi: 0.1475  # crank-rocker linkage ratio
     hysteresis:
       enabled: false
       up:

@@ -1,502 +1,344 @@
 # Ball & Beam Control
 
-Ball and beam firmware + first-principles modeling + run analysis.
+Stepper-driven ball-beam balancer: firmware (C++/PlatformIO) + first-principles gain design (Python) + telemetry analysis.
 
-## Project Root
+---
 
-`/Users/piyush/code/ball-beam-control`
-
-PlatformIO extension note:
-- Repo root now contains `platformio.ini` as a wrapper for `firmware/platformio.ini`, so opening the top-level folder in VS Code is supported.
-
-## Quick Start (Offline)
-
-1. Open the repo in VS Code.
-2. Create and activate Python virtual environment using your custom command:
+## 1 — Build & Upload (One-Time or After Code Changes)
 
 ```bash
-mkvenv
+cd /Users/piyush/code/ball-beam-control
+
+# Generate gains from measured plant parameters
+./.venv/bin/python model/first_principles/design_cascade_pid.py \
+    --params model/first_principles/params_measured_v1.yaml
+./.venv/bin/python model/first_principles/export_gains.py
+
+# Build
+cd firmware && pio run -e nano_new
+
+# Upload (close any monitor first!)
+pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
 ```
 
-3. Install dependencies inside `.venv`:
+> If upload hangs, try `nano_old` (57600 baud bootloader).
+> If auto-detect picks Bluetooth, add `--upload-port /dev/cu.usbserial-*`.
+
+---
+
+## 2 — Connect
 
 ```bash
-pip install -r /Users/piyush/code/ball-beam-control/requirements.txt
+cd /Users/piyush/code/ball-beam-control
+./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1
 ```
 
-4. Generate SI-consistent controller gains and exported firmware header:
+Logger local commands: `/help`, `/diag`, `/bringup`, `/quit`.  
+Raw fallback: `cd firmware && pio device monitor -b 115200 --echo --filter send_on_enter --eol LF`
+
+---
+
+## 3 — Calibration (Step-by-Step, No Ambiguity)
+
+### Run Preconditions
+
+`r` (run) is **blocked** unless ALL of these are true:
+
+| Condition | What satisfies it | Command |
+|-----------|-------------------|---------|
+| **Angle zero captured** | AS5600 reference stored | `a` |
+| **Position zero captured** | Sonar center stored | `p` |
+| **Lower limit captured** | Beam DOWN limit stored | `l` (or `[` or `1`) |
+| **Upper limit captured** | Beam UP limit stored | `u` (or `]` or `2`) |
+| **Signs calibrated** | AS5600/stepper/sonar signs derived | `b` then `g` |
+| **Sensors OK** | AS5600 + sonar returning valid data | (automatic) |
+| **No faults** | Fault flags clear | `f` to clear |
+
+> In **stepper-count mode** (`y`): sign, limits, and angle-zero are bypassed.  
+> Only `p` + valid sonar are required.
+
+### Full Calibration Sequence (AS5600 Mode)
+
+Do this on first power-up or after `d` (reset defaults). Steps are **order-sensitive**.
+
+```
+Step  Command   Action                                          You do
+────  ────────  ──────────────────────────────────────────────  ──────────────────────────
+ 0    s         Status — confirm firmware version, sensor OK    Read output
+ 1    t         Toggle telemetry OFF (reduces noise)            —
+ 2    a         Capture angle zero                              Level the beam horizontally
+ 3    p         Capture position zero                           Place ball at beam center
+ 4    l         Capture lower angle limit                       Tilt beam fully DOWN by hand
+ 5    u         Capture upper angle limit                       Tilt beam fully UP by hand
+ 6    e 1       Enable stepper driver                           —
+ 7    b         Begin sign calibration                          Keep hands clear — motor jogs
+                (auto-derives AS5600 sign + stepper dir sign)
+ 8    g         Save sign calibration                           Motor should be at far end
+                (derives sonar sign from near/far distance)
+                If `g` shows ERR, use: sonar sign 1  (or -1)
+ 9    v         Save ALL calibration to EEPROM                  —
+10    s         Status — confirm all flags = yes                Read output
+```
+
+After `v`, calibration **persists across reboots**. You only need to redo this if hardware changes.
+
+### Quick Re-Calibration (Already Saved in EEPROM)
+
+On subsequent power-ups, calibration auto-loads. Just verify:
+
+```
+s         # all flags should show "yes"
+e 1       # enable driver
+r         # run!
+```
+
+If any flag shows "no", redo that specific step from the table above, then `v` to re-save.
+
+---
+
+## 4 — Run
+
+```
+e 1       # enable stepper driver
+r         # start closed-loop control
+t         # turn on telemetry (if off)
+```
+
+**If `r` prints `ERR,run_blocked`**: the firmware also prints `BLOCK,<reason>` lines telling you exactly what's missing. Common fixes:
+
+| BLOCK message | Fix |
+|---------------|-----|
+| `BLOCK,sign` | Run `b` then `g` (sign calibration) |
+| `BLOCK,zero` | Run `a` and/or `p` |
+| `BLOCK,limits` | Run `l` and `u` |
+| `BLOCK,sensors` | Check wiring; run `sonar diag` / `as5600 diag` |
+| `BLOCK,faults` | Run `f` to clear; check `x` for details |
+
+### Stop
+
+```
+k         # stop control loop
+e 0       # disable driver (optional, saves power)
+```
+
+### Quit Logger
+
+```
+/quit     # sends k → e 0 → exits cleanly
+```
+
+---
+
+## 5 — Telemetry & Analysis
+
+Telemetry line format (10 Hz while RUNNING):
+```
+TEL,<t_ms>,<state>,<x_cm>,<x_filt_cm>,<theta_deg>,<theta_cmd_deg>,<u_step_rate>,<fault_flags>
+```
 
 ```bash
-python model/first_principles/design_cascade_pid.py
-python model/first_principles/export_gains.py
+cd /Users/piyush/code/ball-beam-control
+
+# Plot latest run
+LATEST="$(ls -t data/runs/run_*_telemetry.csv | head -n 1)"
+./.venv/bin/python analysis/plot_run.py --input "$LATEST"
+
+# Compare two runs
+./.venv/bin/python analysis/compare_runs.py \
+    --a data/runs/<run_a>_telemetry.csv \
+    --b data/runs/<run_b>_telemetry.csv
 ```
 
-5. Build firmware for both Nano upload profiles:
+---
 
-```bash
-cd firmware
-pio run -e nano_new
-pio run -e nano_old
-```
-
-## Runtime Architecture (Hardening v2)
-
-- Step pulses are generated in a Timer1 ISR with integer scheduling only.
-- ISR stepping path avoids float math and `digitalWrite()`.
-- HC-SR04 echo capture uses PCINT timestamp ISR (edge+time+flag only).
-- Sonar filtering/mapping runs in the main thread.
-- Control math is SI internal (`m`, `rad`) and telemetry stays human-readable (`cm`, `deg`).
-
-## Firmware Notes
-
-- Target MCU: Arduino Nano (ATmega328P)
-- Driver: TMC2209 in STEP/DIR mode
-- Sensor 1: AS5600 (I2C addr `0x36`)
-- Sensor 2: HC-SR04 ultrasonic
-- Current hardware note: HC-SR04 calibration steps use a flat target for stable echoes.
-- Closed-loop mode always requires sonar position to be valid (`pos=ok`).
-- Default angle source is AS5600, where `run` is blocked until runtime calibration is complete (`zero + limits + sign`).
-- Optional: press `y` to switch to **stepper-count angle** mode (reference-style).
-  Angle is computed from step counts with a fixed travel limit (±`25` full steps at `16x` microstepping), and `run` no longer depends on AS5600 calibration flags (still requires `p` + valid sonar).
-
-## Sonar Filtering Tuning (HC-SR04)
-
-The firmware uses a non-blocking PCINT echo-capture ISR and then applies:
-
-- Rolling median across time (not a NewPing "burst")
-- Minimum-valid-in-window gating (reject medians dominated by failures)
-- EMA smoothing on top
-- "Hold last-good until stale": intermittent timeouts do not instantly make `pos=bad`
-
-Defaults (chosen to match the working standalone sketch feel):
-
-- Trigger period: `SONAR_TRIGGER_PERIOD_US=40000` (about `delay(40)`)
-- Echo timeout: `SONAR_ECHO_TIMEOUT_US=25000`
-- Median window: `SONAR_MEDIAN_WINDOW=11` (matches `ping_median(11)` intent; reduce to 7/9 if you want less lag)
-- Min valid in window: `SONAR_MIN_VALID_IN_WINDOW=1` (curved targets often need this; raise to 3..5 if you see garbage)
-- EMA alpha: `SONAR_EMA_ALPHA=0.6` (0.6 responsive; try 0.3 for smoother)
-- Fresh/hold window: `SONAR_POS_SAMPLE_FRESH_MS=200` (roughly `MAX_BAD=5` at 40 ms)
-- Max valid distance clamp: `SONAR_MAX_VALID_MM=650.0f` (set to ~1.2x your beam's usable distance span)
-
-Note on window sizing vs NewPing:
-- `NewPing::ping_median(11)` is a fast burst of 11 pings in a short time.
-- This firmware's median window is spread over time (e.g., 7 samples at 40 ms is ~280 ms of history),
-  so increasing the window adds noticeable lag while the ball is moving.
-
-To override quickly in PlatformIO, add `-D` flags under `build_flags`:
-
-```ini
-; firmware/platformio.ini
-build_flags =
-  -D SONAR_MEDIAN_WINDOW=7
-  -D SONAR_MIN_VALID_IN_WINDOW=3
-  -D SONAR_POS_SAMPLE_FRESH_MS=200
-  -D SONAR_MAX_VALID_MM=500.0f
-  -D SONAR_EMA_ALPHA=0.3f
-```
-
-## AS5600 Filtering Tuning
-
-The AS5600 angle reading is filtered in firmware to tolerate occasional glitches/jumps:
-
-- Each sample uses a wrap-safe median-of-3 raw reads (cheap outlier rejection).
-- Large per-sample jumps are **slew-limited** (not rejected) so a single spike does not make angle stale.
-- Then an EMA is applied.
-
-Key tuning macros (in `firmware/include/config.h`, override via PlatformIO `-D` flags):
-
-- `AS5600_EMA_ALPHA` (default `0.3f`): lower is smoother but adds lag (try `0.2f..0.4f`).
-- `AS5600_MAX_JUMP_DEG` (default `25.0f`): maximum per-sample delta allowed before slew limiting.
-
-Calibration capture is also filtered (multi-sample + jump reject + EMA):
-- `AS5600_CAL_NEED_GOOD`, `AS5600_CAL_TIMEOUT_MS`, `AS5600_CAL_MAX_JUMP_DEG`
-
-## Serial Commands (Primary UX: Quick Keys)
+## 6 — Serial Command Reference
 
 ### Quick Keys
 
-| Key | Action | Full command equivalent |
-|---|---|---|
-| `?` / `h` | help | `help` |
-| `s` | status | `status` |
-| `t` | toggle telemetry | `telemetry 0|1` |
-| `y` | toggle angle source (AS5600 <-> stepper-count) | *(quick key only)* |
-| `e 0|1` | driver enable/disable | `en 0|1` |
-| `j <steps> <rate>` | jog motor | `jog <signed_steps> <rate>` |
-| `a` | capture angle zero | `cal_zero set angle` |
-| `p` | capture position zero | `cal_zero set position` |
-| `z` | show zero calibration | `cal_zero show` |
-| `[` / `l` / `1` | capture physical DOWN limit | `cal_limits set down` |
-| `]` / `u` / `2` | capture physical UP limit | `cal_limits set up` |
-| `m` | show limits | `cal_limits show` |
-| `b` | sign calibration begin | `cal_sign begin` |
-| `g` | sign calibration save | `cal_sign save` |
-| `v` | save calibration to EEPROM | `cal_save` |
-| `o` | load calibration from EEPROM | `cal_load` |
-| `d` | reset runtime defaults | `cal_reset defaults` |
-| `i` | status (alias) | `status` |
-| `x` | print decoded fault help | `faults` |
-| `sonar diag` | print sonar health stats | `sonar diag` |
-| `as5600 diag` | print AS5600 health stats | `as5600 diag` |
-| `sonar sign 1|-1` | manual sonar sign override | `sonar sign 1|-1` |
-| `r` | start control | `run` |
-| `k` | stop control | `stop` |
-| `f` | clear fault | `fault_reset` |
+| Key | Action | Notes |
+|-----|--------|-------|
+| `h` / `?` | Help | |
+| `s` / `i` | Status | Shows state, calibration flags, sensor health |
+| `t` | Toggle telemetry | Suppress during calibration |
+| `y` | Toggle angle source | AS5600 ↔ stepper-count |
+| `e 0\|1` | Driver disable/enable | |
+| `j <steps> <rate>` | Jog motor | Positive = upward |
+| `a` | Capture angle zero | Beam level |
+| `p` | Capture position zero | Ball at center |
+| `l` / `[` / `1` | Capture lower limit | Beam at max DOWN |
+| `u` / `]` / `2` | Capture upper limit | Beam at max UP |
+| `z` | Show zero calibration | |
+| `m` | Show limits | |
+| `b` | Sign cal — begin | Motor jogs, derives AS5600/stepper signs |
+| `g` | Sign cal — save | Derives sonar sign from distance change |
+| `sonar sign ±1` | Manual sonar sign | Bypass `g` if needed |
+| `v` | Save cal to EEPROM | Persists across reboots |
+| `o` | Load cal from EEPROM | Normally auto at boot |
+| `d` | Reset to defaults | Clears all calibration (RAM only until `v`) |
+| `r` | Run (start control) | Checks all preconditions |
+| `k` | Stop | |
+| `f` | Clear faults | |
+| `x` | Print fault details | Decoded fault flags + sonar diag |
+| `sonar diag` | Sonar health | timeout_cnt, valid_streak, freshness |
+| `as5600 diag` | AS5600 health | status, AGC, raw angle, error count |
 
-### Full Commands (Compatibility)
+---
 
-- `help`
-- `status`
-- `telemetry 0|1`
-- `en 0|1`
-- `jog <signed_steps> <rate>`
-- `cal_zero set angle|position`
-- `cal_zero show|angle|position`
-- `cal_limits set down|up|lower|upper`
-- `cal_limits show`
-- `cal_sign begin|save`
-- `sonar diag | sonar sign 1|-1`
-- `as5600 diag`
-- `cal_save`
-- `cal_load`
-- `cal_reset defaults`
-- `run`
-- `stop`
-- `fault_reset`
+## 7 — Architecture Overview
 
-## Calibration Workflow
+### Control Loop
 
-Preferred workflow:
+- **50 Hz** cascade PID in main thread
+- **Outer loop**: position error (m) → angle command (rad)
+- **Inner loop**: angle error (rad) → step rate (microsteps/s)
+- Gains auto-generated in `firmware/include/generated/controller_gains.h` — **never edit by hand**
 
-1. Use the host-side logger and run `/bringup` (recommended).
-2. Follow the prompts (flat target for sonar, then `p`, then `a`, then limits `l/u`, then save).
-3. Use `e 1` + `j ...` to sanity-check motion, then `r` to run.
+### ISR Design
 
-If AS5600 is flaky and you want to bypass it (stepper-count angle mode):
+- **Timer1 CTC** (40 kHz): step-pulse generation, integer-only, no `digitalWrite()`
+- **PCINT** (HC-SR04 only): echo timestamp capture, flag + time only
 
-```text
-sonar diag          # make sure sonar is stable with a flat target
-p                  # capture sonar center at beam center
-y                  # switch to stepper-count angle (zeros step position at current angle)
-e 1
-r                  # requires target present (pos=ok)
-k
+### State Machine
+
+```
+SAFE_DISABLED → CALIB_SIGN → READY ⇄ CALIB_SCALE → RUNNING → FAULT
 ```
 
-Manual calibration flow (AS5600 mode) stays available using quick keys:
+### Angle Source Modes
 
-```text
-t
-a
-p
-[
-]
-b
-g        # optional if sonar near/far capture is valid
-# OR use manual sonar sign:
-# sonar sign 1
-v
-t
-s
-r
-```
+| Mode | Key | Angle from | Run requires |
+|------|-----|------------|--------------|
+| AS5600 (default) | — | I2C sensor | `a` + `p` + `l` + `u` + `b`/`g` + sensors OK |
+| Stepper-count | `y` | Step counter | `p` + sensors OK |
 
-See `docs/calibration_signs.md`.
+---
 
-## What Changed (Important)
+## 8 — Sensor Variants
 
-- You no longer need to edit `firmware/include/calibration.h` for normal bring-up.
-- Zero, limits, and sign are now captured at runtime via serial commands.
-- Calibration is persisted on-device with `cal_save` and restored at boot.
-- In AS5600-angle mode, `run` is blocked until runtime calibration is complete (`zero + limits + sign`).
-- In stepper-count angle mode (`y`), `run` only requires `p` (sonar center captured) and valid sonar (`pos=ok`).
-- Use `telemetry 0` while entering commands if monitor spam is distracting.
-- In bring-up states, sensor faults are warnings/blockers (not forced FAULT latch).
-- In `RUNNING`, faults remain hard safety faults.
+### Current: TFMini v1.7 (LiDAR)
 
-## Daily Workflow (Short)
+Wiring: TFMini TX → Nano D10, TFMini RX → Nano D11, common GND.
 
-1. Upload firmware from VS Code task: `Firmware: Upload (nano_new)` (or `nano_old`).
-2. Start the serial logger task: `Firmware: Serial Logger (CSV+Events)` (recommended).
-   Raw/debug fallback: `Firmware: Monitor (115200)`.
-3. If calibration is missing/incomplete, run:
-```text
-/bringup
-```
-4. Start closed-loop control:
-```text
-s
-e 1
-r
-```
-Stop any time:
-```text
-k
-e 0
-```
-5. Quit the logger with `/quit` (it sends `k` then `e 0` before exiting).
-
-Manual bring-up stays available using quick keys:
-```text
-telemetry 0
-cal_zero set angle
-cal_zero set position
-cal_limits set down
-cal_limits set up
-cal_sign begin
-cal_sign save            # optional if sonar near/far is valid
-# or manual sonar sign:
-# sonar sign 1
-cal_save
-telemetry 1
-status
-run
-```
-On next power-up, run `cal_load` only if needed; normally saved calibration auto-loads.
-
-## AS5600 Debug Workflow (Isolation Test)
-
-Use this when you see `i2c_error` / `angle_oob` and want to validate the AS5600 reading stability and span.
-
-1. Switch firmware `main.cpp` to the AS5600 checker (backs up the current main):
-
+Switch firmware:
 ```bash
-cd /Users/piyush/code/ball-beam-control
-./.venv/bin/python analysis/switch_firmware_main.py --mode as5600_check
-```
-
-2. Upload:
-
-```bash
-cd firmware
-pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
-```
-
-3. Start the serial logger:
-
-```bash
-cd /Users/piyush/code/ball-beam-control
-./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1
-```
-
-4. In the logger, capture three positions (type each key and press Enter):
-
-```text
-L
-C
-U
-P
-```
-
-5. Quit the logger:
-```text
-/quit
-```
-
-6. Restore normal BallBeam firmware:
-```bash
-cd /Users/piyush/code/ball-beam-control
-./.venv/bin/python analysis/switch_firmware_main.py --mode ballbeam
-```
-
-All logs are saved under `data/runs/` as:
-- `run_<stamp>_raw.log`
-- `run_<stamp>_events.txt`
-- `run_<stamp>_telemetry.csv` (BallBeam firmware only; AS5600 checker emits AS5600_* lines instead)
-
-## TFMini A/B Workflow (Backup Variant)
-
-Use this to test Benewake TFMini v1.7 against HC-SR04 while keeping the same host commands/protocol.
-
-Wiring (Nano):
-- TFMini `TX` -> Nano `D10` (`PIN_TFMINI_RX`)
-- TFMini `RX` -> Nano `D11` (`PIN_TFMINI_TX`)
-- Common `GND`
-- Sensor power per TFMini spec
-
-Switch to TFMini firmware:
-
-```bash
-cd /Users/piyush/code/ball-beam-control
 ./.venv/bin/python analysis/switch_firmware_main.py --mode tfmini
-cd firmware
-pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
+cd firmware && pio run -e nano_new -t upload
 ```
 
-Run (same logger commands as HC-SR04):
+### Default: HC-SR04 (Ultrasonic)
 
+Restore:
 ```bash
-cd /Users/piyush/code/ball-beam-control
-./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1
-```
-
-Then in logger:
-
-```text
-/diag
-sonar diag
-s
-e 1
-r
-k
-/quit
-```
-
-Restore default HC-SR04 firmware:
-
-```bash
-cd /Users/piyush/code/ball-beam-control
 ./.venv/bin/python analysis/switch_firmware_main.py --mode ballbeam
-cd firmware
-pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
+cd firmware && pio run -e nano_new -t upload
 ```
 
-## Run Workflow (Recommended, Using Serial Logger)
-
-1. Power on the Nano and connect USB.
-2. Start the serial logger:
+### Isolation Tests
 
 ```bash
-cd /Users/piyush/code/ball-beam-control
-./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1
+# AS5600 only
+./.venv/bin/python analysis/switch_firmware_main.py --mode as5600_check
+# HC-SR04 only
+./.venv/bin/python analysis/switch_firmware_main.py --mode hcsr04_check
+# Restore
+./.venv/bin/python analysis/switch_firmware_main.py --mode ballbeam
 ```
 
-3. Capture a diagnostic snapshot into your logs:
+---
 
-```text
-/diag
-```
+## 9 — Gain Design Pipeline
 
-4. If calibration is missing/incomplete, run:
-
-```text
-/bringup
-```
-
-5. Ensure device telemetry is ON (needed for `*_telemetry.csv`):
-
-```text
-telemetry 1
-```
-
-6. Start a run:
-
-```text
-s
-f          # only if faults are active
-e 1
-r
-```
-
-7. Stop and quit safely:
-
-```text
-k
-/quit
-```
-
-8. Plot the latest telemetry file:
+Source of truth: `model/first_principles/params_measured_v1.yaml`
 
 ```bash
-cd /Users/piyush/code/ball-beam-control
-LATEST="$(ls -t data/runs/run_*_telemetry.csv | head -n 1)"
-./.venv/bin/python analysis/plot_run.py --input "$LATEST"
-```
-
-## First Hardware Bring-Up Checklist
-
-Run this sequence exactly for first power-up after assembly.
-
-1. From repo root, generate gains from measured parameters:
-
-```bash
-cd /Users/piyush/code/ball-beam-control
-./.venv/bin/python model/first_principles/design_cascade_pid.py --params model/first_principles/params_measured_v1.yaml
+# 1. Edit params if hardware changed
+# 2. Design gains
+./.venv/bin/python model/first_principles/design_cascade_pid.py \
+    --params model/first_principles/params_measured_v1.yaml
+# 3. Export to firmware header
 ./.venv/bin/python model/first_principles/export_gains.py
+# 4. Build + upload
+cd firmware && pio run -e nano_new -t upload
 ```
 
-2. Build and upload firmware:
+---
 
-```bash
-cd firmware
-pio run -e nano_new -t upload
+## 10 — Sonar Filtering Tuning (HC-SR04)
+
+Non-blocking PCINT echo-capture → rolling median → min-valid gating → EMA → hold-last-good.
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `SONAR_TRIGGER_PERIOD_US` | 40000 | Ping interval (~25 Hz) |
+| `SONAR_ECHO_TIMEOUT_US` | 25000 | Max echo wait |
+| `SONAR_MEDIAN_WINDOW` | 11 | Samples in rolling median |
+| `SONAR_MIN_VALID_IN_WINDOW` | 1 | Min valid in window |
+| `SONAR_EMA_ALPHA` | 0.6f | EMA smoothing (lower = smoother) |
+| `SONAR_POS_SAMPLE_FRESH_MS` | 200 | Hold-last-good window |
+| `SONAR_MAX_VALID_MM` | 650.0f | Distance clamp |
+
+Override via `build_flags` in `firmware/platformio.ini`:
+```ini
+build_flags = -D SONAR_MEDIAN_WINDOW=7 -D SONAR_EMA_ALPHA=0.3f
 ```
 
-If upload fails due to bootloader profile mismatch:
+---
 
-```bash
-pio run -e nano_old -t upload
-```
+## 11 — AS5600 Filtering Tuning
 
-If upload auto-detects Bluetooth instead of the Nano, force the USB port:
+Median-of-3 raw reads → slew-limit → EMA.
 
-```bash
-pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
-```
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `AS5600_EMA_ALPHA` | 0.3f | EMA smoothing |
+| `AS5600_MAX_JUMP_DEG` | 25.0f | Max per-sample delta |
 
-Important:
-- Close monitor before upload (`Ctrl+C`), or upload can fail.
-- After reboot, run `h`. New firmware must show `HELP,keys` and `sonar diag`.
-- If you still see old `STEP,1,cmd=t...` menu, old firmware is still running.
+---
 
-3. Find serial port:
+## 12 — Key Files
 
-```bash
-pio device list
-```
+| File | Purpose |
+|------|---------|
+| `firmware/src/main.cpp` | Main firmware (switchable) |
+| `firmware/include/config.h` | Loop rates, limits, unit constants |
+| `firmware/include/types.h` | `SensorData`, `Setpoint`, `ActuatorCmd`, `FaultFlags` |
+| `firmware/include/generated/controller_gains.h` | **Auto-generated** PID gains |
+| `firmware/include/app/state_machine.h` | State machine |
+| `firmware/src/calibration_runtime.cpp` | Runtime cal + EEPROM persistence |
+| `model/first_principles/params_measured_v1.yaml` | Plant parameters (source of truth) |
+| `model/first_principles/design_cascade_pid.py` | Gain design script |
+| `model/first_principles/export_gains.py` | Gains → firmware header |
+| `analysis/serial_logger.py` | Primary host logger |
+| `analysis/switch_firmware_main.py` | Firmware variant switcher |
+| `analysis/plot_run.py` | 4-panel telemetry plot |
+| `analysis/compare_runs.py` | Side-by-side run comparison |
+| `docs/calibration_signs.md` | Sign convention reference |
 
-4. Open serial monitor:
+---
 
-Recommended monitor (simple, logs every run to `data/runs/` as raw log + events.txt + telemetry.csv):
+## 13 — Flash Budget
 
-```bash
-cd /Users/piyush/code/ball-beam-control
-./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1
-```
+ATmega328P: 30,720 bytes flash, 2,048 bytes RAM.
 
-Tip: type `/help` for local commands, `/diag` to capture a diagnostic burst, `/quit` to exit safely.
+When adding code:
+- `F()` macro for all `Serial.print` string literals
+- Reuse existing buffers
+- No `std::` containers or new virtual functions
+- Check: `pio run -e nano_new` reports usage
 
-Raw/debug fallback (PlatformIO monitor):
+---
 
-```bash
-pio device monitor -b 115200 --echo --filter send_on_enter --eol LF
-```
+## 14 — Common Pitfalls
 
-5. In monitor, run:
-
-```text
-help
-status
-```
-
-6. Run guided calibration in the logger (recommended):
-
-```text
-/bringup
-```
-
-If AS5600 is unreliable, you can still proceed using stepper-count angle mode:
-
-```text
-p
-y
-```
-
-8. Sanity check:
-
-```text
-s
-e 1
-j 120 500
-j -120 500
-e 0
-```
-
-9. Start closed-loop control:
-
-```text
-r
-```
+| Pitfall | Fix |
+|---------|-----|
+| `ERR,run_blocked` with no obvious reason | You forgot sign calibration (`b` then `g`) |
+| Editing `controller_gains.h` by hand | Always regenerate via `export_gains.py` |
+| Float math in ISR | Never — use integer only |
+| Upload hangs | Wrong bootloader profile, or monitor still open |
+| Motor barely moves | Inner gains too low — re-run design pipeline |
+| `FAULT` immediately on `r` | Sonar dropout — check `sonar diag`, increase `SONAR_POS_SAMPLE_FRESH_MS` |
+| Wrong motor direction | Sign calibration is wrong — redo `b` + `g` |
 
 Stop when needed:
 

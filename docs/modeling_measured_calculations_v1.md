@@ -112,6 +112,62 @@ Core finalized now:
 
 Still pending for true final model:
 - `beam_com_h_m`
-- linkage geometry consistency (`33.5 mm` vs `47.65 mm` interpretation)
 - damping/friction identification
 - calibrated `theta=f(phi)` and `x=g(d,theta)` maps
+
+## 8) Linkage Geometry (Crank-Rocker)
+
+Motor shaft to upper linkage joint (crank arm length, measured with caliper):
+- `r_crank = 47.65 mm`
+
+Pivot-to-motor-hole center-to-center (from Section 5 above):
+- `L_arm = 323.08 mm`
+
+Linkage ratio (small-angle linear approximation):
+- `linkage_ratio = r_crank / L_arm = 47.65 / 323.08 = 0.1475`
+
+This ratio is the beam-angle per motor-angle scaling.
+It appears in three places in the model:
+- `actuator.linkage_ratio` in `params_measured_v1.yaml`
+- `calibration.theta_from_phi.linear.gain_theta_per_phi` in `params_measured_v1.yaml`
+- Inner-loop plant gain: `K_beam = (2π / steps_per_rev) × linkage_ratio`
+
+Note: `33.5 mm` (motor_shaft_to_beam_motor_hole_hypotenuse_at_theta0_m) is the
+straight-line distance from motor shaft to beam hole at θ=0.  The `47.65 mm`
+is the actual crank arm length (motor shaft center to upper joint bolt center).
+
+## 9) Motor, Driver, and Torque Budget
+
+### 9.1 Motor and driver specs
+
+- Motor: NEMA 17HS4401-D (dual shaft), 1.7 A/phase, 0.40 N·m holding torque
+- Driver: Two Trees TMC2209 V2.0, STEP/DIR mode (no UART config)
+- Microstepping: 1/16 (hardware DIP switches), 3200 µsteps/rev
+- Supply: 12 V DC
+- Vref: 1.2 V → I_rms ≈ 1.2 / 0.88 ≈ 1.36 A (80% of rated 1.7 A)
+
+### 9.2 Torque budget at maximum tilt
+
+At `θ_max = 8°`:
+
+Gravity torque on beam assembly (referred to motor shaft):
+- `τ_gravity_beam = M_b · g · l_b · sin(θ) / linkage_ratio`
+- `= 0.1392 × 9.81 × 0.145 × sin(8°) / 0.1475`
+- `≈ 0.19 N·m` at the motor shaft
+
+Inertial torque for inner-loop bandwidth (worst case, J only):
+- `τ_inertial = J · ωn_i² · θ_max / linkage_ratio`
+- `= 0.00439 × 25.13² × 0.14 / 0.1475`
+- `≈ 0.034 N·m` at the motor shaft (within steady-state, not accounting for peak transient)
+
+Total worst-case: `≈ 0.22 N·m` (below 0.32 N·m available at 80% rated current)
+
+### 9.3 Margin
+
+Available torque at Vref 1.2 V: ~80% × 0.40 = 0.32 N·m.
+Worst-case demand: 0.22 N·m.
+Margin: ~45%. Adequate for 8° operation with safety factor.
+
+At higher speeds (>1000 sps), stepper torque drops due to back-EMF and
+inductance effects.  5000 sps ≈ 1.56 rev/s — still well within the useful
+torque curve for a 17HS4401 at 12 V.

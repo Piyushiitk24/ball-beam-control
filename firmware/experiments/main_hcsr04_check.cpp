@@ -23,6 +23,8 @@
 
 namespace {
 
+using namespace bb;
+
 // ----- Sonar timing constants (same as main firmware) -----
 constexpr uint32_t kTriggerPeriodUs = 40000UL;
 constexpr uint32_t kEchoTimeoutUs   = 25000UL;

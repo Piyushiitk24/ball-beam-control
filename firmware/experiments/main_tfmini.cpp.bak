@@ -8,6 +8,11 @@
 #include "app/state_machine.h"
 #include "calibration.h"
 #include "calibration_runtime.h"
+
+// TFMini + SoftwareSerial at 115200 drops frames when Timer1 40 kHz ISR is
+// active.  Widen the "fresh" window so hasFreshSample() bridges brief gaps.
+#define SONAR_POS_SAMPLE_FRESH_MS 500UL
+
 #include "config.h"
 #include "control/cascade_controller.h"
 #include "hal/stepper_tmc2209.h"
@@ -182,8 +187,9 @@ float parseFloatFast(const char* s) {
 }
 
 uint32_t activeStaleThresholdMs() {
+  // Wider running threshold for SoftwareSerial dropout tolerance.
   return (g_state_machine.state() == AppState::RUNNING)
-             ? kSensorInvalidFaultMsRunning
+             ? 1500UL
              : kSensorInvalidFaultMsBringup;
 }
 
@@ -1730,6 +1736,11 @@ void serviceControl(uint32_t now_ms) {
   if (g_state_machine.state() == AppState::RUNNING) {
     if (hasAnyFault()) {
       applySafeDisable();
+      return;
+    }
+
+    // Brief sonar dropout: hold last motor command instead of disabling.
+    if (!g_sensor.valid_pos) {
       return;
     }
 

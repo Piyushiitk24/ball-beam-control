@@ -37,9 +37,16 @@ def design_gains(params: dict) -> dict:
     wn_i = 2.0 * np.pi * inner_bw_hz
     wn_o = 2.0 * np.pi * outer_bw_hz
 
-    # PI on first-order actuator approximation: tau*s^2 + (1+Kp)s + Ki = 0
-    kpi = max(0.05, (2.0 * inner_zeta * wn_i * tau) - 1.0)
-    kii = max(0.05, (wn_i**2) * tau)
+    # Stepper integrator plant: theta_beam(s)/step_rate(s) = K_beam/s
+    # K_beam = (2*pi / steps_per_rev) * linkage_ratio  (rad beam per microstep)
+    # PI on integrator: s^2 + Kp*K_beam*s + Ki*K_beam = 0
+    # Match to: s^2 + 2*zeta*wn*s + wn^2
+    steps_per_rev = float(params["actuator"]["stepper_steps_per_rev"])
+    linkage_ratio = float(params["actuator"].get("linkage_ratio", 1.0))
+    K_step_motor = 2.0 * np.pi / steps_per_rev
+    K_beam = K_step_motor * linkage_ratio
+    kpi = max(0.05, 2.0 * inner_zeta * wn_i / K_beam)
+    kii = max(0.05, wn_i**2 / K_beam)
     kdi = 0.0
 
     p3 = extra_pole_factor * wn_o

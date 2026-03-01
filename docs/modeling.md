@@ -19,8 +19,8 @@ Companion measured-data worksheet:
 ## 1) System Definition
 
 Measured quantities:
-- Motor angle `phi` from AS5600.
-- Sonar range `d` from HC-SR04.
+- Beam angle `theta` from AS5600 (mounted on beam pivot).
+- Position range `d` from TFMini LiDAR (or HC-SR04 as backup).
 
 Physical plant states:
 - Ball position `x` (along beam) and velocity `x_dot`.
@@ -62,10 +62,11 @@ Therefore the end-to-end model always includes:
 
 ### 2.3 Actuator and map parameters
 
-- `phi_tau` [s]: first-order motor-angle lag -> `actuator.phi_tau_s`
-- `Kp_theta`, `Kd_theta`: inner torque law gains
-  - explicit: `actuator.theta_kp_nm_per_rad`, `actuator.theta_kd_nms_per_rad`
-  - if absent, auto-derived from `design.inner_bw_hz`, `design.inner_zeta`
+- `phi_tau` [s]: first-order motor-angle lag -> `actuator.phi_tau_s` (used in nonlinear simulation only)
+- `steps_per_rev`: microsteps per motor revolution -> `actuator.stepper_steps_per_rev` (default 3200 = 200 full-steps × 16 µsteps)
+- `linkage_ratio` [–]: crank-rocker ratio `r_crank / L_arm` -> `actuator.linkage_ratio` (beam angle per motor angle)
+- `K_step_motor` [rad/step]: `2π / steps_per_rev`
+- `K_beam` [rad_beam/step]: `K_step_motor × linkage_ratio` — the inner-loop plant gain
 - `tau_limit` [N*m]: actuator saturation -> `actuator.torque_limit_nm`
 - `f(phi)` configuration -> `calibration.theta_from_phi`
 - `g(d,theta)` configuration -> `calibration.x_from_d_theta`
@@ -146,23 +147,43 @@ Inverse `d = g^{-1}(x,theta)`:
 - supported for `linear`, `affine_theta`, `lut1d`
 - not implemented for `lut2d`.
 
-## 5) Actuator and Inner Torque Model
+## 5) Actuator Model
 
-Command/actuation path:
-1. Motor-angle lag:
-   - `phi_dot = (phi_cmd - phi)/phi_tau`
-2. Reference angle map:
-   - `theta_ref = f(phi)`
-3. Torque law:
-   - `tau_act = sat(Kp_theta*(theta_ref - theta) - Kd_theta*theta_dot, +/- tau_limit)`
-4. Plant dynamics:
-   - solve coupled equations for `x_ddot`, `theta_ddot`.
+### 5.1 Physical actuator chain
 
-Auto-derivation of inner torque gains (when not explicitly provided):
-- `J_eq0 = J + m_e*R^2`
-- `wn_i = 2*pi*inner_bw_hz`
-- `Kp_theta = J_eq0*wn_i^2`
-- `Kd_theta = 2*inner_zeta*wn_i*J_eq0`
+Motor: NEMA 17 (17HS4401-D), 0.40 N·m holding torque, 1.7 A rated.  
+Driver: TMC2209 in STEP/DIR mode, 1/16 microstepping (hardware DIP), 12 V supply.  
+Linkage: Crank-rocker — motor shaft → lower arm (`r_crank = 47.65 mm`) → bolt joint → upper arm → beam pivot (`L_arm = 323.08 mm`).  
+Linkage ratio: `linkage_ratio = r_crank / L_arm = 0.1475`.
+
+### 5.2 Inner-loop plant model (for PID gain design)
+
+The firmware inner loop measures **beam angle** `theta` (AS5600) and outputs
+**motor step rate** `u` (microsteps/s).  The stepper is treated as a pure
+integrator — each microstep rotates the motor by a fixed angle, and the
+motor angle maps to beam angle through the linkage ratio:
+
+```
+θ_beam(s) / u(s) = K_beam / s
+```
+
+where:
+- `K_step_motor = 2π / steps_per_rev = 2π / 3200 ≈ 0.001963 rad_motor/step`
+- `K_beam = K_step_motor × linkage_ratio = 0.001963 × 0.1475 ≈ 0.000289 rad_beam/step`
+
+This is a single integrator, so a PI controller yields a second-order closed loop.
+
+### 5.3 Nonlinear simulation torque model (separate)
+
+The nonlinear time-domain simulation in `first_principles_core.py` still uses
+a first-order motor-angle lag and torque law for numerical integration:
+1. `phi_dot = (phi_cmd - phi) / phi_tau`
+2. `theta_ref = f(phi)`
+3. `tau_act = sat(Kp_theta*(theta_ref - theta) - Kd_theta*theta_dot, ± tau_limit)`
+4. Coupled equations for `x_ddot`, `theta_ddot`.
+
+This captures transient dynamics beyond the integrator approximation and is useful
+for full-system simulation but is **not** the model used for PID gain synthesis.
 
 ## 6) Controller Design Derivation (matches `design_cascade_pid.py`)
 
@@ -171,17 +192,21 @@ Auto-derivation of inner torque gains (when not explicitly provided):
 Use reduced form:
 - `x_ddot = k*theta` with `k = alpha*g`
 
-### 6.2 Inner gain synthesis approximation
+### 6.2 Inner gain synthesis (stepper integrator plant)
 
-Inner design approximates actuator as first-order:
-- `phi_dot = (phi_cmd - phi)/tau` where `tau = phi_tau`
+Inner design treats the stepper + linkage as a pure integrator:
+- Plant: `theta_beam(s) / u(s) = K_beam / s`
+- `K_beam = (2π / steps_per_rev) × linkage_ratio`
 
-PI structure gives characteristic form:
-- `tau*s^2 + (1 + Kp_i)*s + Ki_i = 0`
+PI controller `C(s) = Kp_i + Ki_i/s` on integrator plant gives closed-loop:
+- `s^2 + Kp_i·K_beam·s + Ki_i·K_beam = 0`
 
-Code formulas:
-- `Kp_i = max(0.05, 2*zeta_i*wn_i*tau - 1)`
-- `Ki_i = max(0.05, wn_i^2 * tau)`
+Matched to standard second-order `s^2 + 2·ζ·ωn·s + ωn² = 0`:
+
+Code formulas (in `design_cascade_pid.py`):
+- `K_beam = (2π / stepper_steps_per_rev) × linkage_ratio`
+- `Kp_i = max(0.05, 2·ζ_i·ωn_i / K_beam)`
+- `Ki_i = max(0.05, ωn_i² / K_beam)`
 - `Kd_i = 0`
 
 ### 6.3 Outer PID pole matching
@@ -214,40 +239,78 @@ Outer:
 Parameter file:
 - `model/first_principles/params_measured_v1.yaml`
 
-Given:
+### 7.1 Given plant parameters
+
 - `m = 0.0028 kg`
 - `R = 0.020035 m`
-- `ball_inertia_ratio = 0.6666666666666666` (thin-shell hollow sphere)
-- `J = 0.00439 kg*m^2`
+- `ball_inertia_ratio = 0.6667` (thin-shell hollow sphere)
+- `J = 0.00439 kg·m²`
 - `M_b = 0.1392 kg`
-- `l_b = 0.145041716954 m`
-- `b_x = 0.0125 N*s/m`
-- `phi_tau = 0.08 s`
-- `g = 9.81 m/s^2`
+- `l_b = 0.145042 m`
+- `b_x = 0.0125 N·s/m`
+- `g = 9.81 m/s²`
 
-Computed:
-- `I = (2/3)*m*R^2 = 7.492822866666667e-07 kg*m^2`
-- `m_e = m + I/R^2 = 0.004666666666666666 kg`
-- `alpha = m/m_e = 0.6`
-- `beta = b_x/m_e = 2.678571428571429 1/s`
-- `k_theta_to_xddot = alpha*g = 5.886`
+### 7.2 Actuator parameters
 
-Current gain snapshot (`controller_initial_gains.json` / `controller_gains.h`):
+- `stepper_steps_per_rev = 3200` (200 full-steps × 16 µsteps)
+- `linkage_ratio = 0.1475` (r_crank / L_arm = 47.65 mm / 323.08 mm)
+- `step_rate_limit = 5000 sps`
+- `theta_cmd_limit = 8° = 0.1396 rad`
+
+### 7.3 Derived quantities
+
+Ball dynamics:
+- `I = (2/3)·m·R² = 7.49e-7 kg·m²`
+- `m_e = m + I/R² = 0.00467 kg`
+- `α = m/m_e = 0.6`
+- `β = b_x/m_e = 2.679 s⁻¹`
+- `k = α·g = 5.886 m/s²/rad`
+
+Inner plant gain:
+- `K_step_motor = 2π / 3200 = 0.001963 rad_motor/step`
+- `K_beam = K_step_motor × 0.1475 = 0.000289 rad_beam/step`
+
+### 7.4 Design bandwidth targets
+
+- Inner: `ωn_i = 2π × 4.0 = 25.13 rad/s`, `ζ_i = 0.9`
+- Outer: `ωn_o = 2π × 1.1 = 6.912 rad/s`, `ζ_o = 0.85`, `extra_pole_factor = 4.0`
+
+### 7.5 Gain computation
+
+Inner PI (on integrator plant `K_beam/s`):
+- `Kp_i = 2·ζ_i·ωn_i / K_beam = 2 × 0.9 × 25.13 / 0.000289 = 156,203`
+- `Ki_i = ωn_i² / K_beam = 25.13² / 0.000289 = 2,181,011`
+- `i_lim = step_rate_limit / Ki_i = 5000 / 2,181,011 = ±0.00229 rad·s`
+- `out = ±5000 sps`
+
+Outer PID (on double-integrator plant `k/s²`):
+- `p3 = 4.0 × 6.912 = 27.65`
+- `a2 = 2 × 0.85 × 6.912 + 27.65 = 39.40`
+- `a1 = 6.912² + 2 × 0.85 × 6.912 × 27.65 = 372.38`
+- `a0 = 6.912² × 27.65 = 1321.0`
+- `Kp_o = 372.38 / 5.886 = 63.30`
+- `Kd_o = 39.40 / 5.886 = 6.693`
+- `Ki_o = 1321.0 / 5.886 = 224.4`
+- `out = ±0.1396 rad (±8°)`
+- `i_lim = 0.1396 / 224.4 = ±0.000622 m·s`
+
+### 7.6 Current gain snapshot (`controller_gains.h`)
+
 - Inner:
-  - `kp = 2.6191147369`
-  - `ki = 50.5323745336`
+  - `kp = 156,203.39`
+  - `ki = 2,181,010.76`
   - `kd = 0.0`
-  - `out = [-1800, 1800] step/s`
-  - `i_lim = +/-35.6207286243`
+  - `out = ±5000 step/s`
+  - `i_lim = ±0.00229`
 - Outer:
-  - `kp = 63.3022944869`
-  - `ki = 224.3661801508`
-  - `kd = 6.6930974985`
-  - `out = +/-0.1396263402 rad`
-  - `i_lim = +/-0.0006223145577`
+  - `kp = 63.30`
+  - `ki = 224.37`
+  - `kd = 6.693`
+  - `out = ±0.1396 rad`
+  - `i_lim = ±0.000622`
 
-Warning:
-- These are snapshot values and must be regenerated whenever params change.
+> **Warning:** These are snapshot values and must be regenerated whenever params change.
+> Run `design_cascade_pid.py` then `export_gains.py` to update.
 
 ## 8) Reproducible Commands
 

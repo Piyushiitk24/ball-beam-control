@@ -4,7 +4,7 @@
 
 Two subsystems that must stay in sync:
 
-- **Firmware** (`firmware/`) — C++/Arduino, ATmega328P, PlatformIO. Cascade PID loop at 50 Hz, Timer1 ISR step-pulse generation, PCINT ISR for HC-SR04 echo capture. TFMini UART variant is available as a switchable backup `main.cpp` template. All code lives in `namespace bb`.
+- **Firmware** (`firmware/`) — C++/Arduino, ATmega328P, PlatformIO. Cascade PID loop at 50 Hz, Timer1 ISR step-pulse generation. Position sensor: TFMini LiDAR (active primary, SoftwareSerial UART) or HC-SR04 ultrasonic (PCINT ISR). Switchable via `analysis/switch_firmware_main.py`. All code lives in `namespace bb`.
 - **Model** (`model/first_principles/`) — Python. First-principles plant + gain design. Output is `firmware/include/generated/controller_gains.h`, which is **auto-generated — never edit by hand**.
 - **Analysis** (`analysis/`) — Python scripts to parse, clean, and plot serial telemetry CSVs from `data/runs/`.
 
@@ -116,8 +116,10 @@ VS Code tasks in `.vscode/tasks.json` wrap the common commands above.
 - Absolute minimum work: set flags/timestamps only; all filtering/control in main thread.
 
 **Cascade controller** ([firmware/include/control/cascade_controller.h](../firmware/include/control/cascade_controller.h)):
-- Outer loop: position error (`m`) → angle command (`rad`).
-- Inner loop: angle error (`rad`) → step rate (`sps`).
+- Outer loop: position error (`m`) → angle command (`rad`). Plant: double integrator `k/s²` where `k = α·g`.
+- Inner loop: angle error (`rad`) → step rate (`sps`). Plant: stepper integrator `K_beam/s` where `K_beam = (2π/3200) × linkage_ratio`.
+- Linkage ratio = 0.1475 (crank-rocker: r_crank 47.65 mm / L_arm 323.08 mm).
+- Max step rate: 5000 sps. Angle command limit: ±8°.
 - Gains loaded from `namespace bb::generated` in `controller_gains.h`.
 
 **Plant parameters** — single source of truth: [`model/first_principles/params_measured_v1.yaml`](../model/first_principles/params_measured_v1.yaml). Edit params there, then re-run the design + export pipeline.

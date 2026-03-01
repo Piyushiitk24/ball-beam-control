@@ -18,7 +18,7 @@ constexpr uint32_t kControlPeriodMs = 1000UL / kControlHz;
 constexpr uint32_t kTelemetryPeriodMs = 1000UL / kTelemetryHz;
 
 constexpr float kControlDtSec = 1.0f / static_cast<float>(kControlHz);
-constexpr float kMaxStepRateSps = 1800.0f;
+constexpr float kMaxStepRateSps = 5000.0f;
 constexpr float kThetaCmdLimitDeg = 8.0f;
 constexpr float kThetaHardLimitDeg = 15.0f;
 constexpr float kBallPosHardLimitCm = 22.0f;

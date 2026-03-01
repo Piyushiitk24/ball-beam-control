@@ -11,13 +11,13 @@ namespace generated {
 // outer_integral_state: m*s
 // inner_integral_state: rad*s
 
-constexpr float kInnerKp = 2.619115f;
-constexpr float kInnerKi = 50.532375f;
+constexpr float kInnerKp = 156203.389831f;
+constexpr float kInnerKi = 2181010.764255f;
 constexpr float kInnerKd = 0.000000f;
-constexpr float kInnerIMin = -35.620729f;
-constexpr float kInnerIMax = 35.620729f;
-constexpr float kInnerOutMin = -1800.000000f;
-constexpr float kInnerOutMax = 1800.000000f;
+constexpr float kInnerIMin = -0.002293f;
+constexpr float kInnerIMax = 0.002293f;
+constexpr float kInnerOutMin = -5000.000000f;
+constexpr float kInnerOutMax = 5000.000000f;
 
 constexpr float kOuterKp = 63.302294f;
 constexpr float kOuterKi = 224.366180f;
