@@ -37,9 +37,60 @@ TFMiniSensor::TFMiniSensor(uint8_t rx_pin, uint8_t tx_pin)
       stale_timeout_latched_(false) {}
 
 void TFMiniSensor::begin() {
+  // One-time migration: if target baud != factory 115200, send baud
+  // change command at 115200 first, then reopen at target baud.
+  // Idempotent: if TFMini is already at target baud the 115200
+  // bytes are just ignored (wrong baud = gibberish).
+  if (kTfminiUartBaud != 115200UL) {
+    serial_.begin(115200UL);
+    delay(50);
+    sendBaudCommand(kTfminiUartBaud);
+    delay(100);
+    serial_.end();
+  }
   serial_.begin(kTfminiUartBaud);
   frame_index_ = 0;
   last_rx_ms_ = millis();
+}
+
+void TFMiniSensor::setBaud(uint32_t new_baud) {
+  sendBaudCommand(new_baud);
+  delay(100);
+  serial_.end();
+  serial_.begin(new_baud);
+  frame_index_ = 0;
+  has_sample_ = false;
+  ema_initialized_ = false;
+  valid_streak_ = 0;
+  timeout_count_ = 0;
+  jump_reject_count_ = 0;
+  last_rx_ms_ = millis();
+}
+
+void TFMiniSensor::sendBaudCommand(uint32_t baud) {
+  // TFMini classic format: 42 57 02 00 00 00 XX 00
+  uint8_t code = 0x06;  // 115200 default
+  if (baud <= 9600UL)       code = 0x01;
+  else if (baud <= 14400UL) code = 0x02;
+  else if (baud <= 19200UL) code = 0x03;
+  else if (baud <= 56000UL) code = 0x04;
+  else if (baud <= 57600UL) code = 0x05;
+  const uint8_t cmd1[] = {0x42, 0x57, 0x02, 0x00, 0x00, 0x00, code, 0x00};
+  serial_.write(cmd1, 8);
+
+  // TFMini-Plus format: 5A 08 06 [4-byte LE baud] checksum
+  const uint8_t b0 = static_cast<uint8_t>(baud & 0xFFu);
+  const uint8_t b1 = static_cast<uint8_t>((baud >> 8) & 0xFFu);
+  const uint8_t b2 = static_cast<uint8_t>((baud >> 16) & 0xFFu);
+  const uint8_t b3 = static_cast<uint8_t>((baud >> 24) & 0xFFu);
+  const uint8_t cs = static_cast<uint8_t>(
+      (0x5Au + 0x08u + 0x06u + b0 + b1 + b2 + b3) & 0xFFu);
+  const uint8_t cmd2[] = {0x5A, 0x08, 0x06, b0, b1, b2, b3, cs};
+  serial_.write(cmd2, 8);
+
+  // Save-config command (5A format): 5A 04 11 6F
+  const uint8_t save[] = {0x5A, 0x04, 0x11, 0x6F};
+  serial_.write(save, 4);
 }
 
 void TFMiniSensor::service(uint32_t now_ms) {

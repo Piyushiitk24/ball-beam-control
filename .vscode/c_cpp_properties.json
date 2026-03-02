@@ -10,13 +10,13 @@
             "includePath": [
                 "/Users/piyush/code/ball-beam-control/firmware/include",
                 "/Users/piyush/code/ball-beam-control/firmware/src",
+                "/Users/piyush/.platformio/packages/framework-arduino-avr/libraries/SoftwareSerial/src",
                 "/Users/piyush/.platformio/packages/framework-arduino-avr/libraries/Wire/src",
                 "/Users/piyush/.platformio/packages/framework-arduino-avr/libraries/EEPROM/src",
                 "/Users/piyush/.platformio/packages/framework-arduino-avr/cores/arduino",
                 "/Users/piyush/.platformio/packages/framework-arduino-avr/variants/eightanaloginputs",
                 "/Users/piyush/.platformio/packages/framework-arduino-avr/libraries/HID/src",
                 "/Users/piyush/.platformio/packages/framework-arduino-avr/libraries/SPI/src",
-                "/Users/piyush/.platformio/packages/framework-arduino-avr/libraries/SoftwareSerial/src",
                 ""
             ],
             "browse": {
@@ -24,13 +24,13 @@
                 "path": [
                     "/Users/piyush/code/ball-beam-control/firmware/include",
                     "/Users/piyush/code/ball-beam-control/firmware/src",
+                    "/Users/piyush/.platformio/packages/framework-arduino-avr/libraries/SoftwareSerial/src",
                     "/Users/piyush/.platformio/packages/framework-arduino-avr/libraries/Wire/src",
                     "/Users/piyush/.platformio/packages/framework-arduino-avr/libraries/EEPROM/src",
                     "/Users/piyush/.platformio/packages/framework-arduino-avr/cores/arduino",
                     "/Users/piyush/.platformio/packages/framework-arduino-avr/variants/eightanaloginputs",
                     "/Users/piyush/.platformio/packages/framework-arduino-avr/libraries/HID/src",
                     "/Users/piyush/.platformio/packages/framework-arduino-avr/libraries/SPI/src",
-                    "/Users/piyush/.platformio/packages/framework-arduino-avr/libraries/SoftwareSerial/src",
                     ""
                 ]
             },

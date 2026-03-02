@@ -18,8 +18,9 @@ constexpr uint32_t kControlPeriodMs = 1000UL / kControlHz;
 constexpr uint32_t kTelemetryPeriodMs = 1000UL / kTelemetryHz;
 
 constexpr float kControlDtSec = 1.0f / static_cast<float>(kControlHz);
-constexpr float kMaxStepRateSps = 5000.0f;
-constexpr float kThetaCmdLimitDeg = 8.0f;
+constexpr float kMaxStepRateSps = 2000.0f;
+constexpr float kMaxStepRateChangeSpsPerTick = 200.0f;  // slew limit per 50 Hz control tick
+constexpr float kThetaCmdLimitDeg = 3.0f;
 constexpr float kThetaHardLimitDeg = 15.0f;
 constexpr float kBallPosHardLimitCm = 22.0f;
 
@@ -80,7 +81,7 @@ constexpr uint32_t kSensorInvalidFaultMsRunning = 300;
 
 // Benewake TFMini (UART) tuning.
 #ifndef TFMINI_UART_BAUD
-#define TFMINI_UART_BAUD 115200UL
+#define TFMINI_UART_BAUD 9600UL
 #endif
 #ifndef TFMINI_READ_STALE_MS
 #define TFMINI_READ_STALE_MS SONAR_POS_SAMPLE_FRESH_MS

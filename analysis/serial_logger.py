@@ -323,6 +323,12 @@ class SerialLogger:
             print(line)
         self._log_event(line)
 
+        # Auto-track firmware telemetry toggle to suppress/resume SNAP.
+        if line == "OK,telemetry=0":
+            self._suppress_snapshots = True
+        elif line == "OK,telemetry=1":
+            self._suppress_snapshots = False
+
         if line.startswith("STATE,"):
             self.snap.state = line.split(",", 1)[1].strip()
 
@@ -385,6 +391,7 @@ class SerialLogger:
             "  /help                 Show this help\n"
             "  /quit                 Quit (sends: k then e 0)\n"
             "  /print_tel 0|1        Toggle printing raw TEL rows to terminal\n"
+            "  /snap 0|1             Toggle periodic SNAP status line\n"
             "  /diag                 Send: s, as5600 diag, sonar diag, x\n"
             "  /bringup              Guided calibration flow (recommended)\n"
             "  /as5600_stats [N]     Sample AS5600 diag N times (default 50) and summarize noise\n"
@@ -761,6 +768,12 @@ class SerialLogger:
                         else:
                             self.print_tel = (parts[1] == "1")
                             print(f"OK print_tel={1 if self.print_tel else 0}")
+                    elif cmd == "/snap":
+                        if len(parts) != 2 or parts[1] not in ("0", "1"):
+                            print("usage: /snap 0|1")
+                        else:
+                            self._suppress_snapshots = (parts[1] == "0")
+                            print(f"OK snap={0 if self._suppress_snapshots else 1}")
                     elif cmd == "/diag":
                         for c in ("s", "as5600 diag", "sonar diag", "x"):
                             self._send(c)

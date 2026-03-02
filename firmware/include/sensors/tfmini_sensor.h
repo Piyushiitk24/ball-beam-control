@@ -13,6 +13,7 @@ class TFMiniSensor {
   TFMiniSensor(uint8_t rx_pin, uint8_t tx_pin);
 
   void begin();
+  void setBaud(uint32_t new_baud);
   void service(uint32_t now_ms);
 
   bool getPosition(float& x_cm, float& x_filt_cm, float& distance_raw_cm) const;
@@ -57,6 +58,7 @@ class TFMiniSensor {
   float medianHistory() const;
   void parseByte(uint8_t byte, uint32_t now_ms);
   void processFrame(const uint8_t frame[kFrameSize], uint32_t now_ms);
+  void sendBaudCommand(uint32_t baud);
 };
 
 }  // namespace bb
