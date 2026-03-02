@@ -10,7 +10,7 @@
 
 static constexpr uint8_t RX_PIN = 10;  // PIN_TFMINI_RX
 static constexpr uint8_t TX_PIN = 11;  // PIN_TFMINI_TX
-static constexpr uint32_t TARGET_BAUD = 9600UL;
+static constexpr uint32_t TARGET_BAUD = 57600UL;
 
 SoftwareSerial tfSerial(RX_PIN, TX_PIN);
 
@@ -69,11 +69,20 @@ static uint16_t tryReadFrames(uint32_t duration_ms) {
     uint16_t cs = 0;
     for (uint8_t i = 0; i < 8; ++i) cs = (cs + buf[i]) & 0xFFu;
     uint16_t dist = static_cast<uint16_t>(buf[2]) | (static_cast<uint16_t>(buf[3]) << 8);
-    if (cs == buf[8] && dist > 0) {
+    uint16_t strength = static_cast<uint16_t>(buf[4]) | (static_cast<uint16_t>(buf[5]) << 8);
+    if (cs == buf[8]) {
       ++good;
-      Serial.print(F("  frame: dist="));
+      Serial.print(F("  dist="));
       Serial.print(dist);
-      Serial.println(F(" cm"));
+      Serial.print(F(" str="));
+      Serial.print(strength);
+      Serial.print(F(" hex="));
+      for (uint8_t j = 0; j < 9; ++j) {
+        if (buf[j] < 0x10) Serial.print('0');
+        Serial.print(buf[j], HEX);
+        Serial.print(' ');
+      }
+      Serial.println();
     }
     idx = 0;
   }
@@ -122,48 +131,10 @@ void setup() {
   Serial.print(F("   Found TFMini at "));
   Serial.print(foundBaud);
   Serial.println(F(" baud"));
-
-  if (foundBaud == TARGET_BAUD) {
-    Serial.println(F("CONFIG_OK,already_at_target_baud"));
-    Serial.println(F("CONFIG_DONE"));
-    return;
-  }
-
-  // Step 1: Send baud change command at the discovered baud
-  Serial.print(F("1) Sending baud change from "));
-  Serial.print(foundBaud);
-  Serial.print(F(" to "));
-  Serial.print(TARGET_BAUD);
-  Serial.println(F("..."));
-  tfSerial.begin(foundBaud);
-  delay(200);
-  while (tfSerial.available() > 0) tfSerial.read();
-
-  for (uint8_t attempt = 0; attempt < 3; ++attempt) {
-    Serial.print(F("   Attempt "));
-    Serial.println(attempt + 1);
-    sendBaudCommands(TARGET_BAUD);
-    delay(300);
-  }
-  tfSerial.end();
-
-  // Step 2: Verify at target baud
-  Serial.print(F("2) Verifying at "));
-  Serial.print(TARGET_BAUD);
-  Serial.println(F(" baud..."));
-  tfSerial.begin(TARGET_BAUD);
-  delay(500);
-  uint16_t frames = tryReadFrames(3000);
-  Serial.print(F("   Frames at target: "));
-  Serial.println(frames);
-
-  if (frames >= 3) {
-    Serial.println(F("CONFIG_OK,baud_changed_successfully"));
-  } else {
-    Serial.println(F("CONFIG_FAIL,no_frames_at_target_baud"));
-    Serial.println(F("Try power-cycling the TFMini and re-uploading."));
-  }
+  Serial.println(F("CONFIG_OK,sensor_found"));
   Serial.println(F("CONFIG_DONE"));
+  Serial.println();
+  Serial.println(F("=== Continuous read — move target / point at wall ==="));
 }
 
 void loop() {

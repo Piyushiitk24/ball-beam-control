@@ -81,7 +81,7 @@ constexpr uint32_t kSensorInvalidFaultMsRunning = 300;
 
 // Benewake TFMini (UART) tuning.
 #ifndef TFMINI_UART_BAUD
-#define TFMINI_UART_BAUD 9600UL
+#define TFMINI_UART_BAUD 115200UL
 #endif
 #ifndef TFMINI_READ_STALE_MS
 #define TFMINI_READ_STALE_MS SONAR_POS_SAMPLE_FRESH_MS
