@@ -46,18 +46,15 @@ Raw fallback: `cd firmware && pio device monitor -b 115200 --echo --filter send_
 
 | Condition | What satisfies it | Command |
 |-----------|-------------------|---------|
-| **Angle zero captured** | AS5600 reference stored | `a` |
-| **Position zero captured** | Sonar center stored | `p` |
+| **Actuator trim ready** | Seeded from `l/u` midpoint or learned and saved | `l` + `u` |
+| **Position zero captured** | Sonar midpoint derived from `l/u`, or manually overridden | `l` + `u` (or optional `p`) |
 | **Lower limit captured** | Beam DOWN limit stored | `l` (or `[` or `1`) |
 | **Upper limit captured** | Beam UP limit stored | `u` (or `]` or `2`) |
-| **Signs calibrated** | AS5600/stepper/sonar signs derived | `b` then `g` |
+| **Signs calibrated** | AS5600 + stepper signs derived; sonar direction fixed by `l/u` | `l`, `u`, then `b` |
 | **Sensors OK** | AS5600 + sonar returning valid data | (automatic) |
 | **No faults** | Fault flags clear | `f` to clear |
 
-> In **stepper-count mode** (`y`): sign, limits, and angle-zero are bypassed.  
-> Only `p` + valid sonar are required.
-
-### Full Calibration Sequence (AS5600 Mode)
+### Full Calibration Sequence (AS5600 Actuator Mode)
 
 Do this on first power-up or after `d` (reset defaults). Steps are **order-sensitive**.
 
@@ -66,19 +63,21 @@ Step  Command   Action                                          You do
 ────  ────────  ──────────────────────────────────────────────  ──────────────────────────
  0    s         Status — confirm firmware version, sensor OK    Read output
  1    t         Toggle telemetry OFF (reduces noise)            —
- 2    a         Capture angle zero                              Level the beam horizontally
- 3    p         Capture position zero                           Place ball at beam center
- 4    l         Capture lower angle limit                       Tilt beam fully DOWN by hand
- 5    u         Capture upper angle limit                       Tilt beam fully UP by hand
- 6    e 1       Enable stepper driver                           —
- 7    b         Begin sign calibration                          Keep hands clear — motor jogs
+ 2    l         Capture lower actuator limit                    Tilt beam fully DOWN by hand
+               (also captures the far sonar distance)
+ 3    u         Capture upper actuator limit                    Tilt beam fully UP by hand
+               (also captures the near sonar distance and fixes sonar direction: upper = near)
+ 4    e 1       Enable stepper driver                           —
+ 5    b         Begin sign calibration                          Keep hands clear — motor jogs
                 (auto-derives AS5600 sign + stepper dir sign)
- 8    g         Save sign calibration                           Motor should be at far end
-                (derives sonar sign from near/far distance)
-                If `g` shows ERR, use: sonar sign 1  (or -1)
- 9    v         Save ALL calibration to EEPROM                  —
-10    s         Status — confirm all flags = yes                Read output
+ 6    g         Optional sonar validation                       Only as a cross-check if you want it
+ 7    v         Save limits, sonar midpoint, and trim seed      —
+ 8    s         Status — confirm all flags = yes                Read output
+               Check `SONAR_CFG,s=-1,m=o,u=1`
+               Check `ACT_CFG` for trim/source info
 ```
+
+`a` is no longer required. The firmware seeds actuator trim from the midpoint of the captured lower/upper travel and can learn a better trim during `RUNNING`.
 
 After `v`, calibration **persists across reboots**. You only need to redo this if hardware changes.
 
@@ -88,11 +87,12 @@ On subsequent power-ups, calibration auto-loads. Just verify:
 
 ```
 s         # all flags should show "yes"
+s         # and SONAR_CFG should show s=-1,m=o,u=1
 e 1       # enable driver
 r         # run!
 ```
 
-If any flag shows "no", redo that specific step from the table above, then `v` to re-save.
+If any flag shows "no", redo `l`, `u`, and `b`, then `v` to re-save. `p` is optional and only needed if you want to override the auto-derived sonar midpoint.
 
 ---
 
@@ -108,10 +108,10 @@ t         # turn on telemetry (if off)
 
 | BLOCK message | Fix |
 |---------------|-----|
-| `BLOCK,sign` | Run `b` then `g` (sign calibration) |
-| `BLOCK,zero` | Run `a` and/or `p` |
+| `BLOCK,sign` | Run `b` (use `g` only if you want sonar validation) |
+| `BLOCK,zero` | Run `l` + `u` to derive center/trim, or `p` for a manual sonar-center override |
 | `BLOCK,limits` | Run `l` and `u` |
-| `BLOCK,sensors` | Check wiring; run `sonar diag` / `as5600 diag` |
+| `BLOCK,sensors` | Check wiring; use `x` for compact sonar/fault diagnostics |
 | `BLOCK,faults` | Run `f` to clear; check `x` for details |
 
 ### Stop
@@ -160,27 +160,22 @@ LATEST="$(ls -t data/runs/run_*_telemetry.csv | head -n 1)"
 | `h` / `?` | Help | |
 | `s` / `i` | Status | Shows state, calibration flags, sensor health |
 | `t` | Toggle telemetry | Suppress during calibration |
-| `y` | Toggle angle source | AS5600 ↔ stepper-count |
 | `e 0\|1` | Driver disable/enable | |
 | `j <steps> <rate>` | Jog motor | Positive = upward |
-| `a` | Capture angle zero | Beam level |
-| `p` | Capture position zero | Ball at center |
-| `l` / `[` / `1` | Capture lower limit | Beam at max DOWN |
-| `u` / `]` / `2` | Capture upper limit | Beam at max UP |
+| `p` | Capture sonar-center override | Optional manual ball-center override |
+| `l` / `[` / `1` | Capture lower limit | Beam at max DOWN / ball far |
+| `u` / `]` / `2` | Capture upper limit | Beam at max UP / ball near |
 | `z` | Show zero calibration | |
 | `m` | Show limits | |
 | `b` | Sign cal — begin | Motor jogs, derives AS5600/stepper signs |
-| `g` | Sign cal — save | Derives sonar sign from distance change |
-| `sonar sign ±1` | Manual sonar sign | Bypass `g` if needed |
+| `g` | Sign cal — validate | Optional near/far sonar cross-check |
 | `v` | Save cal to EEPROM | Persists across reboots |
 | `o` | Load cal from EEPROM | Normally auto at boot |
-| `d` | Reset to defaults | Clears all calibration (RAM only until `v`) |
+| `d` | Reset to defaults | Clears calibration and saves defaults immediately |
 | `r` | Run (start control) | Checks all preconditions |
 | `k` | Stop | |
 | `f` | Clear faults | |
-| `x` | Print fault details | Decoded fault flags + sonar diag |
-| `sonar diag` | Sonar health | timeout_cnt, valid_streak, freshness |
-| `as5600 diag` | AS5600 health | status, AGC, raw angle, error count |
+| `x` | Print fault details | Decoded fault flags + compact sonar diag |
 
 ---
 
@@ -196,7 +191,7 @@ LATEST="$(ls -t data/runs/run_*_telemetry.csv | head -n 1)"
 ### ISR Design
 
 - **Timer1 CTC** (40 kHz): step-pulse generation, integer-only, no `digitalWrite()`
-- **PCINT** (HC-SR04 only): echo timestamp capture, flag + time only
+- **PCINT** (HC-SR04): echo timestamp capture, flag + time only
 
 ### State Machine
 
@@ -204,45 +199,35 @@ LATEST="$(ls -t data/runs/run_*_telemetry.csv | head -n 1)"
 SAFE_DISABLED → CALIB_SIGN → READY ⇄ CALIB_SCALE → RUNNING → FAULT
 ```
 
-### Angle Source Modes
+### Control Frame
 
-| Mode | Key | Angle from | Run requires |
-|------|-----|------------|--------------|
-| AS5600 (default) | — | I2C sensor | `a` + `p` + `l` + `u` + `b`/`g` + sensors OK |
-| Stepper-count | `y` | Step counter | `p` + sensors OK |
+- AS5600 is used as an actuator-position sensor between the captured lower and upper travel limits.
+- Ultrasonic center is defined from the midpoint of the captured near/far sonar distances, unless `p` is used as a manual override.
+- `theta_deg` and `theta_cmd_deg` in telemetry are actuator-relative coordinates around the active trim, not physical balanced-beam angles.
 
 ---
 
-## 8 — Sensor Variants
+## 8 — Position Sensor
 
-### Current: TFMini v1.7 (LiDAR)
+### Current: HC-SR04 (Ultrasonic)
 
-Wiring: TFMini TX → Nano D10, TFMini RX → Nano D11, common GND.
+Wiring: D8 → TRIG, D9 → ECHO, 5 V → VCC, GND → GND.  
+PCINT edge-capture ISR for non-blocking echo measurement. ~25 Hz trigger rate.
 
-Switch firmware:
-```bash
-./.venv/bin/python analysis/switch_firmware_main.py --mode tfmini
-cd firmware && pio run -e nano_new -t upload
-```
-
-### Default: HC-SR04 (Ultrasonic)
-
-Restore:
-```bash
-./.venv/bin/python analysis/switch_firmware_main.py --mode ballbeam
-cd firmware && pio run -e nano_new -t upload
-```
+Valid range: 2–65 cm. Conversion: `raw_cm = pulse_us × 0.0343 × 0.5`.
 
 ### Isolation Tests
 
 ```bash
-# AS5600 only
-./.venv/bin/python analysis/switch_firmware_main.py --mode as5600_check
 # HC-SR04 only
 ./.venv/bin/python analysis/switch_firmware_main.py --mode hcsr04_check
-# Restore
+# AS5600 only
+./.venv/bin/python analysis/switch_firmware_main.py --mode as5600_check
+# Restore full controller
 ./.venv/bin/python analysis/switch_firmware_main.py --mode ballbeam
 ```
+
+> Legacy Sharp IR and TFMini code is in `firmware/experiments/backup/`.
 
 ---
 
@@ -273,13 +258,14 @@ Non-blocking PCINT echo-capture → rolling median → min-valid gating → EMA 
 | `SONAR_ECHO_TIMEOUT_US` | 25000 | Max echo wait |
 | `SONAR_MEDIAN_WINDOW` | 11 | Samples in rolling median |
 | `SONAR_MIN_VALID_IN_WINDOW` | 1 | Min valid in window |
-| `SONAR_EMA_ALPHA` | 0.6f | EMA smoothing (lower = smoother) |
+| `SONAR_EMA_ALPHA` | 0.3f | EMA smoothing (lower = smoother) |
 | `SONAR_POS_SAMPLE_FRESH_MS` | 200 | Hold-last-good window |
 | `SONAR_MAX_VALID_MM` | 650.0f | Distance clamp |
+| `SONAR_MAX_JUMP_CM` | 3.0f | Per-sample jump clamp |
 
 Override via `build_flags` in `firmware/platformio.ini`:
 ```ini
-build_flags = -D SONAR_MEDIAN_WINDOW=7 -D SONAR_EMA_ALPHA=0.3f
+build_flags = -D SONAR_MEDIAN_WINDOW=7 -D SONAR_EMA_ALPHA=0.3f -D SONAR_MAX_JUMP_CM=2.0f
 ```
 
 ---
@@ -332,13 +318,13 @@ When adding code:
 
 | Pitfall | Fix |
 |---------|-----|
-| `ERR,run_blocked` with no obvious reason | You forgot sign calibration (`b` then `g`) |
+| `ERR,run_blocked` with no obvious reason | You forgot sign calibration (`l`, `u`, then `b`) |
 | Editing `controller_gains.h` by hand | Always regenerate via `export_gains.py` |
 | Float math in ISR | Never — use integer only |
 | Upload hangs | Wrong bootloader profile, or monitor still open |
 | Motor barely moves | Inner gains too low — re-run design pipeline |
-| `FAULT` immediately on `r` | Sonar dropout — check `sonar diag`, increase `SONAR_POS_SAMPLE_FRESH_MS` |
-| Wrong motor direction | Sign calibration is wrong — redo `b` + `g` |
+| `FAULT` immediately on `r` | Sonar dropout or hard limit overshoot — check `x` and the saved limits |
+| Wrong motor direction | Sign calibration is wrong — redo `l`, `u`, then `b` |
 
 Stop when needed:
 
@@ -355,7 +341,7 @@ p
 [
 ]
 b
-g
+g         # optional sonar validation
 # or sonar sign 1|-1
 v
 t
@@ -384,8 +370,8 @@ Use the Tasks panel (`Terminal -> Run Task...`) with:
 - `Firmware: Upload (nano_old)`
 - `Firmware: Monitor (115200)`
 - `Firmware: Serial Logger (CSV+Events)`
+- `Firmware: Switch Main -> HC-SR04 Check`
 - `Firmware: Switch Main -> AS5600 Check`
-- `Firmware: Switch Main -> TFMini`
 - `Firmware: Switch Main -> BallBeam`
 - `Model: Design Gains`
 - `Model: Export Gains`

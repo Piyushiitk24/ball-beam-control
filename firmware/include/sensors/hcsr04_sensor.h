@@ -3,20 +3,9 @@
 #include <Arduino.h>
 
 #include "config.h"
+#include "sensors/sensor_types.h"
 
 namespace bb {
-
-struct SonarDiag {
-  bool has_sample = false;
-  bool timeout = false;
-  bool fresh = false;
-  uint32_t age_ms = 0;
-  float raw_cm = 0.0f;
-  float filt_cm = 0.0f;
-  uint16_t valid_streak = 0;
-  uint16_t timeout_count = 0;
-  uint16_t jump_reject_count = 0;
-};
 
 class HCSR04Sensor {
  public:

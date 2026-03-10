@@ -9,11 +9,13 @@
 - `5V -> VIO`
 - `GND -> GND`
 
-### HC-SR04
+### HC-SR04 (ultrasonic distance)
 - `D8 -> TRIG`
 - `D9 -> ECHO`
 - `5V -> VCC`
 - `GND -> GND`
+
+(Legacy: Sharp IR A0 and TFMini D10/D11 — not connected.)
 
 ### AS5600
 - `A4 -> SDA`

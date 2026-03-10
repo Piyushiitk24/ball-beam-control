@@ -20,7 +20,7 @@ constexpr uint32_t kTelemetryPeriodMs = 1000UL / kTelemetryHz;
 constexpr float kControlDtSec = 1.0f / static_cast<float>(kControlHz);
 constexpr float kMaxStepRateSps = 2000.0f;
 constexpr float kMaxStepRateChangeSpsPerTick = 200.0f;  // slew limit per 50 Hz control tick
-constexpr float kThetaCmdLimitDeg = 3.0f;
+constexpr float kThetaCmdLimitDeg = 4.0f;
 constexpr float kThetaHardLimitDeg = 15.0f;
 constexpr float kBallPosHardLimitCm = 22.0f;
 
@@ -67,7 +67,7 @@ constexpr uint32_t kSensorInvalidFaultMsRunning = 300;
 #define SONAR_POS_SAMPLE_FRESH_MS 200UL
 #endif
 #ifndef SONAR_EMA_ALPHA
-#define SONAR_EMA_ALPHA 0.6f
+#define SONAR_EMA_ALPHA 0.3f
 #endif
 #ifndef SONAR_MEDIAN_WINDOW
 #define SONAR_MEDIAN_WINDOW 11
@@ -78,14 +78,16 @@ constexpr uint32_t kSensorInvalidFaultMsRunning = 300;
 #ifndef SONAR_MAX_VALID_MM
 #define SONAR_MAX_VALID_MM 650.0f
 #endif
+#ifndef SONAR_MAX_JUMP_CM
+#define SONAR_MAX_JUMP_CM 3.0f
+#endif
 
-// Benewake TFMini (UART) tuning.
-#ifndef TFMINI_UART_BAUD
-#define TFMINI_UART_BAUD 115200UL
-#endif
-#ifndef TFMINI_READ_STALE_MS
-#define TFMINI_READ_STALE_MS SONAR_POS_SAMPLE_FRESH_MS
-#endif
+// Legacy: Sharp GP2Y0A21YK0F (analog IR) — not connected.
+// #define SHARP_IR_SAMPLE_PERIOD_MS 40UL
+
+// Legacy: Benewake TFMini (UART) — not connected.
+// #define TFMINI_UART_BAUD 115200UL
+// #define TFMINI_READ_STALE_MS SONAR_POS_SAMPLE_FRESH_MS
 
 // AS5600 tuning (noise rejection + calibration stability).
 #ifndef AS5600_EMA_ALPHA
@@ -111,8 +113,7 @@ constexpr uint32_t kSonarTriggerPeriodUs = SONAR_TRIGGER_PERIOD_US;
 constexpr uint32_t kSonarEchoTimeoutUs = SONAR_ECHO_TIMEOUT_US;
 constexpr uint32_t kPosSampleFreshMs = SONAR_POS_SAMPLE_FRESH_MS;
 constexpr float kSonarEmaAlpha = SONAR_EMA_ALPHA;
-constexpr uint32_t kTfminiUartBaud = TFMINI_UART_BAUD;
-constexpr uint32_t kTfminiReadStaleMs = TFMINI_READ_STALE_MS;
+constexpr float kSonarMaxJumpCm = SONAR_MAX_JUMP_CM;
 
 constexpr float kAs5600EmaAlpha = AS5600_EMA_ALPHA;
 constexpr float kAs5600MaxJumpDeg = AS5600_MAX_JUMP_DEG;

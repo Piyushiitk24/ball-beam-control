@@ -105,21 +105,22 @@ def _parse_tel(line: str) -> Optional[dict[str, object]]:
 
 
 def _parse_sonar_diag(line: str) -> Optional[dict[str, object]]:
-    # SONAR_DIAG,has_sample=1,fresh=1,timeout=0,age_ms=9,raw_cm=...,filt_cm=...,valid_streak=...,timeout_cnt=...,jump_reject_cnt=...
+    # SONAR_DIAG,fresh=1,age_ms=9,raw_cm=...,filt_cm=...,jump_reject_cnt=...
     if not line.startswith("SONAR_DIAG,"):
         return None
     kv = _parse_keyvals("SONAR_DIAG,", line)
     if not kv:
         return None
     try:
+        raw_cm = float(kv.get("raw_cm", "nan"))
+        filt_cm = float(kv.get("filt_cm", "nan"))
         return {
-            "has_sample": int(float(kv.get("has_sample", "0"))) != 0,
             "fresh": int(float(kv.get("fresh", "0"))) != 0,
-            "timeout": int(float(kv.get("timeout", "0"))) != 0,
             "age_ms": int(float(kv.get("age_ms", "0"))),
-            "raw_cm": float(kv.get("raw_cm", "nan")),
-            "filt_cm": float(kv.get("filt_cm", "nan")),
-            "timeout_cnt": int(float(kv.get("timeout_cnt", "0"))),
+            "raw_cm": raw_cm,
+            "filt_cm": filt_cm,
+            "has_sample": not (raw_cm != raw_cm and filt_cm != filt_cm),
+            "timeout": False,
             "jump_reject_cnt": int(float(kv.get("jump_reject_cnt", "0"))),
         }
     except ValueError:
@@ -392,11 +393,11 @@ class SerialLogger:
             "  /quit                 Quit (sends: k then e 0)\n"
             "  /print_tel 0|1        Toggle printing raw TEL rows to terminal\n"
             "  /snap 0|1             Toggle periodic SNAP status line\n"
-            "  /diag                 Send: s, as5600 diag, sonar diag, x\n"
+            "  /diag                 Send: s, x\n"
             "  /bringup              Guided calibration flow (recommended)\n"
-            "  /as5600_stats [N]     Sample AS5600 diag N times (default 50) and summarize noise\n"
+            "  /as5600_stats [N]     Not available in compact firmware\n"
             "  /sonar_stats [N]      Sample sonar diag N times (default 30) and summarize stability\n"
-            "\nDevice commands: type anything else and press Enter (e.g. s, y, r, k, sonar diag, as5600 diag)\n"
+            "\nDevice commands: type anything else and press Enter (e.g. s, p, l, u, b, v, r, k)\n"
         )
 
     def _drain_rx_nonblock(self, max_lines: int = 500) -> list[str]:
@@ -439,56 +440,7 @@ class SerialLogger:
         return None
 
     def _cmd_as5600_stats(self, n: int) -> None:
-        n = max(1, min(int(n), 500))
-        print(f"\nAS5600 stats: sampling {n}x (hold beam still)...")
-
-        # Keep terminal readable: suppress the individual AS5600_DIAG lines while capturing.
-        prev = set(self._suppress_print_prefixes)
-        self._suppress_print_prefixes.add("AS5600_DIAG,")
-        try:
-            rows: list[dict[str, object]] = []
-            for i in range(n):
-                self._send("as5600 diag", echo=False, log_sent=False)
-                line = self._wait_for_line(0.6, prefixes=("AS5600_DIAG,",))
-                if line is None:
-                    continue
-                parsed = _parse_as5600_diag(line)
-                if parsed is None:
-                    continue
-                rows.append(parsed)
-                if (i + 1) % 10 == 0 or (i + 1) == n:
-                    print(f"  {i + 1}/{n}...")
-                time.sleep(0.10)
-        finally:
-            self._suppress_print_prefixes = prev
-
-        ok_rows = [r for r in rows if bool(r.get("ok"))]
-        raw_vals = [float(r["raw_deg"]) for r in ok_rows if "raw_deg" in r]
-        theta_vals = [float(r["theta_deg"]) for r in ok_rows if "theta_deg" in r]
-        err_vals = [int(r["err_cnt"]) for r in rows if "err_cnt" in r]
-
-        raw_mean, raw_std, raw_min, raw_max = _mean_std_min_max(raw_vals)
-        th_mean, th_std, th_min, th_max = _mean_std_min_max(theta_vals)
-
-        if err_vals:
-            err_delta = err_vals[-1] - err_vals[0]
-            err_last = err_vals[-1]
-        else:
-            err_delta = 0
-            err_last = -1
-
-        wrap_suspect = False
-        if raw_vals and (raw_min < 20.0 and raw_max > 340.0):
-            wrap_suspect = True
-
-        print("\nAS5600_STATS_RESULT")
-        print(f"  samples_ok = {len(ok_rows)}/{max(1, len(rows))} (parsed {len(rows)} lines)")
-        print(f"  err_cnt    = {err_last} (delta {err_delta})")
-        print(f"  raw_deg    = mean {raw_mean:.2f}  std {raw_std:.2f}  min {raw_min:.2f}  max {raw_max:.2f}")
-        print(f"  theta_deg  = mean {th_mean:.2f}  std {th_std:.2f}  min {th_min:.2f}  max {th_max:.2f}")
-        if wrap_suspect:
-            print("  hint       = wrap suspected (raw_deg spans near 0/360). This is OK if handled via wrap math.")
-        print("")
+        print("\nAS5600 stats are not available in the compact firmware.\n")
 
     def _cmd_sonar_stats(self, n: int) -> None:
         n = max(1, min(int(n), 300))
@@ -499,7 +451,7 @@ class SerialLogger:
         try:
             diags: list[dict[str, object]] = []
             for i in range(n):
-                self._send("sonar diag", echo=False, log_sent=False)
+                self._send("x", echo=False, log_sent=False)
                 line = self._wait_for_line(0.6, prefixes=("SONAR_DIAG,",))
                 if line is None:
                     continue
@@ -513,9 +465,8 @@ class SerialLogger:
         finally:
             self._suppress_print_prefixes = prev
 
-        good = [d for d in diags if d.get("has_sample") and d.get("fresh") and not d.get("timeout")]
+        good = [d for d in diags if d.get("has_sample") and d.get("fresh")]
         fresh = [d for d in diags if d.get("fresh")]
-        timeouts = [d for d in diags if d.get("timeout")]
 
         filt_vals = [float(d["filt_cm"]) for d in good if isinstance(d.get("filt_cm"), float)]
         mean_f, std_f, min_f, max_f = _mean_std_min_max(filt_vals)
@@ -523,8 +474,7 @@ class SerialLogger:
         print("\nSONAR_STATS_RESULT")
         print(f"  samples_parsed = {len(diags)}/{n}")
         print(f"  fresh          = {len(fresh)}/{len(diags) if diags else 1}")
-        print(f"  timeout        = {len(timeouts)}/{len(diags) if diags else 1}")
-        print(f"  good(fresh&no-timeout) = {len(good)}/{len(diags) if diags else 1}")
+        print(f"  good(fresh)    = {len(good)}/{len(diags) if diags else 1}")
         if filt_vals:
             print(f"  filt_cm (good) = mean {mean_f:.2f}  std {std_f:.2f}  min {min_f:.2f}  max {max_f:.2f}")
         print("")
@@ -545,7 +495,7 @@ class SerialLogger:
             time.sleep(0.05)
             self._send("e 0")
 
-            resp = self._prompt_user("\nStep 1/6: Place a FLAT board in front of the sonar and hold it steady. Press Enter when ready.")
+            resp = self._prompt_user("\nStep 1/5: Place a FLAT board in front of the sonar and hold it steady. Press Enter when ready.")
             if resp is None or resp.strip().lower() == "q":
                 print("Bring-up aborted.")
                 return
@@ -558,14 +508,14 @@ class SerialLogger:
                 start = time.time()
                 ok = False
                 while (time.time() - start) < 10.0:
-                    self._send("sonar diag", echo=False, log_sent=False)
+                    self._send("x", echo=False, log_sent=False)
                     line = self._wait_for_line(0.8, prefixes=("SONAR_DIAG,",))
                     diag = _parse_sonar_diag(line) if line else None
-                    good = bool(diag and diag.get("has_sample") and diag.get("fresh") and not diag.get("timeout"))
+                    good = bool(diag and diag.get("has_sample") and diag.get("fresh"))
                     window.append(good)
                     if diag:
                         print(
-                            f"  sonar: fresh={1 if diag.get('fresh') else 0} timeout={1 if diag.get('timeout') else 0} "
+                            f"  sonar: fresh={1 if diag.get('fresh') else 0} "
                             f"age_ms={diag.get('age_ms')} filt_cm={float(diag.get('filt_cm', 0.0)):.2f}"
                         )
                     else:
@@ -582,71 +532,30 @@ class SerialLogger:
                 return
             print("OK: sonar stable.\n")
 
-            resp = self._prompt_user("Step 2/6: Move the flat board to BEAM CENTER under the sonar. Press Enter when ready.")
+            resp = self._prompt_user("Step 2/5: Move beam to physical DOWN hard stop. Hold it still. Press Enter when ready.")
             if resp is None or resp.strip().lower() == "q":
                 print("Bring-up aborted.")
                 return
 
-            print("Capturing sonar center (sending p)...")
-            self._send("p")
-            line = self._wait_for_line(3.0, prefixes=("OK,cal_zero_position_set=", "ERR,sonar_not_ready"))
-            if not line or line.startswith("ERR,"):
-                print("FAIL: sonar center capture failed. Check sonar diag and target, then retry /bringup.")
-                return
-            print("OK: sonar center captured.")
-            self._send("z")
-            zline = self._wait_for_line(1.5, prefixes=("CAL_ZERO,",))
-            zkv = _parse_keyvals("CAL_ZERO,", zline or "")
-            if zkv:
-                print(f"  sonar_center_cm = {zkv.get('sonar_center_cm','?')}")
-
-            resp = self._prompt_user("\nStep 3/6: Level the beam (horizontal). Hold it still. Press Enter when ready.")
-            if resp is None or resp.strip().lower() == "q":
-                print("Bring-up aborted.")
-                return
-
-            print("Capturing angle zero (sending a)...")
-            self._send("a")
-            line = self._wait_for_line(3.0, prefixes=("OK,cal_zero_angle_set=", "ERR,angle_not_ready"))
-            if not line or line.startswith("ERR,"):
-                print("FAIL: angle zero capture failed. Run 'as5600 diag' and check wiring.")
-                print("TIP: To bypass AS5600, use stepper-count angle mode: type y, then use p + run (sonar target required).")
-                return
-            print("OK: angle zero captured.")
-            self._send("z")
-            zline = self._wait_for_line(1.5, prefixes=("CAL_ZERO,",))
-            zkv = _parse_keyvals("CAL_ZERO,", zline or "")
-            if zkv:
-                print(f"  as5600_zero_deg = {zkv.get('as5600_zero_deg','?')}")
-
-            # Capture limits with retry.
             for attempt in range(1, 4):
-                resp = self._prompt_user(
-                    f"\nStep 4/6 (attempt {attempt}/3): Move beam to physical DOWN hard stop. Hold it still. Press Enter when ready."
-                )
-                if resp is None or resp.strip().lower() == "q":
-                    print("Bring-up aborted.")
-                    return
                 print("Capturing DOWN limit (sending l)...")
                 self._send("l")
-                down_line = self._wait_for_line(2.0, prefixes=("OK,cal_limit_down_set=", "ERR,angle_not_ready"))
+                down_line = self._wait_for_line(2.0, prefixes=("OK,cal_limit_down_set=", "ERR,angle_not_ready", "ERR,sonar_not_ready"))
                 if not down_line or down_line.startswith("ERR,"):
-                    print("FAIL: down limit capture failed (angle not ready).")
-                    print("TIP: To bypass AS5600, use stepper-count angle mode: type y, then use p + run (sonar target required).")
+                    print("FAIL: down limit capture failed.")
                     continue
 
                 resp = self._prompt_user(
-                    "Step 5/6: Move beam to physical UP hard stop. Hold it still. Press Enter when ready."
+                    f"Step 3/5 (attempt {attempt}/3): Move beam to physical UP hard stop. Hold it still. Press Enter when ready."
                 )
                 if resp is None or resp.strip().lower() == "q":
                     print("Bring-up aborted.")
                     return
                 print("Capturing UP limit (sending u)...")
                 self._send("u")
-                up_line = self._wait_for_line(2.0, prefixes=("OK,cal_limit_up_set=", "ERR,limit_span_too_small", "ERR,angle_not_ready"))
+                up_line = self._wait_for_line(2.0, prefixes=("OK,cal_limit_up_set=", "ERR,limit_span_too_small", "ERR,angle_not_ready", "ERR,sonar_not_ready"))
                 if not up_line or up_line.startswith("ERR,"):
-                    print("FAIL: up limit capture failed (span too small or angle not ready).")
-                    print("TIP: To bypass AS5600, use stepper-count angle mode: type y, then use p + run (sonar target required).")
+                    print("FAIL: up limit capture failed.")
                     continue
 
                 self._send("m")
@@ -669,7 +578,20 @@ class SerialLogger:
                 print("FAIL: could not capture valid limits after 3 attempts. No save performed.")
                 return
 
-            print("\nStep 6/6: Saving calibration (sending v)...")
+            print("\nStep 4/5: Enabling driver and checking jog sign (sending e 1, then b)...")
+            self._send("e 1")
+            eline = self._wait_for_line(1.5, prefixes=("OK,driver_enabled", "OK,driver_disabled"))
+            if not eline or "driver_enabled" not in eline:
+                print("FAIL: could not enable driver.")
+                return
+            self._send("b")
+            bline = self._wait_for_line(4.0, prefixes=("OK,stepper_sign=", "ERR,"))
+            if not bline or bline.startswith("ERR,"):
+                print("FAIL: stepper sign jog failed.")
+                return
+            print(f"  {bline}")
+
+            print("\nStep 5/5: Saving calibration (sending v)...")
             self._send("v")
             vline = self._wait_for_line(2.0, prefixes=("OK,cal_saved", "ERR,cal_save_failed"))
             if not vline or vline.startswith("ERR,"):
@@ -679,12 +601,12 @@ class SerialLogger:
             print(
                 "\nBRING-UP COMPLETE\n"
                 "Next steps:\n"
-                "  0) If AS5600 is flaky: type y (stepper-angle mode). This zeros step position at the current angle.\n"
-                "  1) Motor test (even if sonar later goes stale):\n"
+                "  1) Motor test:\n"
                 "     e 1\n"
                 "     j 120 500\n"
                 "     k\n"
                 "  2) Closed-loop run (keep a detectable target present continuously):\n"
+                "     s\n"
                 "     e 1\n"
                 "     r\n"
                 "     k\n"
@@ -775,7 +697,7 @@ class SerialLogger:
                             self._suppress_snapshots = (parts[1] == "0")
                             print(f"OK snap={0 if self._suppress_snapshots else 1}")
                     elif cmd == "/diag":
-                        for c in ("s", "as5600 diag", "sonar diag", "x"):
+                        for c in ("s", "x"):
                             self._send(c)
                             time.sleep(0.05)
                     elif cmd == "/bringup":

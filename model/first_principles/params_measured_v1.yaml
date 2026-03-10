@@ -1,9 +1,9 @@
 plant:
   gravity_mps2: 9.81
 
-  # Measured ball properties.
+  # Ping pong ball properties (40 mm diameter, hollow sphere).
   ball_mass_kg: 0.0028
-  ball_radius_m: 0.020035
+  ball_radius_m: 0.020
   ball_inertia_ratio: 0.6666666666666666  # thin-shell hollow sphere
 
   # Beam + attachments excluding ball.
@@ -24,14 +24,14 @@ plant:
   pivot_coulomb_nm: 0.0
 
 limits:
-  theta_cmd_deg: 3.0
+  theta_cmd_deg: 4.0
   step_rate_sps: 2000.0
 
 actuator:
   phi_tau_s: 0.08
   torque_limit_nm: 0.35
   stepper_steps_per_rev: 3200  # 200 full-steps * 16 microsteps
-  linkage_ratio: 0.1475        # r_crank / L_arm = 47.65mm / 323.08mm
+  linkage_ratio: 1.0           # measured from runtime sign jog: 200 usteps -> ~22.7 deg beam
 
 calibration:
   theta_from_phi:
@@ -39,7 +39,7 @@ calibration:
     linear:
       phi0_rad: 0.0
       theta0_rad: 0.0
-      gain_theta_per_phi: 0.1475  # crank-rocker linkage ratio
+      gain_theta_per_phi: 1.0     # measured effective beam-per-motor gain
     hysteresis:
       enabled: false
       up:
@@ -59,7 +59,7 @@ calibration:
 design:
   inner_bw_hz: 0.6
   inner_zeta: 0.9
-  outer_bw_hz: 0.1
+  outer_bw_hz: 0.12
   outer_zeta: 0.85
   extra_pole_factor: 4.0
 

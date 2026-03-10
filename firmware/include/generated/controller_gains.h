@@ -11,21 +11,21 @@ namespace generated {
 // outer_integral_state: m*s
 // inner_integral_state: rad*s
 
-constexpr float kInnerKp = 23430.508475f;
-constexpr float kInnerKi = 0.000000f;  // P-only: integrating plant needs no Ki
+constexpr float kInnerKp = 3456.000000f;
+constexpr float kInnerKi = 7238.229474f;
 constexpr float kInnerKd = 0.000000f;
-constexpr float kInnerIMin = 0.000000f;
-constexpr float kInnerIMax = 0.000000f;
+constexpr float kInnerIMin = -0.276311f;
+constexpr float kInnerIMax = 0.276311f;
 constexpr float kInnerOutMin = -2000.000000f;
 constexpr float kInnerOutMax = 2000.000000f;
 
-constexpr float kOuterKp = 0.523159f;
-constexpr float kOuterKi = 0.168570f;
-constexpr float kOuterKd = 0.608463f;
-constexpr float kOuterIMin = -0.310613f;
-constexpr float kOuterIMax = 0.310613f;
-constexpr float kOuterOutMin = -0.052360f;
-constexpr float kOuterOutMax = 0.052360f;
+constexpr float kOuterKp = 0.753350f;
+constexpr float kOuterKi = 0.291288f;
+constexpr float kOuterKd = 0.730156f;
+constexpr float kOuterIMin = -0.239670f;
+constexpr float kOuterIMax = 0.239670f;
+constexpr float kOuterOutMin = -0.069813f;
+constexpr float kOuterOutMax = 0.069813f;
 
 }  // namespace generated
 }  // namespace bb

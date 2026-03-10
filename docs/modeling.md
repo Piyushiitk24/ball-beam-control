@@ -20,7 +20,7 @@ Companion measured-data worksheet:
 
 Measured quantities:
 - Beam angle `theta` from AS5600 (mounted on beam pivot).
-- Position range `d` from TFMini LiDAR (or HC-SR04 as backup).
+- Position range `d` from HC-SR04 ultrasonic distance sensor (D8/D9).
 
 Physical plant states:
 - Ball position `x` (along beam) and velocity `x_dot`.
