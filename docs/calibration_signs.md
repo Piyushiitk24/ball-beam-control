@@ -27,7 +27,6 @@ t
 b
 # optional:
 # p   (manual sonar-center override)
-# g   (validation only)
 v
 t
 s
@@ -39,7 +38,6 @@ Quick key map:
 - `[`/`l`: capture lower actuator limit
 - `]`/`u`: capture upper actuator limit (also fixes sonar direction: upper = near)
 - `b`: stepper sign jog
-- `g`: optional sonar validation only
 - `v`: save calibration / learned trim
 
 ## Notes

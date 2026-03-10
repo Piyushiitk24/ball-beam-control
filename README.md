@@ -70,9 +70,8 @@ Step  Command   Action                                          You do
  4    e 1       Enable stepper driver                           —
  5    b         Begin sign calibration                          Keep hands clear — motor jogs
                 (auto-derives AS5600 sign + stepper dir sign)
- 6    g         Optional sonar validation                       Only as a cross-check if you want it
- 7    v         Save limits, sonar midpoint, and trim seed      —
- 8    s         Status — confirm all flags = yes                Read output
+ 6    v         Save limits, sonar midpoint, and trim seed      —
+ 7    s         Status — confirm all flags = yes                Read output
                Check `SONAR_CFG,s=-1,m=o,u=1`
                Check `ACT_CFG` for trim/source info
 ```
@@ -99,16 +98,21 @@ If any flag shows "no", redo `l`, `u`, and `b`, then `v` to re-save. `p` is opti
 ## 4 — Run
 
 ```
-e 1       # enable stepper driver
+q c       # center setpoint
+q n       # midpoint between center and near limit
+q f       # midpoint between center and far limit
+q -2.0    # explicit setpoint in cm relative to center
 r         # start closed-loop control
 t         # turn on telemetry (if off)
 ```
+
+`q` with no argument prints the active reference and the calibrated `near_mid` / `far_mid` presets.
 
 **If `r` prints `ERR,run_blocked`**: the firmware also prints `BLOCK,<reason>` lines telling you exactly what's missing. Common fixes:
 
 | BLOCK message | Fix |
 |---------------|-----|
-| `BLOCK,sign` | Run `b` (use `g` only if you want sonar validation) |
+| `BLOCK,sign` | Run `b` |
 | `BLOCK,zero` | Run `l` + `u` to derive center/trim, or `p` for a manual sonar-center override |
 | `BLOCK,limits` | Run `l` and `u` |
 | `BLOCK,sensors` | Check wiring; use `x` for compact sonar/fault diagnostics |
@@ -133,7 +137,7 @@ e 0       # disable driver (optional, saves power)
 
 Telemetry line format (10 Hz while RUNNING):
 ```
-TEL,<t_ms>,<state>,<x_cm>,<x_filt_cm>,<theta_deg>,<theta_cmd_deg>,<u_step_rate>,<fault_flags>
+TEL,<t_ms>,<state>,<x_cm>,<x_filt_cm>,<theta_deg>,<theta_cmd_deg>,<u_step_rate>,<fault_flags>,<x_ref_cm>
 ```
 
 ```bash
@@ -145,9 +149,24 @@ LATEST="$(ls -t data/runs/run_*_telemetry.csv | head -n 1)"
 
 # Compare two runs
 ./.venv/bin/python analysis/compare_runs.py \
-    --a data/runs/<run_a>_telemetry.csv \
-    --b data/runs/<run_b>_telemetry.csv
+    --inputs data/runs/<run_a>_telemetry.csv data/runs/<run_b>_telemetry.csv
 ```
+
+`analysis/plot_run.py` auto-loads the sibling `*_events.txt` file when present, overlays setpoint/disturbance markers, and writes a sibling `*_metrics.csv`.
+
+### Standard Logged Runs
+
+Run these from the local serial logger:
+
+```text
+/std center_reg
+/std step3
+/std disturb
+```
+
+- `center_reg`: ball released off-center, recover to `q c`, total `12 s`
+- `step3`: `center -> near_mid -> center -> far_mid -> center`, total `36 s`
+- `disturb`: hold `q c`, manual disturbance prompts at `5 s` and `10 s`, total `18 s`
 
 ---
 
@@ -161,16 +180,12 @@ LATEST="$(ls -t data/runs/run_*_telemetry.csv | head -n 1)"
 | `s` / `i` | Status | Shows state, calibration flags, sensor health |
 | `t` | Toggle telemetry | Suppress during calibration |
 | `e 0\|1` | Driver disable/enable | |
-| `j <steps> <rate>` | Jog motor | Positive = upward |
 | `p` | Capture sonar-center override | Optional manual ball-center override |
+| `q [c\|n\|f\|<cm>]` | Set/query ball-position target | `q` alone prints current target + presets |
 | `l` / `[` / `1` | Capture lower limit | Beam at max DOWN / ball far |
 | `u` / `]` / `2` | Capture upper limit | Beam at max UP / ball near |
-| `z` | Show zero calibration | |
-| `m` | Show limits | |
 | `b` | Sign cal — begin | Motor jogs, derives AS5600/stepper signs |
-| `g` | Sign cal — validate | Optional near/far sonar cross-check |
 | `v` | Save cal to EEPROM | Persists across reboots |
-| `o` | Load cal from EEPROM | Normally auto at boot |
 | `d` | Reset to defaults | Clears calibration and saves defaults immediately |
 | `r` | Run (start control) | Checks all preconditions |
 | `k` | Stop | |
@@ -296,7 +311,7 @@ Median-of-3 raw reads → slew-limit → EMA.
 | `model/first_principles/export_gains.py` | Gains → firmware header |
 | `analysis/serial_logger.py` | Primary host logger |
 | `analysis/switch_firmware_main.py` | Firmware variant switcher |
-| `analysis/plot_run.py` | 4-panel telemetry plot |
+| `analysis/plot_run.py` | 4-panel telemetry plot + metrics export |
 | `analysis/compare_runs.py` | Side-by-side run comparison |
 | `docs/calibration_signs.md` | Sign convention reference |
 
@@ -336,16 +351,13 @@ k
 
 ```text
 t
-a
-p
-[
-]
+d
+l
+u
 b
-g         # optional sonar validation
-# or sonar sign 1|-1
 v
-t
 s
+q c
 r
 ```
 
@@ -375,3 +387,7 @@ Use the Tasks panel (`Terminal -> Run Task...`) with:
 - `Firmware: Switch Main -> BallBeam`
 - `Model: Design Gains`
 - `Model: Export Gains`
+
+Sources
+Ding et al., Position control for ball and beam system based on active disturbance rejection control — uses step, square-wave, sinusoidal references, and disturbance tests: https://www.tandfonline.com/doi/full/10.1080/21642583.2019.1575297
+Ghude thesis excerpt, The Ball and Beam Experiment — explicitly tests balancing at center and disturbance rejection by pushing the ball left/right: https://research.usq.edu.au/download/f72c533a3c86c6748f769e555ccf90868643913541e043b35dd38c99d94e9216/3488

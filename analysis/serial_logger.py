@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import queue
 import select
 import sys
@@ -83,13 +84,14 @@ def _parse_keyvals(prefix: str, line: str) -> dict[str, str]:
 
 
 def _parse_tel(line: str) -> Optional[dict[str, object]]:
-    # TEL,<t_ms>,<state>,<x_cm>,<x_filt_cm>,<theta_deg>,<theta_cmd_deg>,<u_step_rate>,<fault_flags>
+    # TEL,<t_ms>,<state>,<x_cm>,<x_filt_cm>,<theta_deg>,<theta_cmd_deg>,<u_step_rate>,<fault_flags>[,<x_ref_cm>]
     if not line.startswith("TEL,"):
         return None
     parts = [p.strip() for p in line.split(",")]
-    if len(parts) != 9:
+    if len(parts) not in (9, 10):
         return None
     try:
+        x_ref_cm = float(parts[9]) if len(parts) >= 10 else 0.0
         return {
             "t_ms": int(float(parts[1])),
             "state": parts[2],
@@ -99,6 +101,25 @@ def _parse_tel(line: str) -> Optional[dict[str, object]]:
             "theta_cmd_deg": float(parts[6]),
             "u_step_rate": float(parts[7]),
             "fault_flags": int(float(parts[8])),
+            "x_ref_cm": x_ref_cm,
+        }
+    except ValueError:
+        return None
+
+
+def _parse_setpoint(line: str) -> Optional[dict[str, object]]:
+    # SET,<t_ms>,<x_ref_cm>,<near_mid_cm>,<far_mid_cm>
+    if not line.startswith("SET,"):
+        return None
+    parts = [p.strip() for p in line.split(",")]
+    if len(parts) != 5:
+        return None
+    try:
+        return {
+            "t_ms": int(float(parts[1])),
+            "x_ref_cm": float(parts[2]),
+            "near_mid_cm": float(parts[3]),
+            "far_mid_cm": float(parts[4]),
         }
     except ValueError:
         return None
@@ -166,6 +187,7 @@ class Snapshot:
     sonar_ok: Optional[bool] = None
     theta_deg: Optional[float] = None
     x_filt_cm: Optional[float] = None
+    x_ref_cm: Optional[float] = None
     fault_bits: Optional[int] = None
     last_tel_rx_time: Optional[float] = None
 
@@ -200,6 +222,8 @@ class SerialLogger:
         self._first_lines: list[str] = []
         self._suppress_print_prefixes: set[str] = set()
         self._suppress_snapshots: bool = False
+        self._active_phase: str = ""
+        self._last_tel_t_ms: Optional[int] = None
 
         self._raw_f = raw_path.open("w", encoding="utf-8")
         self._events_f = events_path.open("w", encoding="utf-8")
@@ -215,6 +239,8 @@ class SerialLogger:
                 "theta_cmd_deg",
                 "u_step_rate",
                 "fault_flags",
+                "x_ref_cm",
+                "test_phase",
             ]
         )
         self._tel_f.flush()
@@ -305,6 +331,8 @@ class SerialLogger:
                     tel["theta_cmd_deg"],
                     tel["u_step_rate"],
                     tel["fault_flags"],
+                    tel["x_ref_cm"],
+                    self._active_phase,
                 ]
             )
             self._tel_f.flush()
@@ -312,8 +340,10 @@ class SerialLogger:
             self.snap.state = str(tel["state"])
             self.snap.x_filt_cm = float(tel["x_filt_cm"])  # type: ignore[arg-type]
             self.snap.theta_deg = float(tel["theta_deg"])  # type: ignore[arg-type]
+            self.snap.x_ref_cm = float(tel["x_ref_cm"])  # type: ignore[arg-type]
             self.snap.fault_bits = int(tel["fault_flags"])  # type: ignore[arg-type]
             self.snap.last_tel_rx_time = time.time()
+            self._last_tel_t_ms = int(tel["t_ms"])  # type: ignore[arg-type]
 
             if self.print_tel:
                 print(line)
@@ -365,6 +395,19 @@ class SerialLogger:
             except ValueError:
                 pass
 
+        sp = _parse_setpoint(line)
+        if sp:
+            try:
+                if "x_ref_cm" in sp:
+                    self.snap.x_ref_cm = float(sp["x_ref_cm"])
+            except ValueError:
+                pass
+            try:
+                if "t_ms" in sp:
+                    self._last_tel_t_ms = int(sp["t_ms"])
+            except ValueError:
+                pass
+
     def _print_snapshot(self) -> None:
         proto = self.protocol
         state = self.snap.state or "?"
@@ -376,6 +419,7 @@ class SerialLogger:
         s = "?" if self.snap.sonar_ok is None else ("OK" if self.snap.sonar_ok else "BAD")
         theta = "?" if self.snap.theta_deg is None else f"{self.snap.theta_deg:.1f}deg"
         x = "?" if self.snap.x_filt_cm is None else f"{self.snap.x_filt_cm:.1f}cm"
+        x_ref = "?" if self.snap.x_ref_cm is None else f"{self.snap.x_ref_cm:.1f}cm"
         faults = _decode_faults(self.snap.fault_bits)
         if self.snap.last_tel_rx_time is None:
             last_tel = "never"
@@ -383,7 +427,7 @@ class SerialLogger:
             last_tel = f"{(time.time() - self.snap.last_tel_rx_time):.1f}s"
 
         print(
-            f"SNAP proto={proto}  angle_src={angle_src}  state={state}  sensors(angle={a} sonar={s})  theta={theta}  x_filt={x}  faults={faults}  lastTEL={last_tel}"
+            f"SNAP proto={proto}  angle_src={angle_src}  state={state}  sensors(angle={a} sonar={s})  theta={theta}  x_filt={x}  x_ref={x_ref}  faults={faults}  lastTEL={last_tel}"
         )
 
     def _print_help(self) -> None:
@@ -395,9 +439,12 @@ class SerialLogger:
             "  /snap 0|1             Toggle periodic SNAP status line\n"
             "  /diag                 Send: s, x\n"
             "  /bringup              Guided calibration flow (recommended)\n"
+            "  /std center_reg       Standard center-regulation run\n"
+            "  /std step3            Standard 3-position step-tracking run\n"
+            "  /std disturb          Standard disturbance-rejection run\n"
             "  /as5600_stats [N]     Not available in compact firmware\n"
             "  /sonar_stats [N]      Sample sonar diag N times (default 30) and summarize stability\n"
-            "\nDevice commands: type anything else and press Enter (e.g. s, p, l, u, b, v, r, k)\n"
+            "\nDevice commands: type anything else and press Enter (e.g. s, q c, q n, q -2.0, l, u, b, v, r, k)\n"
         )
 
     def _drain_rx_nonblock(self, max_lines: int = 500) -> list[str]:
@@ -425,6 +472,174 @@ class SerialLogger:
                     return line
             time.sleep(0.01)
         return None
+
+    def _sleep_with_rx(self, duration_s: float) -> None:
+        deadline = time.time() + max(0.0, float(duration_s))
+        while time.time() < deadline and not self.stop_event.is_set():
+            self._drain_rx_nonblock()
+            time.sleep(0.02)
+
+    def _current_t_ms(self) -> int:
+        return int(self._last_tel_t_ms or 0)
+
+    def _log_host_marker(self, kind: str, **fields: object) -> None:
+        parts = [f"HOST_STD,{kind}", f"t_ms={self._current_t_ms()}"]
+        for key, value in fields.items():
+            parts.append(f"{key}={value}")
+        self._log_event(",".join(parts))
+
+    def _set_phase(self, phase: str) -> None:
+        self._active_phase = phase
+        self._log_host_marker("phase", name=phase)
+
+    def _query_setpoint(self) -> Optional[dict[str, object]]:
+        self._send("q", echo=False)
+        line = self._wait_for_line(1.0, prefixes=("SET,", "ERR,"))
+        if line is None or line.startswith("ERR,"):
+            return None
+        return _parse_setpoint(line)
+
+    def _setpoint_command(self, arg: str) -> Optional[dict[str, object]]:
+        self._send(f"q {arg}", echo=False)
+        line = self._wait_for_line(1.0, prefixes=("SET,", "ERR,"))
+        if line is None or line.startswith("ERR,"):
+            if line:
+                print(line)
+            return None
+        return _parse_setpoint(line)
+
+    def _start_standard_run(self, run_name: str) -> bool:
+        self._active_phase = ""
+        self._send("k", echo=False)
+        self._wait_for_line(0.6, prefixes=("OK,stopped",))
+        self._send("e 0", echo=False)
+        self._wait_for_line(0.6, prefixes=("OK,driver_disabled",))
+        self._send("t 1", echo=False)
+        self._wait_for_line(0.6, prefixes=("OK,telemetry=1",))
+        self._send("r", echo=False)
+        line = self._wait_for_line(1.2, prefixes=("OK,running", "ERR,"))
+        if line is None or line.startswith("ERR,"):
+            print(line or "ERR,run_start_timeout")
+            return False
+        self._wait_for_line(1.2, prefixes=("TEL,",))
+        self._log_host_marker("start", run=run_name)
+        return True
+
+    def _stop_standard_run(self, run_name: str) -> None:
+        self._active_phase = ""
+        self._send("k", echo=False)
+        self._wait_for_line(1.0, prefixes=("OK,stopped",))
+        self._send("e 0", echo=False)
+        self._wait_for_line(1.0, prefixes=("OK,driver_disabled",))
+        self._log_host_marker("stop", run=run_name)
+
+    def _cmd_std_center_reg(self) -> None:
+        sp = self._query_setpoint()
+        if not sp or "near_mid_cm" not in sp or "far_mid_cm" not in sp:
+            print("FAIL: could not read setpoint presets. Capture limits first.")
+            return
+        near_mid = float(sp["near_mid_cm"])
+        far_mid = float(sp["far_mid_cm"])
+        if not math.isfinite(near_mid) or not math.isfinite(far_mid):
+            print("FAIL: setpoint presets are unavailable. Capture limits first.")
+            return
+        self._log_event(
+            f"HOST_STD,manifest,run=center_reg,near_mid_cm={near_mid:.4f},far_mid_cm={far_mid:.4f},duration_s=12"
+        )
+        resp = self._prompt_user(
+            "\nCENTER REGULATION\nPlace the ball near either off-center preset, then press Enter to start and release."
+        )
+        if resp is None or resp.strip().lower() == "q":
+            print("Standard run aborted.")
+            return
+        if self._setpoint_command("c") is None:
+            print("FAIL: could not set center reference.")
+            return
+        if not self._start_standard_run("center_reg"):
+            return
+        self._set_phase("recover_to_center")
+        self._sleep_with_rx(12.0)
+        self._stop_standard_run("center_reg")
+        print("Standard run complete: center_reg")
+
+    def _cmd_std_step3(self) -> None:
+        sp = self._query_setpoint()
+        if not sp or "near_mid_cm" not in sp or "far_mid_cm" not in sp:
+            print("FAIL: could not read setpoint presets. Capture limits first.")
+            return
+        near_mid = float(sp["near_mid_cm"])
+        far_mid = float(sp["far_mid_cm"])
+        if not math.isfinite(near_mid) or not math.isfinite(far_mid):
+            print("FAIL: setpoint presets are unavailable. Capture limits first.")
+            return
+        self._log_event(
+            "HOST_STD,manifest,run=step3,"
+            f"near_mid_cm={near_mid:.4f},far_mid_cm={far_mid:.4f},holds_s=4|8|8|8|8"
+        )
+        print("\nSTEP TRACKING 3POS\nRunning: center -> near_mid -> center -> far_mid -> center")
+        if self._setpoint_command("c") is None:
+            print("FAIL: could not set center reference.")
+            return
+        if not self._start_standard_run("step3"):
+            return
+
+        phases = [
+            ("hold_center_1", "c", 4.0),
+            ("hold_near_mid", "n", 8.0),
+            ("hold_center_2", "c", 8.0),
+            ("hold_far_mid", "f", 8.0),
+            ("hold_center_3", "c", 8.0),
+        ]
+        for phase, cmd_arg, duration_s in phases:
+            if self._setpoint_command(cmd_arg) is None:
+                print(f"FAIL: setpoint change failed in phase {phase}.")
+                break
+            self._set_phase(phase)
+            self._sleep_with_rx(duration_s)
+        self._stop_standard_run("step3")
+        print("Standard run complete: step3")
+
+    def _cmd_std_disturb(self) -> None:
+        sp = self._query_setpoint()
+        if not sp or "near_mid_cm" not in sp or "far_mid_cm" not in sp:
+            print("FAIL: could not read setpoint presets. Capture limits first.")
+            return
+        near_mid = float(sp["near_mid_cm"])
+        far_mid = float(sp["far_mid_cm"])
+        if not math.isfinite(near_mid) or not math.isfinite(far_mid):
+            print("FAIL: setpoint presets are unavailable. Capture limits first.")
+            return
+        self._log_event(
+            "HOST_STD,manifest,run=disturb,"
+            f"near_mid_cm={near_mid:.4f},far_mid_cm={far_mid:.4f},schedule_s=5|10|18,notes=manual_nudge"
+        )
+        resp = self._prompt_user(
+            "\nDISTURBANCE REJECTION\nBe ready to nudge the ball when prompted. Press Enter to start."
+        )
+        if resp is None or resp.strip().lower() == "q":
+            print("Standard run aborted.")
+            return
+        if self._setpoint_command("c") is None:
+            print("FAIL: could not set center reference.")
+            return
+        if not self._start_standard_run("disturb"):
+            return
+
+        self._set_phase("hold_center_pre")
+        self._sleep_with_rx(5.0)
+
+        self._log_host_marker("mark", label="disturb_near_prompt")
+        print("NUDGE NOW: disturb the ball toward the near-sensor side.")
+        self._set_phase("recover_after_disturb_near")
+        self._sleep_with_rx(5.0)
+
+        self._log_host_marker("mark", label="disturb_far_prompt")
+        print("NUDGE NOW: disturb the ball toward the far-sensor side.")
+        self._set_phase("recover_after_disturb_far")
+        self._sleep_with_rx(8.0)
+
+        self._stop_standard_run("disturb")
+        print("Standard run complete: disturb")
 
     def _prompt_user(self, prompt: str) -> Optional[str]:
         print(prompt)
@@ -558,7 +773,6 @@ class SerialLogger:
                     print("FAIL: up limit capture failed.")
                     continue
 
-                self._send("m")
                 mline = self._wait_for_line(1.5, prefixes=("CAL_LIMITS,",))
                 mkv = _parse_keyvals("CAL_LIMITS,", mline or "")
                 try:
@@ -601,13 +815,9 @@ class SerialLogger:
             print(
                 "\nBRING-UP COMPLETE\n"
                 "Next steps:\n"
-                "  1) Motor test:\n"
-                "     e 1\n"
-                "     j 120 500\n"
-                "     k\n"
-                "  2) Closed-loop run (keep a detectable target present continuously):\n"
+                "  1) Closed-loop run (keep a detectable target present continuously):\n"
                 "     s\n"
-                "     e 1\n"
+                "     q c\n"
                 "     r\n"
                 "     k\n"
             )
@@ -702,6 +912,19 @@ class SerialLogger:
                             time.sleep(0.05)
                     elif cmd == "/bringup":
                         self._cmd_bringup()
+                    elif cmd == "/std":
+                        if len(parts) != 2:
+                            print("usage: /std center_reg|step3|disturb")
+                            continue
+                        std_name = parts[1].lower()
+                        if std_name == "center_reg":
+                            self._cmd_std_center_reg()
+                        elif std_name == "step3":
+                            self._cmd_std_step3()
+                        elif std_name == "disturb":
+                            self._cmd_std_disturb()
+                        else:
+                            print("usage: /std center_reg|step3|disturb")
                     elif cmd == "/as5600_stats":
                         n = 50
                         if len(parts) == 2:

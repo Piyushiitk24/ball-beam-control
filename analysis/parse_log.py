@@ -15,6 +15,7 @@ COLUMNS = [
     "theta_cmd_deg",
     "u_step_rate",
     "fault_flags",
+    "x_ref_cm",
 ]
 
 
@@ -30,7 +31,7 @@ def parse_telemetry_lines(lines: list[str]) -> pd.DataFrame:
             line = line[4:]
 
         parts = [p.strip() for p in line.split(",")]
-        if len(parts) != len(COLUMNS):
+        if len(parts) not in (8, 9):
             continue
 
         try:
@@ -44,6 +45,7 @@ def parse_telemetry_lines(lines: list[str]) -> pd.DataFrame:
                     "theta_cmd_deg": float(parts[5]),
                     "u_step_rate": float(parts[6]),
                     "fault_flags": int(float(parts[7])),
+                    "x_ref_cm": float(parts[8]) if len(parts) >= 9 else 0.0,
                 }
             )
         except ValueError:

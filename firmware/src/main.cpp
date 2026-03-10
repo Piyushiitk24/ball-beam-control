@@ -74,25 +74,6 @@ uint8_t g_echo_pin_mask = 0;
 char g_cmd_buffer[96];
 size_t g_cmd_len = 0;
 
-struct SignCalSession {
-  bool active = false;
-  bool near_captured = false;
-  bool complete = false;
-
-  float near_distance_cm = 0.0f;
-  float far_distance_cm = 0.0f;
-
-  float theta_before_raw_deg = 0.0f;
-  float theta_after_raw_deg = 0.0f;
-  float theta_delta_raw_deg = 0.0f;
-
-  int8_t suggested_stepper_sign = STEPPER_DIR_SIGN;
-  int8_t suggested_as5600_sign = AS5600_SIGN;
-  int8_t suggested_sonar_sign = SONAR_POS_SIGN;
-};
-
-SignCalSession g_sign_cal;
-
 // Raw AS5600 readings captured at physical lower/upper beam positions.
 // Used by finalizeNormalizedLimitSpan() to auto-compute AS5600 sign.
 float g_limit_lower_raw_deg = 0.0f;
@@ -142,6 +123,9 @@ void syncLimitCaptureCacheFromRuntime();
 void serviceTrimLearning(uint32_t now_ms, float signed_step_rate_sps);
 bool serviceActiveLimitRecovery(uint32_t now_ms);
 bool maybeStartLimitRecovery(uint32_t now_ms, float signed_step_rate_sps);
+bool computeSetpointPresetsCm(float& near_mid_cm, float& far_mid_cm);
+void setBallSetpointCm(float target_cm);
+void printSetpointStatus();
 
 const char* stateToString(AppState state) {
   switch (state) {
@@ -188,6 +172,39 @@ void syncLimitCaptureCacheFromRuntime() {
   g_limit_upper_raw_deg = runtimeCalAs5600UpperRawDeg();
   g_limit_lower_sonar_cm = runtimeCalSonarLowerCm();
   g_limit_upper_sonar_cm = runtimeCalSonarUpperCm();
+}
+
+bool computeSetpointPresetsCm(float& near_mid_cm, float& far_mid_cm) {
+  if (!runtimeCalIsLimitsSet() || !runtimeCalHasSonarCenter()) {
+    return false;
+  }
+  const float lower_x_cm = runtimeMapBallPosCm(runtimeCalSonarLowerCm());
+  const float upper_x_cm = runtimeMapBallPosCm(runtimeCalSonarUpperCm());
+  const float near_limit_cm = (lower_x_cm >= upper_x_cm) ? lower_x_cm : upper_x_cm;
+  const float far_limit_cm = (lower_x_cm <= upper_x_cm) ? lower_x_cm : upper_x_cm;
+  near_mid_cm = 0.5f * near_limit_cm;
+  far_mid_cm = 0.5f * far_limit_cm;
+  return true;
+}
+
+void setBallSetpointCm(float target_cm) {
+  g_setpoint.ball_pos_cm_target = target_cm;
+  g_setpoint.ball_pos_m_target = target_cm * kCmToM;
+}
+
+void printSetpointStatus() {
+  float near_mid_cm = NAN;
+  float far_mid_cm = NAN;
+  computeSetpointPresetsCm(near_mid_cm, far_mid_cm);
+
+  Serial.print(F("SET,"));
+  Serial.print(millis());
+  Serial.print(',');
+  Serial.print(g_setpoint.ball_pos_cm_target, 4);
+  Serial.print(',');
+  Serial.print(near_mid_cm, 4);
+  Serial.print(',');
+  Serial.println(far_mid_cm, 4);
 }
 
 float currentActuatorDeg() {
@@ -454,8 +471,6 @@ bool tryStartRun() {
     resetLimitRecovery();
     resetTrimLearning();
     g_telemetry_enabled = true;
-    g_setpoint.ball_pos_cm_target = kDefaultBallSetpointCm;
-    g_setpoint.ball_pos_m_target = g_setpoint.ball_pos_cm_target * kCmToM;
     Serial.println(F("OK,running"));
     return true;
   }
@@ -732,7 +747,9 @@ void emitTelemetry(uint32_t now_ms) {
   Serial.print(',');
   Serial.print(g_stepper.targetSignedStepRate(), 2);
   Serial.print(',');
-  Serial.println(packFaultFlags(g_fault_flags));
+  Serial.print(packFaultFlags(g_fault_flags));
+  Serial.print(',');
+  Serial.println(g_setpoint.ball_pos_cm_target, 4);
 }
 
 void runJogBlocking(uint32_t timeout_ms) {
@@ -773,20 +790,6 @@ bool handleCalSignBegin() {
     return false;
   }
 
-  // Initialise sign-cal session for later g (save) command.
-  g_sign_cal.active = true;
-  g_sign_cal.near_captured = false;
-  g_sign_cal.complete = false;
-  g_sign_cal.suggested_stepper_sign = runtimeCalStepperDirSign();
-  g_sign_cal.suggested_as5600_sign = runtimeCalAs5600Sign();
-  g_sign_cal.suggested_sonar_sign = runtimeCalOrientationSonarSign();
-  g_sign_cal.theta_before_raw_deg = raw_before;
-
-  // Capture near sonar distance (ball at near end before jog).
-  float sonar_dist_cm = 0.0f;
-  g_sign_cal.near_captured = captureSonarCalDistanceCm(sonar_dist_cm);
-  g_sign_cal.near_distance_cm = sonar_dist_cm;
-
   // Temporarily clear limits so test jog isn't blocked.
   runtimeCalMarkLowerLimitCaptured(false);
   runtimeCalMarkUpperLimitCaptured(false);
@@ -810,25 +813,19 @@ bool handleCalSignBegin() {
 
   if (!got_after) {
     Serial.println(F("ERR,angle_not_ready"));
-    g_sign_cal.active = false;
     g_state_machine.finishSignCalibration(false);
     if (!g_manual_enable) { applySafeDisable(); }
     return false;
   }
 
-  g_sign_cal.theta_after_raw_deg = raw_after;
-
   // Positive jog should increase theta (motor up = positive).
   const float theta_before = runtimeMapThetaDeg(raw_before);
   const float theta_after = runtimeMapThetaDeg(raw_after);
   const float delta_deg = theta_after - theta_before;
-  g_sign_cal.theta_delta_raw_deg = delta_deg;
 
   if (delta_deg < 0.0f) {
     runtimeCalSetStepperDirSign(static_cast<int8_t>(-runtimeCalStepperDirSign()));
   }
-  g_sign_cal.suggested_stepper_sign = runtimeCalStepperDirSign();
-  g_sign_cal.suggested_as5600_sign = runtimeCalAs5600Sign();
 
   runtimeCalSetSignCaptured(true);
   g_runtime_cal_dirty = true;
@@ -841,75 +838,9 @@ bool handleCalSignBegin() {
   Serial.print(F(",delta="));
   Serial.println(delta_deg, 4);
 
-  if (g_sign_cal.near_captured) {
-    Serial.println(F("INFO,sonar_near=1"));
-  } else {
-    Serial.println(F("WARN,sonar_near=0"));
-  }
-
   if (!g_manual_enable) {
     applySafeDisable();
   }
-  return true;
-}
-
-bool handleCalSignSave() {
-  if (!g_sign_cal.active) {
-    Serial.println(F("ERR,cal_sign_not_started"));
-    return false;
-  }
-  if (!g_sign_cal.near_captured) {
-    Serial.println(F("ERR,sign_sonar_near_missing"));
-    Serial.println(F("GUIDE,do=sonar sign 1|-1 or rerun b"));
-    return false;
-  }
-
-  float dist_cm = 0.0f;
-  if (!captureSonarCalDistanceCm(dist_cm)) {
-    Serial.println(F("ERR,sonar_not_ready"));
-    printSonarDiag();
-    return false;
-  }
-
-  g_sign_cal.far_distance_cm = dist_cm;
-  const float delta_cm = g_sign_cal.far_distance_cm - g_sign_cal.near_distance_cm;
-  g_sign_cal.suggested_sonar_sign = (delta_cm >= 0.0f) ? 1 : -1;
-
-  g_sign_cal.complete = true;
-  g_sign_cal.active = false;
-
-  bool applied = false;
-  if (fabsf(delta_cm) < 1.0f) {
-    Serial.println(F("WARN,sign_sonar_delta"));
-  } else if (g_sign_cal.suggested_sonar_sign != runtimeCalOrientationSonarSign()) {
-    Serial.println(F("WARN,sign_flip"));
-  } else {
-    runtimeCalApplyOrientationSonarSign();
-    applied = true;
-  }
-
-  if (g_state_machine.state() == AppState::CALIB_SIGN) {
-    g_state_machine.finishSignCalibration(true);
-  }
-
-  Serial.print(F("SIGN_CAL_RESULT,"));
-  Serial.print(millis());
-  Serial.print(',');
-  Serial.print(g_sign_cal.theta_delta_raw_deg, 5);
-  Serial.print(',');
-  Serial.print(g_sign_cal.suggested_stepper_sign);
-  Serial.print(',');
-  Serial.print(g_sign_cal.suggested_as5600_sign);
-  Serial.print(',');
-  Serial.print(g_sign_cal.near_distance_cm, 4);
-  Serial.print(',');
-  Serial.print(g_sign_cal.far_distance_cm, 4);
-  Serial.print(',');
-  Serial.println(runtimeCalSonarPosSign());
-
-  Serial.println(applied ? F("INFO,signs_applied_runtime")
-                         : F("INFO,sign_keep"));
-  g_runtime_cal_dirty = true;
   return true;
 }
 
@@ -1314,58 +1245,6 @@ void setManualDriverEnabled(bool enabled) {
   }
 }
 
-bool startJogCommand(long steps, float rate, bool require_limits) {
-  if (steps == 0 || rate <= 0.0f) {
-    Serial.println(F("ERR,jog_args"));
-    return false;
-  }
-  if (g_state_machine.state() == AppState::RUNNING) {
-    Serial.println(F("ERR,stop_first"));
-    return false;
-  }
-
-  float theta_now_deg = 0.0f;
-  if (require_limits && !runtimeCalIsLimitsSet()) {
-    Serial.println(F("ERR,jog_requires_limits"));
-    return false;
-  }
-  const float upper = runtimeCalIsLimitsSet()
-                          ? runtimeCalThetaUpperLimitDeg()
-                          : kThetaHardLimitDeg;
-  const float lower = runtimeCalIsLimitsSet()
-                          ? runtimeCalThetaLowerLimitDeg()
-                          : -kThetaHardLimitDeg;
-  if (!sampleAngleNow(millis(), &theta_now_deg, nullptr)) {
-    Serial.println(F("ERR,angle_not_ready"));
-    return false;
-  }
-  if (steps > 0 && theta_now_deg >= (upper - kLimitStopMarginDeg)) {
-    Serial.println(F("ERR,jog_hi"));
-    return false;
-  }
-  if (steps < 0 && theta_now_deg <= (lower + kLimitStopMarginDeg)) {
-    Serial.println(F("ERR,jog_lo"));
-    return false;
-  }
-
-  g_stepper.enable(true);
-  g_stepper.requestJogSteps(steps, rate);
-  Serial.println(F("OK,jog_started"));
-  return true;
-}
-
-__attribute__((noinline)) void loadCalibrationCommand() {
-  const bool loaded = runtimeCalLoad();
-  syncLimitCaptureCacheFromRuntime();
-  resetAs5600Filter();
-  resetLimitRecovery();
-  resetTrimLearning();
-  g_limit_stuck_fault = false;
-  g_runtime_cal_dirty = false;
-  Serial.print(F("OK,cal_load,"));
-  Serial.println(loaded ? F("loaded") : F("defaults"));
-}
-
 void stopRunCommand() {
   g_state_machine.requestStop();
   resetLimitRecovery();
@@ -1455,28 +1334,41 @@ void handleCommand(char* line) {
         setManualDriverEnabled(atoi(arg) != 0);
         return;
       }
-      case 'j': {
-        char* steps_arg = strtok_r(nullptr, " ", &saveptr);
-        char* rate_arg = strtok_r(nullptr, " ", &saveptr);
-        if (steps_arg == nullptr) {
-          Serial.println(F("ERR,usage:j"));
-          return;
-        }
-
-        const long steps = atol(steps_arg);
-        const float rate = (rate_arg != nullptr) ? parseFloatFast(rate_arg) : 500.0f;
-        startJogCommand(steps, rate, false);
-        return;
-      }
       case 'p':
         if (captureZeroPosition()) {
           printGuideNextAction();
         }
         return;
-      case 'z':
-        printCalZero();
-        printGuideNextAction();
+      case 'q': {
+        char* arg = strtok_r(nullptr, " ", &saveptr);
+        if (arg == nullptr) {
+          printSetpointStatus();
+          return;
+        }
+
+        float target_cm = g_setpoint.ball_pos_cm_target;
+        if (strlen(arg) == 1 && (arg[0] == 'c' || arg[0] == 'C')) {
+          target_cm = 0.0f;
+        } else if (strlen(arg) == 1 && (arg[0] == 'n' || arg[0] == 'N' || arg[0] == 'f' || arg[0] == 'F')) {
+          float near_mid_cm = 0.0f;
+          float far_mid_cm = 0.0f;
+          if (!computeSetpointPresetsCm(near_mid_cm, far_mid_cm)) {
+            Serial.println(F("ERR,setpoint_limits"));
+            return;
+          }
+          target_cm = ((arg[0] == 'n') || (arg[0] == 'N')) ? near_mid_cm : far_mid_cm;
+        } else if (((arg[0] >= '0') && (arg[0] <= '9')) || arg[0] == '+' || arg[0] == '-' ||
+                   arg[0] == '.') {
+          target_cm = parseFloatFast(arg);
+        } else {
+          Serial.println(F("ERR,usage:q"));
+          return;
+        }
+
+        setBallSetpointCm(target_cm);
+        printSetpointStatus();
         return;
+      }
       case '[':
       case '{':
       case 'l':
@@ -1493,17 +1385,8 @@ void handleCommand(char* line) {
           printGuideNextAction();
         }
         return;
-      case 'm':
-        printCalLimits();
-        printGuideNextAction();
-        return;
       case 'b':
         if (handleCalSignBegin()) {
-          printGuideNextAction();
-        }
-        return;
-      case 'g':
-        if (handleCalSignSave()) {
           printGuideNextAction();
         }
         return;
@@ -1516,11 +1399,6 @@ void handleCommand(char* line) {
         }
         printGuideNextAction();
         return;
-      case 'o': {
-        loadCalibrationCommand();
-        printGuideNextAction();
-        return;
-      }
       case 'd':
         runtimeCalResetDefaults();
         runtimeCalSave();
