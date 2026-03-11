@@ -10,8 +10,8 @@ Target commands
 ```text
 q          # print current target and stored presets
 q c        # center of the runner
-q n        # midpoint between center and near-sensor end
-q f        # midpoint between center and far end
+q n        # near-sensor endpoint of the runner
+q f        # far endpoint of the runner
 q <cm>     # explicit offset from center, example: q -2.0
 ```
 

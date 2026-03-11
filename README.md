@@ -54,9 +54,9 @@ Use this mental model:
 - `q c`
   - Target is runner center.
 - `q n`
-  - Target is the midpoint between runner center and the near-sensor end.
+  - Target is the calibrated near-sensor endpoint.
 - `q f`
-  - Target is the midpoint between runner center and the far end.
+  - Target is the calibrated far endpoint.
 - `q <cm>`
   - Target is an explicit offset in cm relative to center.
   - Example: `q -2.0`
@@ -246,7 +246,7 @@ Run these from the local serial logger:
 ```
 
 - `center_reg`: ball released off-center, recover to `q c`, total `12 s`
-- `step3`: `center -> near_mid -> center -> far_mid -> center`, total `36 s`
+- `step3`: `center -> near endpoint -> center -> far endpoint -> center`, total `36 s`
 - `disturb`: hold `q c`, manual disturbance prompts at `5 s` and `10 s`, total `18 s`
 
 Recommended operator usage:

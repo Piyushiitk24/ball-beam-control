@@ -130,7 +130,7 @@ def _parse_tel(line: str) -> Optional[dict[str, object]]:
 
 
 def _parse_setpoint(line: str) -> Optional[dict[str, object]]:
-    # SET,<t_ms>,<x_ref_cm>,<near_mid_cm>,<far_mid_cm>
+    # SET,<t_ms>,<x_ref_cm>,<near_target_cm>,<far_target_cm>
     if not line.startswith("SET,"):
         return None
     parts = [p.strip() for p in line.split(",")]
@@ -552,7 +552,7 @@ class SerialLogger:
             print("FAIL: setpoint presets are unavailable. Capture limits first.")
             return
         self._log_event(
-            f"HOST_STD,manifest,run=center_reg,near_mid_cm={near_mid:.4f},far_mid_cm={far_mid:.4f},duration_s=12"
+            f"HOST_STD,manifest,run=center_reg,near_target_cm={near_mid:.4f},far_target_cm={far_mid:.4f},duration_s=12"
         )
         resp = self._prompt_user(
             "\nCENTER REGULATION\nPlace the ball near either off-center preset, then press Enter to start and release."
@@ -582,9 +582,9 @@ class SerialLogger:
             return
         self._log_event(
             "HOST_STD,manifest,run=step3,"
-            f"near_mid_cm={near_mid:.4f},far_mid_cm={far_mid:.4f},holds_s=4|8|8|8|8"
+            f"near_target_cm={near_mid:.4f},far_target_cm={far_mid:.4f},holds_s=4|8|8|8|8"
         )
-        print("\nSTEP TRACKING 3POS\nRunning: center -> near_mid -> center -> far_mid -> center")
+        print("\nSTEP TRACKING 3POS\nRunning: center -> near endpoint -> center -> far endpoint -> center")
         if self._setpoint_command("c") is None:
             print("FAIL: could not set center reference.")
             return
@@ -593,9 +593,9 @@ class SerialLogger:
 
         phases = [
             ("hold_center_1", "c", 4.0),
-            ("hold_near_mid", "n", 8.0),
+            ("hold_near", "n", 8.0),
             ("hold_center_2", "c", 8.0),
-            ("hold_far_mid", "f", 8.0),
+            ("hold_far", "f", 8.0),
             ("hold_center_3", "c", 8.0),
         ]
         for phase, cmd_arg, duration_s in phases:
@@ -619,7 +619,7 @@ class SerialLogger:
             return
         self._log_event(
             "HOST_STD,manifest,run=disturb,"
-            f"near_mid_cm={near_mid:.4f},far_mid_cm={far_mid:.4f},schedule_s=5|10|18,notes=manual_nudge"
+            f"near_target_cm={near_mid:.4f},far_target_cm={far_mid:.4f},schedule_s=5|10|18,notes=manual_nudge"
         )
         resp = self._prompt_user(
             "\nDISTURBANCE REJECTION\nBe ready to nudge the ball when prompted. Press Enter to start."

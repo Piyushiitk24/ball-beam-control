@@ -32,7 +32,9 @@ using namespace bb;
 constexpr float kLimitStopMarginDeg = 0.2f;
 constexpr float kLimitMinSpanDeg = 2.0f;
 constexpr float kRunSoftLimitBandDeg = 1.0f;
-constexpr float kRunHardLimitMarginDeg = 2.0f;
+// Slightly wider than the nominal 2 deg to avoid nuisance angle_oob faults
+// from small AS5600/calibration mismatch near the travel ends.
+constexpr float kRunHardLimitMarginDeg = 3.0f;
 
 StepperTMC2209 g_stepper(PIN_STEP, PIN_DIR, PIN_EN);
 AS5600Sensor g_as5600;
@@ -140,10 +142,8 @@ bool computeSetpointPresetsCm(float& near_mid_cm, float& far_mid_cm) {
   const float upper_x_cm =
       linearToCorrectedBallPosCm(runtimeMapBallPosCm(runtimeCalSonarUpperCm()),
                                  runtimeCalThetaUpperLimitDeg());
-  const float near_limit_cm = (lower_x_cm >= upper_x_cm) ? lower_x_cm : upper_x_cm;
-  const float far_limit_cm = (lower_x_cm <= upper_x_cm) ? lower_x_cm : upper_x_cm;
-  near_mid_cm = 0.5f * near_limit_cm;
-  far_mid_cm = 0.5f * far_limit_cm;
+  near_mid_cm = (lower_x_cm >= upper_x_cm) ? lower_x_cm : upper_x_cm;
+  far_mid_cm = (lower_x_cm <= upper_x_cm) ? lower_x_cm : upper_x_cm;
   return true;
 }
 
