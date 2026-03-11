@@ -9,13 +9,8 @@ Stepper-driven ball-beam balancer: firmware (C++/PlatformIO) + first-principles 
 ```bash
 cd /Users/piyush/code/ball-beam-control
 
-# Generate gains from measured plant parameters
-./.venv/bin/python model/first_principles/design_cascade_pid.py \
-    --params model/first_principles/params_measured_v1.yaml
-./.venv/bin/python model/first_principles/export_gains.py
-
 # Build
-cd firmware && pio run -e nano_new
+pio run -e nano_new
 
 # Upload (close any monitor first!)
 pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
@@ -33,111 +28,197 @@ cd /Users/piyush/code/ball-beam-control
 ./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1
 ```
 
-Logger local commands: `/help`, `/diag`, `/bringup`, `/quit`.  
+Logger local commands: `/help`, `/diag`, `/bringup`, `/std ...`, `/quit`.
 Raw fallback: `cd firmware && pio device monitor -b 115200 --echo --filter send_on_enter --eol LF`
 
 ---
 
-## 3 — Calibration (Step-by-Step, No Ambiguity)
+## 3 — Complete Workflow
 
-### Run Preconditions
+Use this mental model:
 
-`r` (run) is **blocked** unless ALL of these are true:
+1. Capture runner endpoints with `l` and `u`.
+2. Capture the physical runner center with `p`.
+3. Jog sign calibration with `b`.
+4. Save with `v`.
+5. Choose a target with `q ...`.
+6. Start control with `r`.
+7. Change target live with more `q ...` commands.
 
-| Condition | What satisfies it | Command |
-|-----------|-------------------|---------|
-| **Actuator trim ready** | Seeded from `l/u` midpoint or learned and saved | `l` + `u` |
-| **Position zero captured** | Sonar midpoint derived from `l/u`, or manually overridden | `l` + `u` (or optional `p`) |
-| **Lower limit captured** | Beam DOWN limit stored | `l` (or `[` or `1`) |
-| **Upper limit captured** | Beam UP limit stored | `u` (or `]` or `2`) |
-| **Signs calibrated** | AS5600 + stepper signs derived; sonar direction fixed by `l/u` | `l`, `u`, then `b` |
-| **Sensors OK** | AS5600 + sonar returning valid data | (automatic) |
-| **No faults** | Fault flags clear | `f` to clear |
+### What `q`, `q c`, `q n`, and `q f` mean
 
-### Full Calibration Sequence (AS5600 Actuator Mode)
+- `q`
+  - Query only.
+  - It does not move the motor.
+  - It prints the current target plus the two stored presets.
+- `q c`
+  - Target is runner center.
+- `q n`
+  - Target is the midpoint between runner center and the near-sensor end.
+- `q f`
+  - Target is the midpoint between runner center and the far end.
+- `q <cm>`
+  - Target is an explicit offset in cm relative to center.
+  - Example: `q -2.0`
 
-Do this on first power-up or after `d` (reset defaults). Steps are **order-sensitive**.
+Important:
 
-```
-Step  Command   Action                                          You do
-────  ────────  ──────────────────────────────────────────────  ──────────────────────────
- 0    s         Status — confirm firmware version, sensor OK    Read output
- 1    t         Toggle telemetry OFF (reduces noise)            —
- 2    l         Capture lower actuator limit                    Tilt beam fully DOWN by hand
-               (also captures the far sonar distance)
- 3    u         Capture upper actuator limit                    Tilt beam fully UP by hand
-               (also captures the near sonar distance and fixes sonar direction: upper = near)
- 4    e 1       Enable stepper driver                           —
- 5    b         Begin sign calibration                          Keep hands clear — motor jogs
-                (auto-derives AS5600 sign + stepper dir sign)
- 6    v         Save limits, sonar midpoint, and trim seed      —
- 7    s         Status — confirm all flags = yes                Read output
-               Check `SONAR_CFG,s=-1,m=o,u=1`
-               Check `ACT_CFG` for trim/source info
-```
+- If the system is idle, `q ...` only changes the target. Motion starts after `r`.
+- If the system is already `RUNNING`, `q ...` changes target live. Do not send another `r`.
 
-`a` is no longer required. The firmware seeds actuator trim from the midpoint of the captured lower/upper travel and can learn a better trim during `RUNNING`.
+### Workflow 1 — Fresh Calibration From Scratch
 
-After `v`, calibration **persists across reboots**. You only need to redo this if hardware changes.
+Use this after a fresh flash, a mechanical change, or when `s` shows any calibration flag as `no`.
 
-### Quick Re-Calibration (Already Saved in EEPROM)
+#### Physical setup before each capture
 
-On subsequent power-ups, calibration auto-loads. Just verify:
+- Before `l`: hold the beam fully DOWN, with the ball at the far end away from the ultrasonic sensor.
+- Before `u`: hold the beam fully UP, with the ball at the near end close to the ultrasonic sensor.
+- Before `p`: place the ball at the physical center of the runner and hold it steady there. The firmware records runner center and actuator control origin here.
+- Before `b`: remove your hands and keep clear of the mechanism.
 
-```
-s         # all flags should show "yes"
-s         # and SONAR_CFG should show s=-1,m=o,u=1
-e 1       # enable driver
-r         # run!
-```
+#### Exact command sequence
 
-If any flag shows "no", redo `l`, `u`, and `b`, then `v` to re-save. `p` is optional and only needed if you want to override the auto-derived sonar midpoint.
-
----
-
-## 4 — Run
-
-```
-q c       # center setpoint
-q n       # midpoint between center and near limit
-q f       # midpoint between center and far limit
-q -2.0    # explicit setpoint in cm relative to center
-r         # start closed-loop control
-t         # turn on telemetry (if off)
+```text
+s
+d
+l
+u
+p
+e 1
+b
+v
+s
 ```
 
-`q` with no argument prints the active reference and the calibrated `near_mid` / `far_mid` presets.
+What you want after the final `s`:
 
-**If `r` prints `ERR,run_blocked`**: the firmware also prints `BLOCK,<reason>` lines telling you exactly what's missing. Common fixes:
+- `CAL,zero_calibrated=yes`
+- `CAL,limits_calibrated=yes`
+- `CAL,sign_calibrated=yes`
+- `ACT_CFG,...,v=1`
 
-| BLOCK message | Fix |
-|---------------|-----|
-| `BLOCK,sign` | Run `b` |
-| `BLOCK,zero` | Run `l` + `u` to derive center/trim, or `p` for a manual sonar-center override |
-| `BLOCK,limits` | Run `l` and `u` |
-| `BLOCK,sensors` | Check wiring; use `x` for compact sonar/fault diagnostics |
-| `BLOCK,faults` | Run `f` to clear; check `x` for details |
+### Workflow 2 — First Closed-Loop Run After Calibration
 
-### Stop
+Use this immediately after the fresh calibration above:
 
-```
-k         # stop control loop
-e 0       # disable driver (optional, saves power)
+```text
+q c
+e 1
+r
 ```
 
-### Quit Logger
+What happens:
 
+- `q c` sets the desired ball target to the physical runner center.
+- `r` now starts `RUNNING` directly.
+- There is no center-search phase anymore.
+
+What you do physically:
+
+- Keep hands off the beam and ball.
+- Let the controller move the ball toward the selected target.
+
+### Workflow 3 — Normal Daily Use After Calibration Is Saved
+
+Center run:
+
+```text
+s
+q c
+e 1
+r
+k
+e 0
 ```
-/quit     # sends k → e 0 → exits cleanly
+
+Near-side run:
+
+```text
+s
+q n
+e 1
+r
+k
+e 0
+```
+
+Far-side run:
+
+```text
+s
+q f
+e 1
+r
+k
+e 0
+```
+
+Custom target:
+
+```text
+s
+q -2.0
+e 1
+r
+k
+e 0
+```
+
+### Change Target During a Run
+
+If the system is already running, send target changes directly:
+
+```text
+q n
+q f
+q c
+q -2.0
+```
+
+Do not send `k`, `e 0`, or another `r` unless you actually want to stop.
+
+### If `r` Does Not Start
+
+If `r` prints `ERR,run_blocked`, read the `BLOCK,...` lines.
+
+- `BLOCK,zero`
+  - runner center has not been captured
+  - run `p`
+- `BLOCK,limits`
+  - lower/upper endpoints are missing
+  - run `l`, then `u`
+- `BLOCK,sign`
+  - sign jog has not been done
+  - run `b`
+- `BLOCK,sensors`
+  - sonar or AS5600 is not currently valid
+  - run `s` and wait for `SENSORS,angle=ok,pos=ok`
+- `BLOCK,faults`
+  - run `f`, then `s`
+
+### Stop And Quit
+
+Stop control:
+
+```text
+k
+e 0
+```
+
+Quit the logger:
+
+```text
+/quit
 ```
 
 ---
 
 ## 5 — Telemetry & Analysis
 
-Telemetry line format (10 Hz while RUNNING):
+Telemetry line format (10 Hz whenever telemetry is enabled):
 ```
-TEL,<t_ms>,<state>,<x_cm>,<x_filt_cm>,<theta_deg>,<theta_cmd_deg>,<u_step_rate>,<fault_flags>,<x_ref_cm>
+TEL,<t_ms>,<state>,<x_cm>,<x_filt_cm>,<theta_deg>,<theta_cmd_deg>,<u_step_rate>,<fault_flags>,<x_ref_cm>,<sonar_age_ms>,<sonar_valid>,<sonar_miss_count>,<theta_cmd_unclamped_deg>,<theta_cmd_clamped_deg>,<theta_cmd_saturated>,<act_deg_abs>,<trim_deg>,<search_phase>
 ```
 
 ```bash
@@ -168,6 +249,14 @@ Run these from the local serial logger:
 - `step3`: `center -> near_mid -> center -> far_mid -> center`, total `36 s`
 - `disturb`: hold `q c`, manual disturbance prompts at `5 s` and `10 s`, total `18 s`
 
+Recommended operator usage:
+
+| Test | What you do before starting | Local logger command | What happens |
+|------|-----------------------------|----------------------|--------------|
+| Center regulation | Place ball away from center, be ready to release | `/std center_reg` | Logger sets `q c`, starts run, logs `12 s` recovery |
+| 3-position step tracking | Start with ball near center | `/std step3` | Logger steps `q c -> q n -> q c -> q f -> q c` |
+| Disturbance rejection | Start centered, keep hand ready to nudge | `/std disturb` | Logger prompts you when to disturb |
+
 ---
 
 ## 6 — Serial Command Reference
@@ -180,17 +269,16 @@ Run these from the local serial logger:
 | `s` / `i` | Status | Shows state, calibration flags, sensor health |
 | `t` | Toggle telemetry | Suppress during calibration |
 | `e 0\|1` | Driver disable/enable | |
-| `p` | Capture sonar-center override | Optional manual ball-center override |
+| `p` | Capture physical runner center | Required center reference for `r` |
 | `q [c\|n\|f\|<cm>]` | Set/query ball-position target | `q` alone prints current target + presets |
 | `l` / `[` / `1` | Capture lower limit | Beam at max DOWN / ball far |
 | `u` / `]` / `2` | Capture upper limit | Beam at max UP / ball near |
 | `b` | Sign cal — begin | Motor jogs, derives AS5600/stepper signs |
 | `v` | Save cal to EEPROM | Persists across reboots |
 | `d` | Reset to defaults | Clears calibration and saves defaults immediately |
-| `r` | Run (start control) | Checks all preconditions |
+| `r` | Run | Starts closed-loop control immediately |
 | `k` | Stop | |
 | `f` | Clear faults | |
-| `x` | Print fault details | Decoded fault flags + compact sonar diag |
 
 ---
 
@@ -198,10 +286,10 @@ Run these from the local serial logger:
 
 ### Control Loop
 
-- **50 Hz** cascade PID in main thread
-- **Outer loop**: position error (m) → angle command (rad)
-- **Inner loop**: angle error (rad) → step rate (microsteps/s)
-- Gains auto-generated in `firmware/include/generated/controller_gains.h` — **never edit by hand**
+- **50 Hz** single PID in the main thread
+- Input: angle-corrected ball-position error
+- Output: absolute actuator target in relative step counts
+- Motion generation converts target-position error into bounded step rate and acceleration
 
 ### ISR Design
 
@@ -211,14 +299,16 @@ Run these from the local serial logger:
 ### State Machine
 
 ```
-SAFE_DISABLED → CALIB_SIGN → READY ⇄ CALIB_SCALE → RUNNING → FAULT
+SAFE_DISABLED → CALIB_SIGN → READY ⇄ RUNNING → FAULT
 ```
 
 ### Control Frame
 
-- AS5600 is used as an actuator-position sensor between the captured lower and upper travel limits.
-- Ultrasonic center is defined from the midpoint of the captured near/far sonar distances, unless `p` is used as a manual override.
-- `theta_deg` and `theta_cmd_deg` in telemetry are actuator-relative coordinates around the active trim, not physical balanced-beam angles.
+- HC-SR04 remains the ball-position sensor.
+- Ball position is angle-corrected at runtime: the sonar offset from center is multiplied by `cos(theta_est)`.
+- `p` captures the physical runner center and also defines the actuator control origin.
+- AS5600 is used for calibration, run-start synchronization, and missed-step / drift verification.
+- `theta_deg` and `theta_cmd_deg` in telemetry are step-count-relative actuator coordinates around the `p` origin.
 
 ---
 
@@ -246,37 +336,43 @@ Valid range: 2–65 cm. Conversion: `raw_cm = pulse_us × 0.0343 × 0.5`.
 
 ---
 
-## 9 — Gain Design Pipeline
+## 9 — Runtime Tuning
 
-Source of truth: `model/first_principles/params_measured_v1.yaml`
+The default runtime controller is now the single position PID in `firmware/include/config.h`.
+
+Main tuning constants:
+
+| Constant | Meaning |
+|----------|---------|
+| `kPosPidKpStepsPerCm` | Position proportional gain |
+| `kPosPidKiStepsPerCmSec` | Position integral gain |
+| `kPosPidKdStepsSecPerCm` | Position derivative gain |
+| `kRunMotionAccelSps2` | Motion-generator acceleration limit |
+| `kAs5600VerifyMaxErrDeg` | Allowed step-count vs AS5600 mismatch before fault |
+
+After changing these, rebuild and upload:
 
 ```bash
-# 1. Edit params if hardware changed
-# 2. Design gains
-./.venv/bin/python model/first_principles/design_cascade_pid.py \
-    --params model/first_principles/params_measured_v1.yaml
-# 3. Export to firmware header
-./.venv/bin/python model/first_principles/export_gains.py
-# 4. Build + upload
-cd firmware && pio run -e nano_new -t upload
+pio run -e nano_new -t upload
 ```
 
 ---
 
 ## 10 — Sonar Filtering Tuning (HC-SR04)
 
-Non-blocking PCINT echo-capture → rolling median → min-valid gating → EMA → hold-last-good.
+Non-blocking PCINT echo-capture → rolling median → min-valid gating → EMA → hold-last-good across intermittent misses.
 
 | Parameter | Default | Effect |
 |-----------|---------|--------|
 | `SONAR_TRIGGER_PERIOD_US` | 40000 | Ping interval (~25 Hz) |
 | `SONAR_ECHO_TIMEOUT_US` | 25000 | Max echo wait |
 | `SONAR_MEDIAN_WINDOW` | 11 | Samples in rolling median |
-| `SONAR_MIN_VALID_IN_WINDOW` | 1 | Min valid in window |
+| `SONAR_MIN_VALID_IN_WINDOW` | 3 | Min valid in window |
 | `SONAR_EMA_ALPHA` | 0.3f | EMA smoothing (lower = smoother) |
-| `SONAR_POS_SAMPLE_FRESH_MS` | 200 | Hold-last-good window |
+| `SONAR_POS_SAMPLE_FRESH_MS` | 500 | Fresh-sample window |
 | `SONAR_MAX_VALID_MM` | 650.0f | Distance clamp |
 | `SONAR_MAX_JUMP_CM` | 3.0f | Per-sample jump clamp |
+| `SONAR_MAX_CONSECUTIVE_MISSES` | 6 | Miss burst tolerance before invalid |
 
 Override via `build_flags` in `firmware/platformio.ini`:
 ```ini
@@ -303,12 +399,9 @@ Median-of-3 raw reads → slew-limit → EMA.
 | `firmware/src/main.cpp` | Main firmware (switchable) |
 | `firmware/include/config.h` | Loop rates, limits, unit constants |
 | `firmware/include/types.h` | `SensorData`, `Setpoint`, `ActuatorCmd`, `FaultFlags` |
-| `firmware/include/generated/controller_gains.h` | **Auto-generated** PID gains |
 | `firmware/include/app/state_machine.h` | State machine |
 | `firmware/src/calibration_runtime.cpp` | Runtime cal + EEPROM persistence |
-| `model/first_principles/params_measured_v1.yaml` | Plant parameters (source of truth) |
-| `model/first_principles/design_cascade_pid.py` | Gain design script |
-| `model/first_principles/export_gains.py` | Gains → firmware header |
+| `firmware/src/control/cascade_controller.cpp` | Single position PID + motion generator |
 | `analysis/serial_logger.py` | Primary host logger |
 | `analysis/switch_firmware_main.py` | Firmware variant switcher |
 | `analysis/plot_run.py` | 4-panel telemetry plot + metrics export |
@@ -333,12 +426,14 @@ When adding code:
 
 | Pitfall | Fix |
 |---------|-----|
-| `ERR,run_blocked` with no obvious reason | You forgot sign calibration (`l`, `u`, then `b`) |
-| Editing `controller_gains.h` by hand | Always regenerate via `export_gains.py` |
+| `ERR,run_blocked` with `BLOCK,zero` | You did not capture physical runner center with `p` |
+| `ERR,run_blocked` with `BLOCK,limits` | Redo `l`, then `u` |
+| `ERR,run_blocked` with `BLOCK,sign` | Redo `b` |
+| Ball goes to the wrong side and stays there | Redo `d`, `l`, `u`, `p`, `b`, then verify `q` presets |
 | Float math in ISR | Never — use integer only |
 | Upload hangs | Wrong bootloader profile, or monitor still open |
-| Motor barely moves | Inner gains too low — re-run design pipeline |
-| `FAULT` immediately on `r` | Sonar dropout or hard limit overshoot — check `x` and the saved limits |
+| Motor barely moves | Check telemetry for `theta_cmd_saturated`, `actuator_drift`, and sonar age before retuning |
+| `FAULT` immediately on `r` | Usually sonar dropout, actuator drift, or a hard limit violation — inspect `s` and the saved limits |
 | Wrong motor direction | Sign calibration is wrong — redo `l`, `u`, then `b` |
 
 Stop when needed:
@@ -347,21 +442,26 @@ Stop when needed:
 k
 ```
 
-10. Manual compatibility flow (raw serial / device-only):
+Minimal raw serial flow:
 
 ```text
 t
 d
 l
 u
+p
+e 1
 b
 v
 s
 q c
+e 1
 r
+k
+e 0
 ```
 
-11. Capture and analyze a run:
+Capture and analyze a run:
 
 ```bash
 cd /Users/piyush/code/ball-beam-control

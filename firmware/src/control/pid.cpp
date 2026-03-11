@@ -30,10 +30,18 @@ void PID::reset() {
   has_prev_ = false;
 }
 
-float PID::update(float error, float dt_s) {
+float PID::update(float error,
+                  float dt_s,
+                  float out_min_override,
+                  float out_max_override,
+                  bool use_output_override,
+                  float* unclamped_out) {
   if (dt_s <= 0.0f) {
     return 0.0f;
   }
+
+  const float out_min = use_output_override ? out_min_override : gains_.out_min;
+  const float out_max = use_output_override ? out_max_override : gains_.out_max;
 
   float derivative = 0.0f;
   if (has_prev_) {
@@ -43,8 +51,8 @@ float PID::update(float error, float dt_s) {
   // Evaluate saturation tendency before integration.
   const float pre_int_output =
       gains_.kp * error + gains_.ki * integral_ + gains_.kd * derivative;
-  const bool sat_high = (pre_int_output >= gains_.out_max);
-  const bool sat_low = (pre_int_output <= gains_.out_min);
+  const bool sat_high = (pre_int_output >= out_max);
+  const bool sat_low = (pre_int_output <= out_min);
 
   bool allow_integral = true;
   if ((sat_high && error > 0.0f) || (sat_low && error < 0.0f)) {
@@ -57,7 +65,10 @@ float PID::update(float error, float dt_s) {
   }
 
   float output = gains_.kp * error + gains_.ki * integral_ + gains_.kd * derivative;
-  output = clampf(output, gains_.out_min, gains_.out_max);
+  if (unclamped_out != nullptr) {
+    *unclamped_out = output;
+  }
+  output = clampf(output, out_min, out_max);
 
   prev_error_ = error;
   has_prev_ = true;

@@ -1,91 +1,122 @@
 #include "control/cascade_controller.h"
 
+#include <math.h>
+
 #include "config.h"
-#include "generated/controller_gains.h"
 
 namespace bb {
 namespace {
 
-float clampf(float value, float min_value, float max_value) {
-  if (value < min_value) {
-    return min_value;
+float clampf(float value, float lo, float hi) {
+  if (value < lo) {
+    return lo;
   }
-  if (value > max_value) {
-    return max_value;
+  if (value > hi) {
+    return hi;
   }
   return value;
 }
 
 }  // namespace
 
-CascadeController::CascadeController() : last_theta_cmd_rad_(0.0f) {
-  PIDGains outer_gains;
-  outer_gains.kp = generated::kOuterKp;
-  outer_gains.ki = generated::kOuterKi;
-  outer_gains.kd = generated::kOuterKd;
-  outer_gains.i_min = generated::kOuterIMin;
-  outer_gains.i_max = generated::kOuterIMax;
-  outer_gains.out_min = generated::kOuterOutMin;
-  outer_gains.out_max = generated::kOuterOutMax;
-  outer_pos_pid_.setGains(outer_gains);
-
-  PIDGains inner_gains;
-  inner_gains.kp = generated::kInnerKp;
-  inner_gains.ki = generated::kInnerKi;
-  inner_gains.kd = generated::kInnerKd;
-  inner_gains.i_min = generated::kInnerIMin;
-  inner_gains.i_max = generated::kInnerIMax;
-  inner_gains.out_min = generated::kInnerOutMin;
-  inner_gains.out_max = generated::kInnerOutMax;
-  inner_theta_pid_.setGains(inner_gains);
-}
+CascadeController::CascadeController()
+    : integral_output_steps_(0.0f),
+      prev_measurement_cm_(0.0f),
+      has_prev_measurement_(false),
+      last_target_steps_(0.0f),
+      last_target_steps_unclamped_(0.0f),
+      last_target_saturated_(false),
+      last_signed_rate_sps_(0.0f) {}
 
 void CascadeController::reset() {
-  outer_pos_pid_.reset();
-  inner_theta_pid_.reset();
-  last_theta_cmd_rad_ = 0.0f;
+  integral_output_steps_ = 0.0f;
+  prev_measurement_cm_ = 0.0f;
+  has_prev_measurement_ = false;
+  last_target_steps_ = 0.0f;
+  last_target_steps_unclamped_ = 0.0f;
+  last_target_saturated_ = false;
+  last_signed_rate_sps_ = 0.0f;
 }
 
 ActuatorCmd CascadeController::update(const SensorData& sensor,
                                      const Setpoint& setpoint,
                                      float dt_s,
-                                     float theta_cmd_min_rad,
-                                     float theta_cmd_max_rad) {
+                                     int32_t pos_min_steps,
+                                     int32_t pos_max_steps) {
   ActuatorCmd cmd;
-  if (!sensor.valid_angle || !sensor.valid_pos) {
+  if (!sensor.valid_pos) {
     cmd.enable = false;
     cmd.signed_step_rate_sps = 0.0f;
     cmd.dir_positive = true;
-    last_theta_cmd_rad_ = 0.0f;
+    last_signed_rate_sps_ = 0.0f;
+    has_prev_measurement_ = false;
     return cmd;
   }
 
-  const float pos_error_m = setpoint.ball_pos_m_target - sensor.ball_pos_filt_m;
-
-  if (theta_cmd_min_rad > theta_cmd_max_rad) {
-    const float swap = theta_cmd_min_rad;
-    theta_cmd_min_rad = theta_cmd_max_rad;
-    theta_cmd_max_rad = swap;
+  if (pos_min_steps > pos_max_steps) {
+    const int32_t swap = pos_min_steps;
+    pos_min_steps = pos_max_steps;
+    pos_max_steps = swap;
   }
 
-  float theta_cmd_rad = outer_pos_pid_.update(pos_error_m, dt_s);
-  theta_cmd_rad = clampf(theta_cmd_rad, theta_cmd_min_rad, theta_cmd_max_rad);
-  last_theta_cmd_rad_ = theta_cmd_rad;
+  const float pos_error_cm = setpoint.ball_pos_cm_target - sensor.ball_pos_filt_cm;
+  float measurement_rate_cm_s = 0.0f;
+  if (has_prev_measurement_) {
+    measurement_rate_cm_s = (sensor.ball_pos_filt_cm - prev_measurement_cm_) / dt_s;
+  }
 
-  const float theta_error_rad = theta_cmd_rad - sensor.beam_angle_rad;
-  float signed_step_rate = inner_theta_pid_.update(theta_error_rad, dt_s);
-  signed_step_rate = clampf(signed_step_rate, -kMaxStepRateSps, kMaxStepRateSps);
+  const float p_term_steps = kPosPidKpStepsPerCm * pos_error_cm;
+  const float d_term_steps = -kPosPidKdStepsSecPerCm * measurement_rate_cm_s;
+  const float pre_i_output = p_term_steps + integral_output_steps_ + d_term_steps;
+  const bool sat_high = (pre_i_output >= static_cast<float>(pos_max_steps));
+  const bool sat_low = (pre_i_output <= static_cast<float>(pos_min_steps));
+  if (!((sat_high && pos_error_cm > 0.0f) || (sat_low && pos_error_cm < 0.0f))) {
+    integral_output_steps_ += kPosPidKiStepsPerCmSec * pos_error_cm * dt_s;
+    integral_output_steps_ =
+        clampf(integral_output_steps_, -kPosPidIntegralClampSteps, kPosPidIntegralClampSteps);
+  }
+
+  last_target_steps_unclamped_ = p_term_steps + integral_output_steps_ + d_term_steps;
+  const float target_steps = clampf(last_target_steps_unclamped_,
+                                    static_cast<float>(pos_min_steps),
+                                    static_cast<float>(pos_max_steps));
+  last_target_steps_ = target_steps;
+  last_target_saturated_ = fabsf(last_target_steps_unclamped_ - last_target_steps_) > 1.0e-4f;
+  prev_measurement_cm_ = sensor.ball_pos_filt_cm;
+  has_prev_measurement_ = true;
+
+  const float current_steps = sensor.beam_angle_deg / kStepperDegPerStep;
+  const float step_error = target_steps - current_steps;
+
+  float desired_rate_sps = 0.0f;
+  if (fabsf(step_error) > kRunPositionDeadbandSteps) {
+    const float mag = sqrtf(2.0f * kRunMotionAccelSps2 * fabsf(step_error));
+    desired_rate_sps = (step_error >= 0.0f ? 1.0f : -1.0f) * clampf(mag, 0.0f, kMaxStepRateSps);
+  }
+
+  float delta = desired_rate_sps - last_signed_rate_sps_;
+  const float max_delta = kRunMotionAccelSps2 * dt_s;
+  if (delta > max_delta) {
+    delta = max_delta;
+  } else if (delta < -max_delta) {
+    delta = -max_delta;
+  }
+  last_signed_rate_sps_ += delta;
 
   cmd.enable = true;
-  cmd.signed_step_rate_sps = signed_step_rate;
-  cmd.dir_positive = (signed_step_rate >= 0.0f);
+  cmd.signed_step_rate_sps = last_signed_rate_sps_;
+  cmd.dir_positive = (cmd.signed_step_rate_sps >= 0.0f);
   return cmd;
 }
 
 float CascadeController::lastThetaCmdDeg() const {
-  return last_theta_cmd_rad_ * kRadToDeg;
+  return last_target_steps_ * kStepperDegPerStep;
 }
 
-float CascadeController::lastThetaCmdRad() const { return last_theta_cmd_rad_; }
+float CascadeController::lastThetaCmdUnclampedDeg() const {
+  return last_target_steps_unclamped_ * kStepperDegPerStep;
+}
+
+bool CascadeController::lastThetaCmdSaturated() const { return last_target_saturated_; }
 
 }  // namespace bb

@@ -21,6 +21,10 @@
 #define SERIAL_BAUD 115200
 #endif
 
+#ifndef NOINLINE
+#define NOINLINE __attribute__((noinline))
+#endif
+
 namespace {
 
 using namespace bb;
@@ -29,16 +33,6 @@ constexpr float kLimitStopMarginDeg = 0.2f;
 constexpr float kLimitMinSpanDeg = 2.0f;
 constexpr float kRunSoftLimitBandDeg = 1.0f;
 constexpr float kRunHardLimitMarginDeg = 2.0f;
-constexpr uint32_t kLimitRecoveryHoldMs = 300UL;
-constexpr float kLimitRecoveryMoveCm = 0.4f;
-constexpr long kLimitRecoveryNudgeSteps = 120;
-constexpr float kLimitRecoveryNudgeRateSps = 250.0f;
-constexpr float kTrimLearnXWindowCm = 0.8f;
-constexpr float kTrimLearnThetaWindowDeg = 0.5f;
-constexpr float kTrimLearnMaxStepRateSps = 80.0f;
-constexpr uint32_t kTrimLearnStableMs = 500UL;
-constexpr float kTrimLearnRateDegPerSec = 0.2f;
-constexpr float kTrimGuardBandDeg = 1.0f;
 
 StepperTMC2209 g_stepper(PIN_STEP, PIN_DIR, PIN_EN);
 AS5600Sensor g_as5600;
@@ -67,6 +61,7 @@ uint32_t g_last_valid_angle_ms = 0;
 uint32_t g_last_valid_pos_ms = 0;
 uint32_t g_last_angle_read_ms = 0;
 uint32_t g_last_angle_read_dt_ms = 0;
+uint32_t g_actuator_drift_since_ms = 0;
 
 volatile uint8_t* g_echo_pin_reg = nullptr;
 uint8_t g_echo_pin_mask = 0;
@@ -84,48 +79,25 @@ float g_limit_lower_sonar_cm = 0.0f;
 float g_limit_upper_sonar_cm = 0.0f;
 
 bool g_runtime_cal_dirty = false;
-bool g_limit_stuck_fault = false;
-
-enum class LimitRecoveryPhase : uint8_t {
-  kIdle = 0,
-  kHold,
-  kNudging,
-  kPostNudgeHold
-};
-
-struct LimitRecoveryState {
-  LimitRecoveryPhase phase = LimitRecoveryPhase::kIdle;
-  int8_t side = 0;  // -1 = lower, +1 = upper
-  bool nudge_used = false;
-  uint32_t phase_start_ms = 0;
-  float entry_abs_x_cm = 0.0f;
-};
-
-LimitRecoveryState g_limit_recovery;
-
-struct TrimLearningState {
-  uint32_t stable_since_ms = 0;
-};
-
-TrimLearningState g_trim_learning;
 
 void printFaultInfo();
-void printSonarDiag();
 bool captureSonarCalDistanceCm(float& out_cm);
 bool readAs5600RawMedianDeg(float& out_raw_deg);
 bool captureAs5600CalRawDeg(float& out_raw_deg);
 void applySafeDisable();
 void maybeStopJogAtLimits();
 void serviceControl(uint32_t now_ms);
-void resetLimitRecovery();
-void resetTrimLearning();
 void syncLimitCaptureCacheFromRuntime();
-void serviceTrimLearning(uint32_t now_ms, float signed_step_rate_sps);
-bool serviceActiveLimitRecovery(uint32_t now_ms);
-bool maybeStartLimitRecovery(uint32_t now_ms, float signed_step_rate_sps);
 bool computeSetpointPresetsCm(float& near_mid_cm, float& far_mid_cm);
 void setBallSetpointCm(float target_cm);
 void printSetpointStatus();
+void syncStepPositionToCurrentActuator();
+float currentStepperThetaDeg();
+float linearToCorrectedBallPosCm(float x_linear_cm, float theta_deg);
+bool effectiveActuatorStepBounds(int32_t& min_steps, int32_t& max_steps);
+NOINLINE float telemetryThetaCmdDeg();
+NOINLINE float telemetryThetaCmdUnclampedDeg();
+NOINLINE bool telemetryThetaCmdSaturated();
 
 const char* stateToString(AppState state) {
   switch (state) {
@@ -133,8 +105,6 @@ const char* stateToString(AppState state) {
       return "SAFE_DISABLED";
     case AppState::CALIB_SIGN:
       return "CALIB_SIGN";
-    case AppState::CALIB_SCALE:
-      return "CALIB_SCALE";
     case AppState::READY:
       return "READY";
     case AppState::RUNNING:
@@ -146,26 +116,12 @@ const char* stateToString(AppState state) {
   }
 }
 
-float clampf(float value, float min_value, float max_value) {
-  if (value < min_value) {
-    return min_value;
-  }
-  if (value > max_value) {
-    return max_value;
-  }
-  return value;
-}
-
 void resetAs5600Filter() {
   g_as5600_ema_initialized = false;
   g_as5600_last_initialized = false;
   g_as5600_theta_ema_deg = 0.0f;
   g_as5600_theta_last_deg = 0.0f;
 }
-
-void resetLimitRecovery() { g_limit_recovery = LimitRecoveryState{}; }
-
-void resetTrimLearning() { g_trim_learning = TrimLearningState{}; }
 
 void syncLimitCaptureCacheFromRuntime() {
   g_limit_lower_raw_deg = runtimeCalAs5600LowerRawDeg();
@@ -175,11 +131,15 @@ void syncLimitCaptureCacheFromRuntime() {
 }
 
 bool computeSetpointPresetsCm(float& near_mid_cm, float& far_mid_cm) {
-  if (!runtimeCalIsLimitsSet() || !runtimeCalHasSonarCenter()) {
+  if (!runtimeCalIsLimitsSet() || !runtimeCalHasSonarCenter() || !runtimeCalActuatorTrimValid()) {
     return false;
   }
-  const float lower_x_cm = runtimeMapBallPosCm(runtimeCalSonarLowerCm());
-  const float upper_x_cm = runtimeMapBallPosCm(runtimeCalSonarUpperCm());
+  const float lower_x_cm =
+      linearToCorrectedBallPosCm(runtimeMapBallPosCm(runtimeCalSonarLowerCm()),
+                                 runtimeCalThetaLowerLimitDeg());
+  const float upper_x_cm =
+      linearToCorrectedBallPosCm(runtimeMapBallPosCm(runtimeCalSonarUpperCm()),
+                                 runtimeCalThetaUpperLimitDeg());
   const float near_limit_cm = (lower_x_cm >= upper_x_cm) ? lower_x_cm : upper_x_cm;
   const float far_limit_cm = (lower_x_cm <= upper_x_cm) ? lower_x_cm : upper_x_cm;
   near_mid_cm = 0.5f * near_limit_cm;
@@ -208,151 +168,62 @@ void printSetpointStatus() {
 }
 
 float currentActuatorDeg() {
-  return g_sensor.beam_angle_deg + runtimeCalActiveActuatorTrimDeg();
+  return g_sensor.actuator_abs_deg;
 }
 
-float clampActuatorTrimDeg(float trim_deg) {
-  const float span = runtimeCalActuatorSpanDeg();
-  if (span <= 0.0f) {
-    return 0.0f;
-  }
-  if (span <= (2.0f * kTrimGuardBandDeg)) {
-    return 0.5f * span;
-  }
-  return clampf(trim_deg, kTrimGuardBandDeg, span - kTrimGuardBandDeg);
-}
-
-bool ballMovedCenterwardEnough() {
-  if (!g_sensor.valid_pos) {
-    return false;
-  }
-  return (g_limit_recovery.entry_abs_x_cm - fabsf(g_sensor.ball_pos_filt_cm)) >=
-         kLimitRecoveryMoveCm;
-}
-
-void triggerLimitStuckFault() {
-  g_limit_stuck_fault = true;
-  g_prev_step_rate_sps = 0.0f;
-  resetLimitRecovery();
-  g_state_machine.requestFault();
-  applySafeDisable();
-}
-
-bool serviceActiveLimitRecovery(uint32_t now_ms) {
-  if (g_limit_recovery.phase == LimitRecoveryPhase::kIdle) {
+bool effectiveActuatorStepBounds(int32_t& min_steps, int32_t& max_steps) {
+  if (!runtimeCalIsLimitsSet()) {
     return false;
   }
 
-  if (ballMovedCenterwardEnough()) {
-    resetLimitRecovery();
-    return false;
-  }
-
-  if (g_limit_recovery.phase == LimitRecoveryPhase::kNudging) {
-    maybeStopJogAtLimits();
-    if (g_stepper.jogActive()) {
-      g_stepper.enable(true);
-      return true;
+  float lower_deg = runtimeCalThetaLowerLimitDeg() + kRunSoftLimitBandDeg;
+  float upper_deg = runtimeCalThetaUpperLimitDeg() - kRunSoftLimitBandDeg;
+  if (lower_deg > upper_deg) {
+    lower_deg = runtimeCalThetaLowerLimitDeg();
+    upper_deg = runtimeCalThetaUpperLimitDeg();
+    if (lower_deg > upper_deg) {
+      return false;
     }
-    g_limit_recovery.phase = LimitRecoveryPhase::kPostNudgeHold;
-    g_limit_recovery.phase_start_ms = now_ms;
   }
 
-  g_prev_step_rate_sps = 0.0f;
-  g_stepper.enable(true);
-  g_stepper.setSignedStepRate(0.0f);
-
-  if (static_cast<uint32_t>(now_ms - g_limit_recovery.phase_start_ms) < kLimitRecoveryHoldMs) {
-    return true;
+  min_steps = static_cast<int32_t>(lroundf(lower_deg / kStepperDegPerStep));
+  max_steps = static_cast<int32_t>(lroundf(upper_deg / kStepperDegPerStep));
+  if (min_steps > max_steps) {
+    const int32_t swap = min_steps;
+    min_steps = max_steps;
+    max_steps = swap;
   }
-
-  if (!g_limit_recovery.nudge_used) {
-    g_limit_recovery.nudge_used = true;
-    g_limit_recovery.phase = LimitRecoveryPhase::kNudging;
-    g_limit_recovery.phase_start_ms = now_ms;
-    g_controller.reset();
-    g_prev_step_rate_sps = 0.0f;
-    g_stepper.enable(true);
-    g_stepper.requestJogSteps(
-        (g_limit_recovery.side > 0) ? -kLimitRecoveryNudgeSteps : kLimitRecoveryNudgeSteps,
-        kLimitRecoveryNudgeRateSps);
-    return true;
-  }
-
-  triggerLimitStuckFault();
   return true;
 }
 
-bool maybeStartLimitRecovery(uint32_t now_ms, float signed_step_rate_sps) {
-  if (g_limit_recovery.phase != LimitRecoveryPhase::kIdle ||
-      !runtimeCalIsLimitsSet() || !g_sensor.valid_angle) {
-    return false;
-  }
-
-  int8_t side = 0;
-  const float theta_deg = g_sensor.beam_angle_deg;
-  if (signed_step_rate_sps > 0.0f &&
-      theta_deg >= (runtimeCalThetaUpperLimitDeg() - kRunSoftLimitBandDeg)) {
-    side = 1;
-  } else if (signed_step_rate_sps < 0.0f &&
-             theta_deg <= (runtimeCalThetaLowerLimitDeg() + kRunSoftLimitBandDeg)) {
-    side = -1;
-  }
-
-  if (side == 0) {
-    return false;
-  }
-
-  g_limit_recovery.phase = LimitRecoveryPhase::kHold;
-  g_limit_recovery.side = side;
-  g_limit_recovery.nudge_used = false;
-  g_limit_recovery.phase_start_ms = now_ms;
-  g_limit_recovery.entry_abs_x_cm = fabsf(g_sensor.ball_pos_filt_cm);
-  return serviceActiveLimitRecovery(now_ms);
+float currentStepperThetaDeg() {
+  return static_cast<float>(g_stepper.positionSteps()) * kStepperDegPerStep;
 }
 
-void serviceTrimLearning(uint32_t now_ms, float signed_step_rate_sps) {
-  if (!runtimeCalIsLimitsSet() || !g_sensor.valid_angle || !g_sensor.valid_pos) {
-    resetTrimLearning();
-    return;
-  }
-
-  if (fabsf(g_sensor.ball_pos_filt_cm) > kTrimLearnXWindowCm ||
-      fabsf(g_controller.lastThetaCmdDeg() - g_sensor.beam_angle_deg) > kTrimLearnThetaWindowDeg ||
-      fabsf(signed_step_rate_sps) > kTrimLearnMaxStepRateSps) {
-    resetTrimLearning();
-    return;
-  }
-
-  if (g_trim_learning.stable_since_ms == 0u) {
-    g_trim_learning.stable_since_ms = now_ms;
-    return;
-  }
-
-  if (static_cast<uint32_t>(now_ms - g_trim_learning.stable_since_ms) < kTrimLearnStableMs) {
-    return;
-  }
-
-  const float act_deg = currentActuatorDeg();
-  const float trim_now = runtimeCalActiveActuatorTrimDeg();
-  const float max_step = kTrimLearnRateDegPerSec * kControlDtSec;
-  float delta = act_deg - trim_now;
-  if (delta > max_step) {
-    delta = max_step;
-  } else if (delta < -max_step) {
-    delta = -max_step;
-  }
-
-  if (fabsf(delta) < 1.0e-4f) {
-    return;
-  }
-
-  runtimeCalSetActuatorTrimDeg(clampActuatorTrimDeg(trim_now + delta));
-  runtimeCalSetActuatorTrimValid(true);
-  runtimeCalSetActuatorTrimSource(ActuatorTrimSource::kLearned);
-  runtimeCalMarkZeroAngleCaptured(true);
-  g_runtime_cal_dirty = true;
+float linearToCorrectedBallPosCm(float x_linear_cm, float theta_deg) {
+  return x_linear_cm * cosf(theta_deg * kDegToRad);
 }
+
+void syncStepPositionToCurrentActuator() {
+  if (!runtimeCalActuatorTrimValid() || !g_sensor.valid_angle) {
+    return;
+  }
+  const float rel_deg = currentActuatorDeg() - runtimeCalActiveActuatorTrimDeg();
+  const int32_t rel_steps = static_cast<int32_t>(lroundf(rel_deg / kStepperDegPerStep));
+  g_stepper.resetPositionSteps(rel_steps);
+  g_sensor.beam_angle_deg = static_cast<float>(rel_steps) * kStepperDegPerStep;
+  g_sensor.beam_angle_rad = g_sensor.beam_angle_deg * kDegToRad;
+}
+
+NOINLINE float telemetryThetaCmdDeg() {
+  return g_controller.lastThetaCmdDeg();
+}
+
+NOINLINE float telemetryThetaCmdUnclampedDeg() {
+  return g_controller.lastThetaCmdUnclampedDeg();
+}
+
+NOINLINE bool telemetryThetaCmdSaturated() { return g_controller.lastThetaCmdSaturated(); }
 
 // Tiny float parser to avoid pulling in strtod()/atof() (saves significant flash).
 // Supported: optional whitespace, optional +/- sign, digits, optional .digits.
@@ -409,14 +280,14 @@ float parseFloatFast(const char* s) {
 
 uint32_t activeStaleThresholdMs() {
   // Wider running threshold for sensor dropout tolerance.
-  return (g_state_machine.state() == AppState::RUNNING)
-             ? 1500UL
-             : kSensorInvalidFaultMsBringup;
+  return (g_state_machine.state() == AppState::RUNNING) ? kSensorInvalidFaultMsRunning
+                                                        : kSensorInvalidFaultMsBringup;
 }
 
 bool hasAnyFault() {
   return g_fault_flags.sonar_timeout || g_fault_flags.i2c_error ||
-         g_fault_flags.angle_oob || g_fault_flags.pos_oob;
+         g_fault_flags.angle_oob || g_fault_flags.pos_oob ||
+         g_fault_flags.actuator_drift;
 }
 
 void applySafeDisable() {
@@ -446,14 +317,21 @@ AppConditions currentConditions();
 void printRunBlockedDetails(const AppConditions& cond);
 
 bool tryStartRun() {
-  readSensors(millis());
-  updateFaultState(millis());
+  const uint32_t now_ms = millis();
+  readSensors(now_ms);
+  updateFaultState(now_ms);
+
+  if (g_state_machine.state() == AppState::RUNNING) {
+    Serial.println(F("OK,already_running"));
+    return true;
+  }
 
   if (runtimeCalIsLimitsSet() && g_sensor.valid_angle) {
-    const float theta_deg = g_sensor.beam_angle_deg;
-    if (theta_deg < runtimeCalThetaLowerLimitDeg() || theta_deg > runtimeCalThetaUpperLimitDeg()) {
-      Serial.print(F("ERR,act_range,theta="));
-      Serial.println(theta_deg, 1);
+    const float act_deg = currentActuatorDeg();
+    const float span_deg = runtimeCalActuatorSpanDeg();
+    if (act_deg < 0.0f || act_deg > span_deg) {
+      Serial.print(F("ERR,act_range,act="));
+      Serial.println(act_deg, 1);
       return false;
     }
   }
@@ -464,12 +342,15 @@ bool tryStartRun() {
   }
 
   const AppConditions cond = currentConditions();
+  if (!cond.zero_calibrated) {
+    printRunBlockedDetails(cond);
+    return false;
+  }
+
   if (g_state_machine.requestRun(cond)) {
+    syncStepPositionToCurrentActuator();
     g_controller.reset();
     g_prev_step_rate_sps = 0.0f;
-    g_limit_stuck_fault = false;
-    resetLimitRecovery();
-    resetTrimLearning();
     g_telemetry_enabled = true;
     Serial.println(F("OK,running"));
     return true;
@@ -501,7 +382,7 @@ bool sampleAngleNow(uint32_t now_ms,
   g_as5600_theta_last_deg = theta_deg;
   g_as5600_last_initialized = true;
 
-  // EMA smoothing on mapped theta (used by control).
+  // EMA smoothing on mapped theta (used for safety / verification only).
   if (!g_as5600_ema_initialized) {
     g_as5600_theta_ema_deg = theta_deg;
     g_as5600_ema_initialized = true;
@@ -512,9 +393,10 @@ bool sampleAngleNow(uint32_t now_ms,
 
   theta_deg = g_as5600_theta_ema_deg;
 
-  g_sensor.beam_angle_deg = theta_deg;
-  g_sensor.beam_angle_rad = theta_deg * kDegToRad;
+  g_sensor.as5600_theta_deg = theta_deg;
+  g_sensor.as5600_theta_rad = theta_deg * kDegToRad;
   g_sensor.beam_angle_raw_deg = theta_raw_deg;
+  g_sensor.actuator_abs_deg = runtimeMapActuatorDeg(theta_raw_deg);
   if (g_last_angle_read_ms != 0) {
     g_last_angle_read_dt_ms = static_cast<uint32_t>(now_ms - g_last_angle_read_ms);
   }
@@ -544,40 +426,63 @@ bool sampleSonarNow(uint32_t now_ms,
                     float* x_cm_out = nullptr,
                     float* x_filt_cm_out = nullptr,
                     float* dist_cm_out = nullptr) {
+  g_sensor.sonar_age_ms = g_hcsr04.sampleAgeMs(now_ms);
+  g_sensor.sonar_miss_count = g_hcsr04.consecutiveMissCount();
+  g_sensor.pos_fresh = false;
+  g_sensor.pos_held = false;
+
   float x_cm = 0.0f;
   float x_filt_cm = 0.0f;
   float dist_cm = 0.0f;
   const bool has_pos_sample = g_hcsr04.getPosition(x_cm, x_filt_cm, dist_cm);
   if (!has_pos_sample) {
+    g_sensor.sonar_age_ms = 0;
     g_sensor.valid_pos = false;
     g_fault_flags.pos_oob = false;
     return false;
   }
 
-  g_sensor.ball_pos_cm = x_cm;
-  g_sensor.ball_pos_m = x_cm * kCmToM;
-  g_sensor.ball_pos_filt_cm = x_filt_cm;
-  g_sensor.ball_pos_filt_m = x_filt_cm * kCmToM;
+  g_sensor.ball_pos_linear_cm = x_cm;
+  g_sensor.ball_pos_linear_m = x_cm * kCmToM;
+  g_sensor.ball_pos_linear_filt_cm = x_filt_cm;
+  g_sensor.ball_pos_linear_filt_m = x_filt_cm * kCmToM;
+  g_sensor.ball_pos_cm = linearToCorrectedBallPosCm(x_cm, g_sensor.beam_angle_deg);
+  g_sensor.ball_pos_m = g_sensor.ball_pos_cm * kCmToM;
+  g_sensor.ball_pos_filt_cm = linearToCorrectedBallPosCm(x_filt_cm, g_sensor.beam_angle_deg);
+  g_sensor.ball_pos_filt_m = g_sensor.ball_pos_filt_cm * kCmToM;
   g_sensor.sonar_distance_raw_cm = dist_cm;
 
+  const uint32_t stale_threshold_ms = activeStaleThresholdMs();
+  const uint32_t sample_age_ms = g_hcsr04.sampleAgeMs(now_ms);
+  const uint16_t miss_count = g_hcsr04.consecutiveMissCount();
   const bool fresh = g_hcsr04.hasFreshSample(now_ms);
-  g_sensor.valid_pos = fresh;
+  const bool usable = (sample_age_ms <= stale_threshold_ms) &&
+                      (miss_count <= static_cast<uint16_t>(kSonarMaxConsecutiveMisses));
 
-  if (g_sensor.valid_pos) {
+  g_sensor.sonar_age_ms = sample_age_ms;
+  g_sensor.sonar_miss_count = miss_count;
+  g_sensor.valid_pos = usable;
+  g_sensor.pos_fresh = fresh;
+  g_sensor.pos_held = usable && !fresh;
+
+  if (sample_age_ms <= stale_threshold_ms) {
+    g_fault_flags.sonar_timeout = false;
+  }
+
+  if (usable) {
     // Track time of the last accepted sonar sample (not "last time we checked"),
     // so stale/fault timing is consistent even when we hold last-good on timeouts.
-    g_last_valid_pos_ms = static_cast<uint32_t>(now_ms - g_hcsr04.sampleAgeMs(now_ms));
-    g_fault_flags.sonar_timeout = false;
-    g_fault_flags.pos_oob = fabsf(g_sensor.ball_pos_filt_m) > kBallPosHardLimitM;
+    g_last_valid_pos_ms = static_cast<uint32_t>(now_ms - sample_age_ms);
+    g_fault_flags.pos_oob = fabsf(g_sensor.ball_pos_filt_cm) > kBallPosHardLimitCm;
   } else {
     g_fault_flags.pos_oob = false;
   }
 
   if (x_cm_out != nullptr) {
-    *x_cm_out = x_cm;
+    *x_cm_out = g_sensor.ball_pos_cm;
   }
   if (x_filt_cm_out != nullptr) {
-    *x_filt_cm_out = x_filt_cm;
+    *x_filt_cm_out = g_sensor.ball_pos_filt_cm;
   }
   if (dist_cm_out != nullptr) {
     *dist_cm_out = dist_cm;
@@ -594,6 +499,15 @@ bool readSensors(uint32_t now_ms) {
       g_as5600_last_initialized &&
       (static_cast<uint32_t>(now_ms - g_last_valid_angle_ms) <= kPosSampleFreshMs);
 
+  g_sensor.beam_angle_deg = currentStepperThetaDeg();
+  g_sensor.beam_angle_rad = g_sensor.beam_angle_deg * kDegToRad;
+  if (runtimeCalActuatorTrimValid() && g_sensor.valid_angle) {
+    g_sensor.actuator_verify_err_deg =
+        (g_sensor.actuator_abs_deg - runtimeCalActiveActuatorTrimDeg()) - g_sensor.beam_angle_deg;
+  } else {
+    g_sensor.actuator_verify_err_deg = 0.0f;
+  }
+
   sampleSonarNow(now_ms);
   return g_sensor.valid_angle && g_sensor.valid_pos;
 }
@@ -609,38 +523,29 @@ void updateFaultState(uint32_t now_ms) {
     g_fault_flags.sonar_timeout = true;
   }
 
+  if (g_state_machine.state() == AppState::RUNNING &&
+      runtimeCalActuatorTrimValid() && g_sensor.valid_angle) {
+    const bool drift_now = fabsf(g_sensor.actuator_verify_err_deg) > kAs5600VerifyMaxErrDeg;
+    if (drift_now) {
+      if (g_actuator_drift_since_ms == 0u) {
+        g_actuator_drift_since_ms = now_ms;
+      }
+      g_fault_flags.actuator_drift =
+          static_cast<uint32_t>(now_ms - g_actuator_drift_since_ms) >= kAs5600VerifyFaultMs;
+    } else {
+      g_actuator_drift_since_ms = 0u;
+      g_fault_flags.actuator_drift = false;
+    }
+  } else {
+    g_actuator_drift_since_ms = 0u;
+    g_fault_flags.actuator_drift = false;
+  }
+
   if (g_state_machine.state() == AppState::RUNNING && hasAnyFault()) {
-    resetLimitRecovery();
-    resetTrimLearning();
     g_state_machine.requestFault();
     g_prev_step_rate_sps = 0.0f;
     applySafeDisable();
   }
-}
-
-void effectiveThetaCmdBoundsRad(float& theta_min_rad, float& theta_max_rad) {
-  float lower_deg = -kThetaCmdLimitDeg;
-  float upper_deg = kThetaCmdLimitDeg;
-
-  if (runtimeCalIsLimitsSet()) {
-    if (runtimeCalThetaLowerLimitDeg() > lower_deg) {
-      lower_deg = runtimeCalThetaLowerLimitDeg();
-    }
-    if (runtimeCalThetaUpperLimitDeg() < upper_deg) {
-      upper_deg = runtimeCalThetaUpperLimitDeg();
-    }
-  }
-
-  lower_deg = clampf(lower_deg, -kThetaHardLimitDeg, kThetaHardLimitDeg);
-  upper_deg = clampf(upper_deg, -kThetaHardLimitDeg, kThetaHardLimitDeg);
-
-  if (lower_deg > upper_deg) {
-    lower_deg = -kThetaCmdLimitDeg;
-    upper_deg = kThetaCmdLimitDeg;
-  }
-
-  theta_min_rad = lower_deg * kDegToRad;
-  theta_max_rad = upper_deg * kDegToRad;
 }
 
 void maybeStopJogAtLimits() {
@@ -653,7 +558,7 @@ void maybeStopJogAtLimits() {
     return;
   }
 
-  const float theta_deg = g_sensor.beam_angle_deg;
+  const float theta_deg = g_sensor.as5600_theta_deg;
 
   if (rate > 0.0f && theta_deg >= (runtimeCalThetaUpperLimitDeg() - kLimitStopMarginDeg)) {
     g_stepper.stop();
@@ -682,7 +587,15 @@ void printStatus() {
   Serial.print(F("SENSORS,angle="));
   Serial.print(g_sensor.valid_angle ? F("ok") : F("bad"));
   Serial.print(F(",pos="));
-  Serial.println(g_sensor.valid_pos ? F("ok") : F("bad"));
+  Serial.print(g_sensor.valid_pos ? F("ok") : F("bad"));
+  Serial.print(F(",m="));
+  if (g_sensor.pos_fresh) {
+    Serial.println(F("f"));
+  } else if (g_sensor.pos_held) {
+    Serial.println(F("h"));
+  } else {
+    Serial.println(F("n"));
+  }
 
   Serial.print(F("MEAS,theta_deg="));
   Serial.print(g_sensor.beam_angle_deg, 4);
@@ -694,7 +607,9 @@ void printStatus() {
   Serial.print(F("AGE,angle_ms="));
   Serial.print(static_cast<uint32_t>(now_ms - g_last_valid_angle_ms));
   Serial.print(F(",pos_ms="));
-  Serial.println(static_cast<uint32_t>(now_ms - g_last_valid_pos_ms));
+  Serial.print(g_sensor.sonar_age_ms);
+  Serial.print(F(",miss="));
+  Serial.println(g_sensor.sonar_miss_count);
 
   Serial.print(F("FAULTS,bits="));
   Serial.println(packFaultFlags(g_fault_flags));
@@ -706,22 +621,17 @@ void printStatus() {
   Serial.print(F(",sign_calibrated="));
   Serial.println(runtimeCalIsSignSet() ? F("yes") : F("no"));
 
-  Serial.print(F("CAL_STORE,status="));
-  Serial.println(runtimeCalLoadStatusName(runtimeCalLoadStatus()));
-
   Serial.print(F("SONAR_CFG,s="));
   Serial.print(runtimeCalSonarPosSign());
-  Serial.print(F(",m="));
-  Serial.print(runtimeCalSonarSignModeName(runtimeCalSonarSignMode()));
   Serial.print(F(",u="));
   Serial.println(runtimeCalUpperLimitNearSensor() ? F("1") : F("0"));
 
   Serial.print(F("ACT_CFG,t="));
   Serial.print(runtimeCalActiveActuatorTrimDeg(), 4);
-  Serial.print(F(",s="));
-  Serial.print(runtimeCalActuatorTrimSourceName(runtimeCalActuatorTrimSource()));
-  Serial.print(F(",c="));
-  Serial.println(runtimeCalSonarCenterSourceName(runtimeCalSonarCenterSource()));
+  Serial.print(F(",v="));
+  Serial.print(runtimeCalActuatorTrimValid() ? F("1") : F("0"));
+  Serial.print(F(",e="));
+  Serial.println(g_sensor.actuator_verify_err_deg, 3);
 
   Serial.print(F("TEL,enabled="));
   Serial.println(g_telemetry_enabled ? F("1") : F("0"));
@@ -743,13 +653,31 @@ void emitTelemetry(uint32_t now_ms) {
   Serial.print(',');
   Serial.print(g_sensor.beam_angle_deg, 4);
   Serial.print(',');
-  Serial.print(g_controller.lastThetaCmdDeg(), 4);
+  Serial.print(telemetryThetaCmdDeg(), 4);
   Serial.print(',');
   Serial.print(g_stepper.targetSignedStepRate(), 2);
   Serial.print(',');
   Serial.print(packFaultFlags(g_fault_flags));
   Serial.print(',');
-  Serial.println(g_setpoint.ball_pos_cm_target, 4);
+  Serial.print(g_setpoint.ball_pos_cm_target, 4);
+  Serial.print(',');
+  Serial.print(g_sensor.sonar_age_ms);
+  Serial.print(',');
+  Serial.print(g_sensor.valid_pos ? F("1") : F("0"));
+  Serial.print(',');
+  Serial.print(g_sensor.sonar_miss_count);
+  Serial.print(',');
+  Serial.print(telemetryThetaCmdUnclampedDeg(), 4);
+  Serial.print(',');
+  Serial.print(telemetryThetaCmdDeg(), 4);
+  Serial.print(',');
+  Serial.print(telemetryThetaCmdSaturated() ? F("1") : F("0"));
+  Serial.print(',');
+  Serial.print(g_sensor.actuator_abs_deg, 4);
+  Serial.print(',');
+  Serial.print(runtimeCalActiveActuatorTrimDeg(), 4);
+  Serial.print(',');
+  Serial.println(F("idle"));
 }
 
 void runJogBlocking(uint32_t timeout_ms) {
@@ -856,14 +784,8 @@ AppConditions currentConditions() {
 }
 
 void printCalZero() {
-  Serial.print(F("CAL_ZERO,as5600_zero_deg="));
-  Serial.print(runtimeCalActiveActuatorTrimDeg(), 6);
-  Serial.print(F(",act_trim_src="));
-  Serial.print(runtimeCalActuatorTrimSourceName(runtimeCalActuatorTrimSource()));
-  Serial.print(F(",sonar_center_cm="));
+  Serial.print(F("CAL_ZERO,sonar_center_cm="));
   Serial.print(runtimeCalActiveSonarCenterCm(), 6);
-  Serial.print(F(",sonar_center_src="));
-  Serial.print(runtimeCalSonarCenterSourceName(runtimeCalSonarCenterSource()));
   Serial.print(F(",zero_calibrated="));
   Serial.println(runtimeCalIsZeroSet() ? F("yes") : F("no"));
 }
@@ -881,9 +803,7 @@ void printFaultInfo() {
   const uint8_t bits = packFaultFlags(g_fault_flags);
   Serial.print(F("FAULT_INFO,bits="));
   Serial.println(bits);
-  Serial.print(F("FAULT_INFO,mode="));
-  Serial.println(g_state_machine.state() == AppState::RUNNING ? F("run_hard_fault") : F("bringup_warning"));
-  if (bits == 0 && !g_limit_stuck_fault) {
+  if (bits == 0) {
     Serial.println(F("FAULT_INFO,none"));
     return;
   }
@@ -899,27 +819,9 @@ void printFaultInfo() {
   if (g_fault_flags.pos_oob) {
     Serial.println(F("FAULT_INFO,pos_oob=1"));
   }
-  if (g_limit_stuck_fault) {
-    Serial.println(F("FAULT_INFO,stuck=1"));
+  if (g_fault_flags.actuator_drift) {
+    Serial.println(F("FAULT_INFO,actuator_drift=1"));
   }
-  if (g_state_machine.state() == AppState::FAULT) {
-    Serial.println(F("FAULT_INFO,recover=f"));
-  }
-}
-
-void printSonarDiag() {
-  SonarDiag diag;
-  g_hcsr04.getDiag(millis(), diag);
-  Serial.print(F("SONAR_DIAG,fresh="));
-  Serial.print(diag.fresh ? F("1") : F("0"));
-  Serial.print(F(",age_ms="));
-  Serial.print(diag.age_ms);
-  Serial.print(F(",raw_cm="));
-  Serial.print(diag.raw_cm, 4);
-  Serial.print(F(",filt_cm="));
-  Serial.print(diag.filt_cm, 4);
-  Serial.print(F(",jump_reject_cnt="));
-  Serial.println(diag.jump_reject_count);
 }
 
 bool captureSonarCalDistanceCm(float& out_cm) {
@@ -1091,15 +993,43 @@ bool captureAs5600CalRawDeg(float& out_raw_deg) {
 }
 
 bool captureZeroPosition() {
+  if (!runtimeCalIsLimitsSet()) {
+    Serial.println(F("ERR,capture_l_u_first"));
+    return false;
+  }
+
   float dist_cm = 0.0f;
   if (!captureSonarCalDistanceCm(dist_cm)) {
     Serial.println(F("ERR,sonar_not_ready"));
-    printSonarDiag();
     return false;
   }
+
+  float raw_deg = 0.0f;
+  if (!captureAs5600CalRawDeg(raw_deg)) {
+    Serial.println(F("ERR,angle_not_ready"));
+    return false;
+  }
+
+  if (runtimeCalIsLowerLimitCaptured() && runtimeCalIsUpperLimitCaptured()) {
+    const float lo_cm = runtimeCalSonarFarCm();
+    const float hi_cm = runtimeCalSonarNearCm();
+    const float min_cm = (lo_cm < hi_cm) ? lo_cm : hi_cm;
+    const float max_cm = (lo_cm > hi_cm) ? lo_cm : hi_cm;
+    if (!(dist_cm > min_cm && dist_cm < max_cm)) {
+      Serial.println(F("ERR,center_outside_limits"));
+      return false;
+    }
+  }
+
   runtimeCalSetSonarCenterCm(dist_cm);
   runtimeCalSetSonarCenterSource(CenterSource::kManual);
   runtimeCalMarkZeroPosCaptured(true);
+  runtimeCalSetActuatorTrimDeg(runtimeMapActuatorDeg(raw_deg));
+  runtimeCalSetActuatorTrimValid(true);
+  runtimeCalSetActuatorTrimSource(ActuatorTrimSource::kSaved);
+  g_stepper.resetPositionSteps(0);
+  g_sensor.beam_angle_deg = 0.0f;
+  g_sensor.beam_angle_rad = 0.0f;
   sampleSonarNow(millis(), nullptr, nullptr, nullptr);
   g_runtime_cal_dirty = true;
   Serial.print(F("OK,cal_zero_position_set="));
@@ -1125,23 +1055,29 @@ bool finalizeNormalizedLimitSpan() {
   if (span_deg < kLimitMinSpanDeg) {
     runtimeCalMarkLowerLimitCaptured(false);
     runtimeCalMarkUpperLimitCaptured(false);
-    runtimeCalMarkZeroAngleCaptured(false);
+    runtimeCalSetActuatorTrimValid(false);
     Serial.println(F("ERR,limit_span_too_small"));
     return false;
   }
 
-  runtimeCalSetActuatorTrimDeg(runtimeCalActuatorMidpointDeg());
-  runtimeCalSetActuatorTrimValid(true);
-  runtimeCalSetActuatorTrimSource(ActuatorTrimSource::kMidpoint);
-  runtimeCalMarkZeroAngleCaptured(true);
-
-  if (runtimeCalSonarCenterSource() == CenterSource::kAuto) {
-    runtimeCalSetSonarCenterCm(runtimeCalDerivedSonarCenterCm());
-  }
-  runtimeCalMarkZeroPosCaptured(true);
+  runtimeCalSetActuatorTrimValid(false);
   runtimeCalSetUpperLimitNearSensor(true);
   runtimeCalApplyOrientationSonarSign();
   resetAs5600Filter();
+
+  if (runtimeCalHasSonarCenter()) {
+    const float center_cm = runtimeCalActiveSonarCenterCm();
+    const float min_cm = (runtimeCalSonarFarCm() < runtimeCalSonarNearCm())
+                             ? runtimeCalSonarFarCm()
+                             : runtimeCalSonarNearCm();
+    const float max_cm = (runtimeCalSonarFarCm() > runtimeCalSonarNearCm())
+                             ? runtimeCalSonarFarCm()
+                             : runtimeCalSonarNearCm();
+    if (!(center_cm > min_cm && center_cm < max_cm)) {
+      runtimeCalMarkZeroPosCaptured(false);
+      Serial.println(F("WARN,retake_p"));
+    }
+  }
 
   Serial.print(F("OK,as5600_sign="));
   Serial.print(new_sign);
@@ -1153,12 +1089,8 @@ bool finalizeNormalizedLimitSpan() {
     const float dd = g_limit_upper_sonar_cm - g_limit_lower_sonar_cm;
     const int8_t measured_sign = (dd >= 0.0f) ? static_cast<int8_t>(1) : static_cast<int8_t>(-1);
     if (fabsf(dd) >= 1.0f && measured_sign == runtimeCalOrientationSonarSign()) {
-      Serial.println(F("INFO,limits_sonar_ok"));
-    } else {
-      Serial.println(F("WARN,limits_sonar_bad"));
+      Serial.println(F("INFO,limits_ok"));
     }
-  } else {
-    Serial.println(F("WARN,limits_sonar_bad"));
   }
   return true;
 }
@@ -1172,7 +1104,6 @@ bool captureDownLimit() {
   float dist_cm = 0.0f;
   if (!captureSonarCalDistanceCm(dist_cm)) {
     Serial.println(F("ERR,sonar_not_ready"));
-    printSonarDiag();
     return false;
   }
 
@@ -1180,6 +1111,7 @@ bool captureDownLimit() {
   g_limit_lower_sonar_cm = dist_cm;
   runtimeCalSetAs5600LowerRawDeg(raw_deg);
   runtimeCalSetSonarLowerCm(dist_cm);
+  runtimeCalSetActuatorTrimValid(false);
   runtimeCalMarkLowerLimitCaptured(true);
   g_runtime_cal_dirty = true;
 
@@ -1203,7 +1135,6 @@ bool captureUpLimit() {
   float dist_cm = 0.0f;
   if (!captureSonarCalDistanceCm(dist_cm)) {
     Serial.println(F("ERR,sonar_not_ready"));
-    printSonarDiag();
     return false;
   }
 
@@ -1211,6 +1142,7 @@ bool captureUpLimit() {
   g_limit_upper_sonar_cm = dist_cm;
   runtimeCalSetAs5600UpperRawDeg(raw_deg);
   runtimeCalSetSonarUpperCm(dist_cm);
+  runtimeCalSetActuatorTrimValid(false);
   runtimeCalMarkUpperLimitCaptured(true);
   g_runtime_cal_dirty = true;
 
@@ -1230,7 +1162,6 @@ bool captureUpLimit() {
 }
 
 void printGuideNextAction() {
-  // Deprecated: use host-side logger (/bringup) for workflow.
 }
 
 void setManualDriverEnabled(bool enabled) {
@@ -1247,17 +1178,16 @@ void setManualDriverEnabled(bool enabled) {
 
 void stopRunCommand() {
   g_state_machine.requestStop();
-  resetLimitRecovery();
-  resetTrimLearning();
+  g_prev_step_rate_sps = 0.0f;
+  g_actuator_drift_since_ms = 0u;
   applySafeDisable();
   Serial.println(F("OK,stopped"));
 }
 
 void clearFaultCommand() {
   g_fault_flags = FaultFlags{};
-  g_limit_stuck_fault = false;
-  resetLimitRecovery();
-  resetTrimLearning();
+  g_prev_step_rate_sps = 0.0f;
+  g_actuator_drift_since_ms = 0u;
   if (g_state_machine.clearFault(currentConditions())) {
     Serial.println(F("OK,fault_cleared"));
   } else {
@@ -1288,9 +1218,6 @@ void printRunBlockedDetails(const AppConditions& cond) {
   }
   if (cond.faults_active) {
     printFaultInfo();
-  }
-  if (!cond.sensors_ok) {
-    printSonarDiag();
   }
   printGuideNextAction();
 }
@@ -1404,10 +1331,10 @@ void handleCommand(char* line) {
         runtimeCalSave();
         syncLimitCaptureCacheFromRuntime();
         resetAs5600Filter();
-        resetLimitRecovery();
-        resetTrimLearning();
-        g_limit_stuck_fault = false;
         g_runtime_cal_dirty = false;
+        g_prev_step_rate_sps = 0.0f;
+        g_actuator_drift_since_ms = 0u;
+        g_stepper.resetPositionSteps(0);
         Serial.println(F("OK,cal_reset_saved"));
         printGuideNextAction();
         return;
@@ -1420,11 +1347,6 @@ void handleCommand(char* line) {
         return;
       case 'f':
         clearFaultCommand();
-        printGuideNextAction();
-        return;
-      case 'x':
-        printFaultInfo();
-        printSonarDiag();
         printGuideNextAction();
         return;
       default:
@@ -1459,14 +1381,12 @@ void serviceControl(uint32_t now_ms) {
 
   if (g_state_machine.state() == AppState::RUNNING) {
     if (hasAnyFault()) {
-      resetTrimLearning();
       applySafeDisable();
       return;
     }
 
     // Sonar dropout: ramp motor toward zero instead of holding last command.
     if (!g_sensor.valid_pos) {
-      resetTrimLearning();
       float target = 0.0f;
       float delta = target - g_prev_step_rate_sps;
       if (delta > kMaxStepRateChangeSpsPerTick) delta = kMaxStepRateChangeSpsPerTick;
@@ -1477,45 +1397,28 @@ void serviceControl(uint32_t now_ms) {
       return;
     }
 
-    if (serviceActiveLimitRecovery(now_ms)) {
-      resetTrimLearning();
+    g_setpoint.ball_pos_m_target = g_setpoint.ball_pos_cm_target * kCmToM;
+
+    int32_t pos_min_steps = 0;
+    int32_t pos_max_steps = 0;
+    if (!effectiveActuatorStepBounds(pos_min_steps, pos_max_steps)) {
+      g_prev_step_rate_sps = 0.0f;
+      applySafeDisable();
       return;
     }
 
-    g_setpoint.ball_pos_m_target = g_setpoint.ball_pos_cm_target * kCmToM;
-
-    float theta_min_rad = -kThetaCmdLimitRad;
-    float theta_max_rad = kThetaCmdLimitRad;
-    effectiveThetaCmdBoundsRad(theta_min_rad, theta_max_rad);
-
     const ActuatorCmd cmd = g_controller.update(
-        g_sensor, g_setpoint, kControlDtSec, theta_min_rad, theta_max_rad);
+        g_sensor, g_setpoint, kControlDtSec, pos_min_steps, pos_max_steps);
     if (cmd.enable) {
-      if (maybeStartLimitRecovery(now_ms, cmd.signed_step_rate_sps)) {
-        resetTrimLearning();
-        return;
-      }
-
-      // Slew-rate limit step rate to prevent step skipping on sudden accel.
-      float target = cmd.signed_step_rate_sps;
-      float delta = target - g_prev_step_rate_sps;
-      if (delta > kMaxStepRateChangeSpsPerTick) delta = kMaxStepRateChangeSpsPerTick;
-      if (delta < -kMaxStepRateChangeSpsPerTick) delta = -kMaxStepRateChangeSpsPerTick;
-      target = g_prev_step_rate_sps + delta;
-      g_prev_step_rate_sps = target;
-
       g_stepper.enable(true);
-      g_stepper.setSignedStepRate(target);
-      serviceTrimLearning(now_ms, target);
+      g_prev_step_rate_sps = cmd.signed_step_rate_sps;
+      g_stepper.setSignedStepRate(cmd.signed_step_rate_sps);
     } else {
-      resetTrimLearning();
       g_prev_step_rate_sps = 0.0f;
       applySafeDisable();
     }
     return;
   }
-
-  resetTrimLearning();
 
   if (g_stepper.jogActive()) {
     maybeStopJogAtLimits();

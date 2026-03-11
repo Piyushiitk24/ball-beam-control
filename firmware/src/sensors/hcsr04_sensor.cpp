@@ -31,6 +31,7 @@ HCSR04Sensor::HCSR04Sensor(uint8_t trig_pin, uint8_t echo_pin)
       last_x_filt_cm_(0.0f),
       last_sample_ms_(0),
       valid_streak_(0),
+      consecutive_miss_count_(0),
       timeout_count_(0),
       jump_reject_count_(0),
       timeout_flag_(false),
@@ -103,6 +104,10 @@ void HCSR04Sensor::service(uint32_t now_us, uint32_t now_ms) {
 
       pushAttempt(range_ok, cm);
       if (!range_ok) {
+        valid_streak_ = 0;
+        if (consecutive_miss_count_ < 0xFFFFu) {
+          ++consecutive_miss_count_;
+        }
         timeout_flag_ = true;
         if (timeout_count_ < 0xFFFFu) {
           ++timeout_count_;
@@ -112,7 +117,7 @@ void HCSR04Sensor::service(uint32_t now_us, uint32_t now_ms) {
 
       if (valid_count_ < static_cast<uint8_t>(SONAR_MIN_VALID_IN_WINDOW)) {
         // Too many recent failures; don't trust a median yet.
-        timeout_flag_ = true;
+        timeout_flag_ = !has_sample_;
         return;
       }
 
@@ -131,6 +136,7 @@ void HCSR04Sensor::service(uint32_t now_us, uint32_t now_ms) {
       last_sample_ms_ = now_ms;
       has_sample_ = true;
       timeout_flag_ = false;
+      consecutive_miss_count_ = 0;
       if (valid_streak_ < 0xFFFFu) {
         ++valid_streak_;
       }
@@ -139,6 +145,10 @@ void HCSR04Sensor::service(uint32_t now_us, uint32_t now_ms) {
 
     // Invalid reading: mark timeout, but keep last-good sample (freshness is age-based).
     pushAttempt(false, 0.0f);
+    valid_streak_ = 0;
+    if (consecutive_miss_count_ < 0xFFFFu) {
+      ++consecutive_miss_count_;
+    }
     timeout_flag_ = true;
     if (timeout_count_ < 0xFFFFu) {
       ++timeout_count_;
@@ -148,6 +158,10 @@ void HCSR04Sensor::service(uint32_t now_us, uint32_t now_ms) {
   if (waiting_echo_ && static_cast<uint32_t>(now_us - last_trigger_us_) > kSonarEchoTimeoutUs) {
     waiting_echo_ = false;
     pushAttempt(false, 0.0f);
+    valid_streak_ = 0;
+    if (consecutive_miss_count_ < 0xFFFFu) {
+      ++consecutive_miss_count_;
+    }
     timeout_flag_ = true;
     if (timeout_count_ < 0xFFFFu) {
       ++timeout_count_;
@@ -159,6 +173,8 @@ void HCSR04Sensor::service(uint32_t now_us, uint32_t now_ms) {
     }
   }
 }
+
+bool HCSR04Sensor::hasSample() const { return has_sample_; }
 
 bool HCSR04Sensor::getPosition(float& x_cm, float& x_filt_cm, float& distance_raw_cm) const {
   if (!has_sample_) {
@@ -190,6 +206,8 @@ uint32_t HCSR04Sensor::sampleAgeMs(uint32_t now_ms) const {
 
 bool HCSR04Sensor::hasTimeout() const { return timeout_flag_; }
 
+uint16_t HCSR04Sensor::consecutiveMissCount() const { return consecutive_miss_count_; }
+
 void HCSR04Sensor::getDiag(uint32_t now_ms, SonarDiag& diag) const {
   diag.has_sample = has_sample_;
   diag.timeout = timeout_flag_;
@@ -198,6 +216,7 @@ void HCSR04Sensor::getDiag(uint32_t now_ms, SonarDiag& diag) const {
   diag.raw_cm = last_distance_cm_;
   diag.filt_cm = ema_cm_;
   diag.valid_streak = valid_streak_;
+  diag.consecutive_miss_count = consecutive_miss_count_;
   diag.timeout_count = timeout_count_;
   diag.jump_reject_count = jump_reject_count_;
 }

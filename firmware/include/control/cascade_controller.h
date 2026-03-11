@@ -1,6 +1,5 @@
 #pragma once
 
-#include "control/pid.h"
 #include "types.h"
 
 namespace bb {
@@ -13,16 +12,21 @@ class CascadeController {
   ActuatorCmd update(const SensorData& sensor,
                      const Setpoint& setpoint,
                      float dt_s,
-                     float theta_cmd_min_rad,
-                     float theta_cmd_max_rad);
+                     int32_t pos_min_steps,
+                     int32_t pos_max_steps);
 
   float lastThetaCmdDeg() const;
-  float lastThetaCmdRad() const;
+  float lastThetaCmdUnclampedDeg() const;
+ bool lastThetaCmdSaturated() const;
 
  private:
-  PID outer_pos_pid_;
-  PID inner_theta_pid_;
-  float last_theta_cmd_rad_;
+  float integral_output_steps_;
+  float prev_measurement_cm_;
+  bool has_prev_measurement_;
+  float last_target_steps_;
+  float last_target_steps_unclamped_;
+  bool last_target_saturated_;
+  float last_signed_rate_sps_;
 };
 
 }  // namespace bb

@@ -133,7 +133,15 @@ void StepperTMC2209::setSignedStepRate(float signed_rate_sps) {
       signed_rate_sps_ * static_cast<float>(runtimeCalStepperDirSign());
   direction_positive_ = (hardware_dir_reference >= 0.0f);
   setDirPinFast(direction_positive_);
-  step_dir_sign_ = direction_positive_ ? 1 : -1;
+  // Keep integrated position in the logical control frame, not raw DIR-pin frame.
+  // runtimeCalStepperDirSign() only maps logical direction to hardware wiring.
+  if (signed_rate_sps_ > 0.0f) {
+    step_dir_sign_ = 1;
+  } else if (signed_rate_sps_ < 0.0f) {
+    step_dir_sign_ = -1;
+  } else {
+    step_dir_sign_ = 0;
+  }
 
   const uint16_t half_period_ticks = rateToHalfPeriodTicks(abs_rate_sps_);
 

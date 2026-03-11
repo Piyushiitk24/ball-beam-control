@@ -9,7 +9,6 @@ import select
 import sys
 import threading
 import time
-from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -42,6 +41,8 @@ def _decode_faults(bits: Optional[int]) -> str:
         names.append("angle_oob")
     if bits & 0x08:
         names.append("pos_oob")
+    if bits & 0x10:
+        names.append("actuator_drift")
     return "none" if not names else "+".join(names)
 
 
@@ -84,14 +85,26 @@ def _parse_keyvals(prefix: str, line: str) -> dict[str, str]:
 
 
 def _parse_tel(line: str) -> Optional[dict[str, object]]:
-    # TEL,<t_ms>,<state>,<x_cm>,<x_filt_cm>,<theta_deg>,<theta_cmd_deg>,<u_step_rate>,<fault_flags>[,<x_ref_cm>]
+    # TEL,<t_ms>,<state>,<x_cm>,<x_filt_cm>,<theta_deg>,<theta_cmd_deg>,<u_step_rate>,<fault_flags>
+    #   [,<x_ref_cm>,<sonar_age_ms>,<sonar_valid>,<sonar_miss_count>,
+    #    <theta_cmd_unclamped_deg>,<theta_cmd_clamped_deg>,<theta_cmd_saturated>,
+    #    <act_deg_abs>,<trim_deg>,<search_phase>]
     if not line.startswith("TEL,"):
         return None
     parts = [p.strip() for p in line.split(",")]
-    if len(parts) not in (9, 10):
+    if len(parts) < 9:
         return None
     try:
         x_ref_cm = float(parts[9]) if len(parts) >= 10 else 0.0
+        sonar_age_ms = int(float(parts[10])) if len(parts) >= 11 else 0
+        sonar_valid = int(float(parts[11])) if len(parts) >= 12 else 0
+        sonar_miss_count = int(float(parts[12])) if len(parts) >= 13 else 0
+        theta_cmd_unclamped_deg = float(parts[13]) if len(parts) >= 14 else float(parts[6])
+        theta_cmd_clamped_deg = float(parts[14]) if len(parts) >= 15 else float(parts[6])
+        theta_cmd_saturated = int(float(parts[15])) if len(parts) >= 16 else 0
+        act_deg_abs = float(parts[16]) if len(parts) >= 17 else math.nan
+        trim_deg = float(parts[17]) if len(parts) >= 18 else math.nan
+        search_phase = parts[18] if len(parts) >= 19 else ""
         return {
             "t_ms": int(float(parts[1])),
             "state": parts[2],
@@ -102,6 +115,15 @@ def _parse_tel(line: str) -> Optional[dict[str, object]]:
             "u_step_rate": float(parts[7]),
             "fault_flags": int(float(parts[8])),
             "x_ref_cm": x_ref_cm,
+            "sonar_age_ms": sonar_age_ms,
+            "sonar_valid": sonar_valid,
+            "sonar_miss_count": sonar_miss_count,
+            "theta_cmd_unclamped_deg": theta_cmd_unclamped_deg,
+            "theta_cmd_clamped_deg": theta_cmd_clamped_deg,
+            "theta_cmd_saturated": theta_cmd_saturated,
+            "act_deg_abs": act_deg_abs,
+            "trim_deg": trim_deg,
+            "search_phase": search_phase,
         }
     except ValueError:
         return None
@@ -125,29 +147,6 @@ def _parse_setpoint(line: str) -> Optional[dict[str, object]]:
         return None
 
 
-def _parse_sonar_diag(line: str) -> Optional[dict[str, object]]:
-    # SONAR_DIAG,fresh=1,age_ms=9,raw_cm=...,filt_cm=...,jump_reject_cnt=...
-    if not line.startswith("SONAR_DIAG,"):
-        return None
-    kv = _parse_keyvals("SONAR_DIAG,", line)
-    if not kv:
-        return None
-    try:
-        raw_cm = float(kv.get("raw_cm", "nan"))
-        filt_cm = float(kv.get("filt_cm", "nan"))
-        return {
-            "fresh": int(float(kv.get("fresh", "0"))) != 0,
-            "age_ms": int(float(kv.get("age_ms", "0"))),
-            "raw_cm": raw_cm,
-            "filt_cm": filt_cm,
-            "has_sample": not (raw_cm != raw_cm and filt_cm != filt_cm),
-            "timeout": False,
-            "jump_reject_cnt": int(float(kv.get("jump_reject_cnt", "0"))),
-        }
-    except ValueError:
-        return None
-
-
 def _parse_as5600_diag(line: str) -> Optional[dict[str, object]]:
     # AS5600_DIAG,<ok>,<raw_deg>,<theta_deg>,<err_cnt>,<read_hz>
     if not line.startswith("AS5600_DIAG,"):
@@ -165,18 +164,6 @@ def _parse_as5600_diag(line: str) -> Optional[dict[str, object]]:
         }
     except ValueError:
         return None
-
-
-def _mean_std_min_max(values: list[float]) -> tuple[float, float, float, float]:
-    if not values:
-        return (float("nan"), float("nan"), float("nan"), float("nan"))
-    mn = sum(values) / float(len(values))
-    if len(values) < 2:
-        sd = 0.0
-    else:
-        var = sum((v - mn) ** 2 for v in values) / float(len(values) - 1)
-        sd = var**0.5
-    return (mn, sd, min(values), max(values))
 
 
 @dataclass
@@ -240,6 +227,15 @@ class SerialLogger:
                 "u_step_rate",
                 "fault_flags",
                 "x_ref_cm",
+                "sonar_age_ms",
+                "sonar_valid",
+                "sonar_miss_count",
+                "theta_cmd_unclamped_deg",
+                "theta_cmd_clamped_deg",
+                "theta_cmd_saturated",
+                "act_deg_abs",
+                "trim_deg",
+                "search_phase",
                 "test_phase",
             ]
         )
@@ -332,6 +328,15 @@ class SerialLogger:
                     tel["u_step_rate"],
                     tel["fault_flags"],
                     tel["x_ref_cm"],
+                    tel["sonar_age_ms"],
+                    tel["sonar_valid"],
+                    tel["sonar_miss_count"],
+                    tel["theta_cmd_unclamped_deg"],
+                    tel["theta_cmd_clamped_deg"],
+                    tel["theta_cmd_saturated"],
+                    tel["act_deg_abs"],
+                    tel["trim_deg"],
+                    tel["search_phase"],
                     self._active_phase,
                 ]
             )
@@ -342,6 +347,7 @@ class SerialLogger:
             self.snap.theta_deg = float(tel["theta_deg"])  # type: ignore[arg-type]
             self.snap.x_ref_cm = float(tel["x_ref_cm"])  # type: ignore[arg-type]
             self.snap.fault_bits = int(tel["fault_flags"])  # type: ignore[arg-type]
+            self.snap.angle_src = 1
             self.snap.last_tel_rx_time = time.time()
             self._last_tel_t_ms = int(tel["t_ms"])  # type: ignore[arg-type]
 
@@ -437,14 +443,14 @@ class SerialLogger:
             "  /quit                 Quit (sends: k then e 0)\n"
             "  /print_tel 0|1        Toggle printing raw TEL rows to terminal\n"
             "  /snap 0|1             Toggle periodic SNAP status line\n"
-            "  /diag                 Send: s, x\n"
+            "  /diag                 Send: s\n"
             "  /bringup              Guided calibration flow (recommended)\n"
             "  /std center_reg       Standard center-regulation run\n"
             "  /std step3            Standard 3-position step-tracking run\n"
             "  /std disturb          Standard disturbance-rejection run\n"
             "  /as5600_stats [N]     Not available in compact firmware\n"
-            "  /sonar_stats [N]      Sample sonar diag N times (default 30) and summarize stability\n"
-            "\nDevice commands: type anything else and press Enter (e.g. s, q c, q n, q -2.0, l, u, b, v, r, k)\n"
+            "  /sonar_stats [N]      Not available in compact firmware\n"
+            "\nDevice commands: type anything else and press Enter (e.g. s, d, l, u, p, q c, q n, q -2.0, b, v, r, k)\n"
         )
 
     def _drain_rx_nonblock(self, max_lines: int = 500) -> list[str]:
@@ -516,6 +522,8 @@ class SerialLogger:
         self._wait_for_line(0.6, prefixes=("OK,driver_disabled",))
         self._send("t 1", echo=False)
         self._wait_for_line(0.6, prefixes=("OK,telemetry=1",))
+        self._send("e 1", echo=False)
+        self._wait_for_line(0.6, prefixes=("OK,driver_enabled", "OK,driver_disabled"))
         self._send("r", echo=False)
         line = self._wait_for_line(1.2, prefixes=("OK,running", "ERR,"))
         if line is None or line.startswith("ERR,"):
@@ -658,48 +666,10 @@ class SerialLogger:
         print("\nAS5600 stats are not available in the compact firmware.\n")
 
     def _cmd_sonar_stats(self, n: int) -> None:
-        n = max(1, min(int(n), 300))
-        print(f"\nSONAR stats: sampling {n}x (hold target still if testing stability)...")
-
-        prev = set(self._suppress_print_prefixes)
-        self._suppress_print_prefixes.add("SONAR_DIAG,")
-        try:
-            diags: list[dict[str, object]] = []
-            for i in range(n):
-                self._send("x", echo=False, log_sent=False)
-                line = self._wait_for_line(0.6, prefixes=("SONAR_DIAG,",))
-                if line is None:
-                    continue
-                parsed = _parse_sonar_diag(line)
-                if parsed is None:
-                    continue
-                diags.append(parsed)
-                if (i + 1) % 10 == 0 or (i + 1) == n:
-                    print(f"  {i + 1}/{n}...")
-                time.sleep(0.12)
-        finally:
-            self._suppress_print_prefixes = prev
-
-        good = [d for d in diags if d.get("has_sample") and d.get("fresh")]
-        fresh = [d for d in diags if d.get("fresh")]
-
-        filt_vals = [float(d["filt_cm"]) for d in good if isinstance(d.get("filt_cm"), float)]
-        mean_f, std_f, min_f, max_f = _mean_std_min_max(filt_vals)
-
-        print("\nSONAR_STATS_RESULT")
-        print(f"  samples_parsed = {len(diags)}/{n}")
-        print(f"  fresh          = {len(fresh)}/{len(diags) if diags else 1}")
-        print(f"  good(fresh)    = {len(good)}/{len(diags) if diags else 1}")
-        if filt_vals:
-            print(f"  filt_cm (good) = mean {mean_f:.2f}  std {std_f:.2f}  min {min_f:.2f}  max {max_f:.2f}")
-        print("")
+        print("\nSONAR stats are not available in the compact firmware.\n")
 
     def _cmd_bringup(self) -> None:
-        print(
-            "\nGUIDED BRING-UP (/bringup)\n"
-            "Follow the prompts. Do NOT type device commands unless asked.\n"
-            "Type 'q' + Enter at any prompt to abort.\n"
-        )
+        print("\nGUIDED BRING-UP (/bringup)\nFollow the prompts. Type 'q' + Enter at any prompt to abort.\n")
 
         prev_suppress = self._suppress_snapshots
         self._suppress_snapshots = True
@@ -709,45 +679,11 @@ class SerialLogger:
             self._send("k")
             time.sleep(0.05)
             self._send("e 0")
+            print("Resetting calibration (sending d)...")
+            self._send("d")
+            self._wait_for_line(1.0, prefixes=("OK,cal_reset_saved",))
 
-            resp = self._prompt_user("\nStep 1/5: Place a FLAT board in front of the sonar and hold it steady. Press Enter when ready.")
-            if resp is None or resp.strip().lower() == "q":
-                print("Bring-up aborted.")
-                return
-
-            print("Checking sonar stability (need >=3 good out of last 5)...")
-            prev = set(self._suppress_print_prefixes)
-            self._suppress_print_prefixes.add("SONAR_DIAG,")
-            try:
-                window: "deque[bool]" = deque(maxlen=5)
-                start = time.time()
-                ok = False
-                while (time.time() - start) < 10.0:
-                    self._send("x", echo=False, log_sent=False)
-                    line = self._wait_for_line(0.8, prefixes=("SONAR_DIAG,",))
-                    diag = _parse_sonar_diag(line) if line else None
-                    good = bool(diag and diag.get("has_sample") and diag.get("fresh"))
-                    window.append(good)
-                    if diag:
-                        print(
-                            f"  sonar: fresh={1 if diag.get('fresh') else 0} "
-                            f"age_ms={diag.get('age_ms')} filt_cm={float(diag.get('filt_cm', 0.0)):.2f}"
-                        )
-                    else:
-                        print("  sonar: no diag response")
-                    if len(window) == 5 and sum(1 for v in window if v) >= 3:
-                        ok = True
-                        break
-                    time.sleep(0.20)
-            finally:
-                self._suppress_print_prefixes = prev
-
-            if not ok:
-                print("FAIL: sonar not stable. Stop and fix target/wiring, then re-run /bringup.")
-                return
-            print("OK: sonar stable.\n")
-
-            resp = self._prompt_user("Step 2/5: Move beam to physical DOWN hard stop. Hold it still. Press Enter when ready.")
+            resp = self._prompt_user("Step 1/6: Move beam to physical DOWN hard stop. Hold it still. Press Enter when ready.")
             if resp is None or resp.strip().lower() == "q":
                 print("Bring-up aborted.")
                 return
@@ -761,7 +697,7 @@ class SerialLogger:
                     continue
 
                 resp = self._prompt_user(
-                    f"Step 3/5 (attempt {attempt}/3): Move beam to physical UP hard stop. Hold it still. Press Enter when ready."
+                    f"Step 2/6 (attempt {attempt}/3): Move beam to physical UP hard stop. Hold it still. Press Enter when ready."
                 )
                 if resp is None or resp.strip().lower() == "q":
                     print("Bring-up aborted.")
@@ -792,12 +728,26 @@ class SerialLogger:
                 print("FAIL: could not capture valid limits after 3 attempts. No save performed.")
                 return
 
-            print("\nStep 4/5: Enabling driver and checking jog sign (sending e 1, then b)...")
+            resp = self._prompt_user("Step 3/6: Place the ball at the physical center of the runner. Hold it steady and press Enter.")
+            if resp is None or resp.strip().lower() == "q":
+                print("Bring-up aborted.")
+                return
+
+            print("Capturing center reference and control origin (sending p)...")
+            self._send("p")
+            pline = self._wait_for_line(2.0, prefixes=("OK,cal_zero_position_set=", "ERR,sonar_not_ready", "ERR,center_outside_limits"))
+            if not pline or pline.startswith("ERR,"):
+                print("FAIL: center capture failed.")
+                return
+
+            print("\nStep 4/6: Enabling driver (sending e 1)...")
             self._send("e 1")
             eline = self._wait_for_line(1.5, prefixes=("OK,driver_enabled", "OK,driver_disabled"))
             if not eline or "driver_enabled" not in eline:
                 print("FAIL: could not enable driver.")
                 return
+
+            print("\nStep 5/6: Checking jog sign (sending b)...")
             self._send("b")
             bline = self._wait_for_line(4.0, prefixes=("OK,stepper_sign=", "ERR,"))
             if not bline or bline.startswith("ERR,"):
@@ -805,7 +755,7 @@ class SerialLogger:
                 return
             print(f"  {bline}")
 
-            print("\nStep 5/5: Saving calibration (sending v)...")
+            print("\nStep 6/6: Saving calibration (sending v)...")
             self._send("v")
             vline = self._wait_for_line(2.0, prefixes=("OK,cal_saved", "ERR,cal_save_failed"))
             if not vline or vline.startswith("ERR,"):
@@ -815,11 +765,18 @@ class SerialLogger:
             print(
                 "\nBRING-UP COMPLETE\n"
                 "Next steps:\n"
-                "  1) Closed-loop run (keep a detectable target present continuously):\n"
+                "  1) First closed-loop run after calibration:\n"
                 "     s\n"
                 "     q c\n"
+                "     e 1\n"
                 "     r\n"
+                "  2) Change target live if needed:\n"
+                "     q n\n"
+                "     q f\n"
+                "     q c\n"
+                "  3) Stop:\n"
                 "     k\n"
+                "     e 0\n"
             )
         finally:
             self._suppress_snapshots = prev_suppress
@@ -907,9 +864,7 @@ class SerialLogger:
                             self._suppress_snapshots = (parts[1] == "0")
                             print(f"OK snap={0 if self._suppress_snapshots else 1}")
                     elif cmd == "/diag":
-                        for c in ("s", "x"):
-                            self._send(c)
-                            time.sleep(0.05)
+                        self._send("s")
                     elif cmd == "/bringup":
                         self._cmd_bringup()
                     elif cmd == "/std":

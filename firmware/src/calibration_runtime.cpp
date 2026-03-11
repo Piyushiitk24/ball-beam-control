@@ -10,9 +10,9 @@ namespace bb {
 namespace {
 
 constexpr uint16_t kRuntimeCalMagic = 0xBB10;
-constexpr uint16_t kRuntimeCalVersion = 3;
-constexpr uint16_t kRuntimeCalVersionV2 = 2;
-constexpr uint16_t kRuntimeCalVersionV1 = 1;
+constexpr uint16_t kRuntimeCalVersion = 5;
+constexpr uint16_t kRuntimeCalVersionV4 = 4;
+constexpr uint16_t kRuntimeCalVersionV3 = 3;
 constexpr int kRuntimeCalEepromAddress = 0;
 
 constexpr uint8_t kFlagZeroAngleCaptured = 1u << 0;
@@ -22,7 +22,6 @@ constexpr uint8_t kFlagUpperLimitCaptured = 1u << 3;
 constexpr uint8_t kFlagSignCaptured = 1u << 4;
 
 RuntimeCalibration g_runtime_cal;
-RuntimeCalLoadStatus g_load_status = RuntimeCalLoadStatus::kUninitialized;
 
 int8_t normalizeSign(int8_t sign) { return (sign >= 0) ? static_cast<int8_t>(1) : static_cast<int8_t>(-1); }
 
@@ -35,9 +34,9 @@ CenterSource normalizeCenterSource(uint8_t source) {
 }
 
 ActuatorTrimSource normalizeActuatorTrimSource(uint8_t source) {
-  return (source == static_cast<uint8_t>(ActuatorTrimSource::kLearned))
-             ? ActuatorTrimSource::kLearned
-             : ActuatorTrimSource::kMidpoint;
+  return (source == static_cast<uint8_t>(ActuatorTrimSource::kSaved))
+             ? ActuatorTrimSource::kSaved
+             : ActuatorTrimSource::kSearched;
 }
 
 SonarSignMode normalizeSonarSignMode(uint8_t mode) {
@@ -70,21 +69,7 @@ float clampf(float value, float lo, float hi) {
   return value;
 }
 
-struct RuntimeCalibrationV1 {
-  uint16_t magic = 0;
-  uint16_t version = 0;
-  int8_t as5600_sign = 1;
-  int8_t stepper_dir_sign = 1;
-  int8_t sonar_pos_sign = 1;
-  uint8_t flags = 0;
-  float as5600_zero_deg = 0.0f;
-  float sonar_center_cm = 0.0f;
-  float theta_lower_limit_deg = -8.0f;
-  float theta_upper_limit_deg = 8.0f;
-  uint16_t crc16 = 0;
-};
-
-struct RuntimeCalibrationV2 {
+struct RuntimeCalibrationV4 {
   uint16_t magic = 0;
   uint16_t version = 0;
   int8_t as5600_sign = 1;
@@ -93,10 +78,36 @@ struct RuntimeCalibrationV2 {
   uint8_t flags = 0;
   uint8_t upper_limit_near_sensor = 1;
   uint8_t sonar_sign_mode = static_cast<uint8_t>(SonarSignMode::kOrientation);
-  float as5600_zero_deg = 0.0f;
+  uint8_t sonar_center_source = static_cast<uint8_t>(CenterSource::kAuto);
+  uint8_t actuator_trim_valid = 0;
+  uint8_t actuator_trim_source = static_cast<uint8_t>(ActuatorTrimSource::kSearched);
   float sonar_center_cm = 0.0f;
-  float theta_lower_limit_deg = -8.0f;
-  float theta_upper_limit_deg = 8.0f;
+  float as5600_lower_raw_deg = 0.0f;
+  float as5600_upper_raw_deg = 0.0f;
+  float sonar_lower_cm = 0.0f;
+  float sonar_upper_cm = 0.0f;
+  float actuator_trim_deg = 0.0f;
+  uint16_t crc16 = 0;
+};
+
+struct RuntimeCalibrationV3 {
+  uint16_t magic = 0;
+  uint16_t version = 0;
+  int8_t as5600_sign = 1;
+  int8_t stepper_dir_sign = 1;
+  int8_t sonar_pos_sign = 1;
+  uint8_t flags = 0;
+  uint8_t upper_limit_near_sensor = 1;
+  uint8_t sonar_sign_mode = static_cast<uint8_t>(SonarSignMode::kOrientation);
+  uint8_t sonar_center_source = static_cast<uint8_t>(CenterSource::kAuto);
+  uint8_t actuator_trim_valid = 0;
+  uint8_t actuator_trim_source = static_cast<uint8_t>(ActuatorTrimSource::kSearched);
+  float sonar_center_cm = 0.0f;
+  float as5600_lower_raw_deg = 0.0f;
+  float as5600_upper_raw_deg = 0.0f;
+  float sonar_lower_cm = 0.0f;
+  float sonar_upper_cm = 0.0f;
+  float actuator_trim_deg = 0.0f;
   uint16_t crc16 = 0;
 };
 
@@ -120,13 +131,13 @@ uint16_t runtimeCalCrc(const RuntimeCalibration& cal) {
   return crc16Ccitt(reinterpret_cast<const uint8_t*>(&cal), kPayloadBytes);
 }
 
-uint16_t runtimeCalV1Crc(const RuntimeCalibrationV1& cal) {
-  constexpr size_t kPayloadBytes = offsetof(RuntimeCalibrationV1, crc16);
+uint16_t runtimeCalV3Crc(const RuntimeCalibrationV3& cal) {
+  constexpr size_t kPayloadBytes = offsetof(RuntimeCalibrationV3, crc16);
   return crc16Ccitt(reinterpret_cast<const uint8_t*>(&cal), kPayloadBytes);
 }
 
-uint16_t runtimeCalV2Crc(const RuntimeCalibrationV2& cal) {
-  constexpr size_t kPayloadBytes = offsetof(RuntimeCalibrationV2, crc16);
+uint16_t runtimeCalV4Crc(const RuntimeCalibrationV4& cal) {
+  constexpr size_t kPayloadBytes = offsetof(RuntimeCalibrationV4, crc16);
   return crc16Ccitt(reinterpret_cast<const uint8_t*>(&cal), kPayloadBytes);
 }
 
@@ -188,9 +199,9 @@ void applyDefaults(RuntimeCalibration& cal) {
   cal.stepper_dir_sign = normalizeSign(STEPPER_DIR_SIGN);
   cal.upper_limit_near_sensor = 1u;
   cal.sonar_sign_mode = static_cast<uint8_t>(SonarSignMode::kOrientation);
-  cal.sonar_center_source = static_cast<uint8_t>(CenterSource::kAuto);
+  cal.sonar_center_source = static_cast<uint8_t>(CenterSource::kManual);
   cal.actuator_trim_valid = 0u;
-  cal.actuator_trim_source = static_cast<uint8_t>(ActuatorTrimSource::kMidpoint);
+  cal.actuator_trim_source = static_cast<uint8_t>(ActuatorTrimSource::kSearched);
   cal.sonar_pos_sign = orientationSonarSignFor(cal.upper_limit_near_sensor);
   cal.sonar_center_cm = SONAR_CENTER_CM;
   cal.as5600_lower_raw_deg = 0.0f;
@@ -224,86 +235,65 @@ void sanitizeLoaded(RuntimeCalibration& cal) {
     cal.sonar_pos_sign = orientationSonarSignFor(cal.upper_limit_near_sensor);
   }
 
-  if (normalizeCenterSource(cal.sonar_center_source) == CenterSource::kAuto) {
-    if (((cal.flags & kFlagLowerLimitCaptured) == 0u) || ((cal.flags & kFlagUpperLimitCaptured) == 0u) ||
-        cal.sonar_lower_cm <= 0.0f || cal.sonar_upper_cm <= 0.0f) {
-      cal.flags &= static_cast<uint8_t>(~kFlagZeroPosCaptured);
-    } else {
-      cal.sonar_center_cm = derivedSonarCenterCm(cal);
-      cal.flags |= kFlagZeroPosCaptured;
-    }
-  } else if (cal.sonar_center_cm <= 0.0f) {
+  if (cal.sonar_center_cm <= 0.0f) {
     cal.flags &= static_cast<uint8_t>(~kFlagZeroPosCaptured);
   } else {
     cal.flags |= kFlagZeroPosCaptured;
   }
 
-  if ((cal.flags & kFlagZeroAngleCaptured) != 0u) {
-    const float span = rawSpanDeg(cal);
-    if (span > 0.0f) {
-      cal.actuator_trim_deg = clampf(cal.actuator_trim_deg, 0.0f, span);
-      cal.actuator_trim_valid = 1u;
-    } else {
-      cal.flags &= static_cast<uint8_t>(~kFlagZeroAngleCaptured);
-      cal.actuator_trim_valid = 0u;
-    }
+  const float span = rawSpanDeg(cal);
+  if (span > 0.0f) {
+    cal.actuator_trim_deg = clampf(cal.actuator_trim_deg, 0.0f, span);
   } else {
-    cal.actuator_trim_valid = 0u;
+    cal.actuator_trim_deg = 0.0f;
   }
+  cal.actuator_trim_valid =
+      (cal.actuator_trim_valid != 0u) && (span > 0.0f) ? 1u : 0u;
+  if (cal.actuator_trim_valid == 0u && span > 0.0f) {
+    cal.actuator_trim_deg = actuatorMidpointDeg(cal);
+  }
+  cal.flags &= static_cast<uint8_t>(~kFlagZeroAngleCaptured);
 }
 
-void migrateLegacyToV3(const RuntimeCalibrationV1& legacy, RuntimeCalibration& cal) {
+void migrateV3ToV4(const RuntimeCalibrationV3& legacy, RuntimeCalibration& cal) {
   applyDefaults(cal);
   cal.flags = legacy.flags;
   cal.as5600_sign = normalizeSign(legacy.as5600_sign);
   cal.stepper_dir_sign = normalizeSign(legacy.stepper_dir_sign);
-  cal.upper_limit_near_sensor = 1u;
-  cal.sonar_sign_mode = static_cast<uint8_t>(SonarSignMode::kOrientation);
-  cal.sonar_pos_sign = orientationSonarSignFor(cal.upper_limit_near_sensor);
-
-  if (((legacy.flags & kFlagLowerLimitCaptured) != 0u) && ((legacy.flags & kFlagUpperLimitCaptured) != 0u) &&
-      (legacy.theta_upper_limit_deg > legacy.theta_lower_limit_deg)) {
-    const float sign = static_cast<float>(cal.as5600_sign);
-    cal.as5600_lower_raw_deg = wrapAngle360(legacy.as5600_zero_deg + (legacy.theta_lower_limit_deg * sign));
-    cal.as5600_upper_raw_deg = wrapAngle360(legacy.as5600_zero_deg + (legacy.theta_upper_limit_deg * sign));
-    cal.actuator_trim_deg = actuatorMidpointDeg(cal);
-  }
-
-  if ((legacy.flags & kFlagZeroPosCaptured) != 0u && legacy.sonar_center_cm > 0.0f) {
-    cal.sonar_center_cm = legacy.sonar_center_cm;
-    cal.sonar_center_source = static_cast<uint8_t>(CenterSource::kManual);
-    cal.flags |= kFlagZeroPosCaptured;
-  }
-
+  cal.sonar_pos_sign = normalizeSign(legacy.sonar_pos_sign);
+  cal.upper_limit_near_sensor = normalizeBoolByte(legacy.upper_limit_near_sensor);
+  cal.sonar_sign_mode = legacy.sonar_sign_mode;
+  cal.sonar_center_source = legacy.sonar_center_source;
+  cal.sonar_center_cm = legacy.sonar_center_cm;
+  cal.as5600_lower_raw_deg = legacy.as5600_lower_raw_deg;
+  cal.as5600_upper_raw_deg = legacy.as5600_upper_raw_deg;
+  cal.sonar_lower_cm = legacy.sonar_lower_cm;
+  cal.sonar_upper_cm = legacy.sonar_upper_cm;
+  cal.actuator_trim_deg = legacy.actuator_trim_deg;
   cal.actuator_trim_valid = 0u;
+  cal.actuator_trim_source = static_cast<uint8_t>(ActuatorTrimSource::kSearched);
   cal.flags &= static_cast<uint8_t>(~kFlagZeroAngleCaptured);
   sanitizeLoaded(cal);
 }
 
-void migrateV2ToV3(const RuntimeCalibrationV2& legacy, RuntimeCalibration& cal) {
+void migrateV4ToV5(const RuntimeCalibrationV4& legacy, RuntimeCalibration& cal) {
   applyDefaults(cal);
   cal.flags = legacy.flags;
   cal.as5600_sign = normalizeSign(legacy.as5600_sign);
   cal.stepper_dir_sign = normalizeSign(legacy.stepper_dir_sign);
+  cal.sonar_pos_sign = normalizeSign(legacy.sonar_pos_sign);
   cal.upper_limit_near_sensor = normalizeBoolByte(legacy.upper_limit_near_sensor);
   cal.sonar_sign_mode = legacy.sonar_sign_mode;
-  cal.sonar_pos_sign = legacy.sonar_pos_sign;
-
-  if (((legacy.flags & kFlagLowerLimitCaptured) != 0u) && ((legacy.flags & kFlagUpperLimitCaptured) != 0u) &&
-      (legacy.theta_upper_limit_deg > legacy.theta_lower_limit_deg)) {
-    const float sign = static_cast<float>(cal.as5600_sign);
-    cal.as5600_lower_raw_deg = wrapAngle360(legacy.as5600_zero_deg + (legacy.theta_lower_limit_deg * sign));
-    cal.as5600_upper_raw_deg = wrapAngle360(legacy.as5600_zero_deg + (legacy.theta_upper_limit_deg * sign));
-    cal.actuator_trim_deg = actuatorMidpointDeg(cal);
-  }
-
-  if ((legacy.flags & kFlagZeroPosCaptured) != 0u && legacy.sonar_center_cm > 0.0f) {
-    cal.sonar_center_cm = legacy.sonar_center_cm;
-    cal.sonar_center_source = static_cast<uint8_t>(CenterSource::kManual);
-    cal.flags |= kFlagZeroPosCaptured;
-  }
-
+  cal.sonar_center_source = legacy.sonar_center_source;
+  cal.sonar_center_cm = legacy.sonar_center_cm;
+  cal.as5600_lower_raw_deg = legacy.as5600_lower_raw_deg;
+  cal.as5600_upper_raw_deg = legacy.as5600_upper_raw_deg;
+  cal.sonar_lower_cm = legacy.sonar_lower_cm;
+  cal.sonar_upper_cm = legacy.sonar_upper_cm;
+  cal.actuator_trim_deg = legacy.actuator_trim_deg;
+  // Force a fresh `p` capture for the new step-count-origin controller.
   cal.actuator_trim_valid = 0u;
+  cal.actuator_trim_source = static_cast<uint8_t>(ActuatorTrimSource::kSearched);
   cal.flags &= static_cast<uint8_t>(~kFlagZeroAngleCaptured);
   sanitizeLoaded(cal);
 }
@@ -322,7 +312,6 @@ bool runtimeCalLoad() {
 
   if (loaded.magic != kRuntimeCalMagic) {
     applyDefaults(g_runtime_cal);
-    g_load_status = RuntimeCalLoadStatus::kDefaultsApplied;
     return false;
   }
 
@@ -330,88 +319,71 @@ bool runtimeCalLoad() {
     const uint16_t expected_crc = runtimeCalCrc(loaded);
     if (loaded.crc16 != expected_crc) {
       applyDefaults(g_runtime_cal);
-      g_load_status = RuntimeCalLoadStatus::kDefaultsApplied;
       return false;
     }
 
     g_runtime_cal = loaded;
     sanitizeLoaded(g_runtime_cal);
+    if (g_runtime_cal.actuator_trim_valid != 0u) {
+      g_runtime_cal.actuator_trim_source = static_cast<uint8_t>(ActuatorTrimSource::kSaved);
+    }
     g_runtime_cal.crc16 = runtimeCalCrc(g_runtime_cal);
-    g_load_status = RuntimeCalLoadStatus::kLoadedFromEeprom;
     return true;
   }
 
-  if (loaded.version == kRuntimeCalVersionV2) {
-    RuntimeCalibrationV2 legacy{};
+  if (loaded.version == kRuntimeCalVersionV4) {
+    RuntimeCalibrationV4 legacy{};
     EEPROM.get(kRuntimeCalEepromAddress, legacy);
-    const uint16_t expected_crc = runtimeCalV2Crc(legacy);
+    const uint16_t expected_crc = runtimeCalV4Crc(legacy);
     if (legacy.crc16 != expected_crc) {
       applyDefaults(g_runtime_cal);
-      g_load_status = RuntimeCalLoadStatus::kDefaultsApplied;
       return false;
     }
 
-    migrateV2ToV3(legacy, g_runtime_cal);
+    migrateV4ToV5(legacy, g_runtime_cal);
     runtimeCalSave();
-    g_load_status = RuntimeCalLoadStatus::kLoadedFromEeprom;
     return true;
   }
 
-  if (loaded.version == kRuntimeCalVersionV1) {
-    RuntimeCalibrationV1 legacy{};
+  if (loaded.version == kRuntimeCalVersionV3) {
+    RuntimeCalibrationV3 legacy{};
     EEPROM.get(kRuntimeCalEepromAddress, legacy);
-    const uint16_t expected_crc = runtimeCalV1Crc(legacy);
+    const uint16_t expected_crc = runtimeCalV3Crc(legacy);
     if (legacy.crc16 != expected_crc) {
       applyDefaults(g_runtime_cal);
-      g_load_status = RuntimeCalLoadStatus::kDefaultsApplied;
       return false;
     }
 
-    migrateLegacyToV3(legacy, g_runtime_cal);
+    migrateV3ToV4(legacy, g_runtime_cal);
     runtimeCalSave();
-    g_load_status = RuntimeCalLoadStatus::kLoadedFromEeprom;
     return true;
   }
 
   applyDefaults(g_runtime_cal);
-  g_load_status = RuntimeCalLoadStatus::kDefaultsApplied;
   return false;
 }
 
 bool runtimeCalSave() {
   g_runtime_cal.magic = kRuntimeCalMagic;
   g_runtime_cal.version = kRuntimeCalVersion;
+  if (g_runtime_cal.actuator_trim_valid != 0u) {
+    g_runtime_cal.actuator_trim_source = static_cast<uint8_t>(ActuatorTrimSource::kSaved);
+  }
   sanitizeLoaded(g_runtime_cal);
   g_runtime_cal.crc16 = runtimeCalCrc(g_runtime_cal);
   EEPROM.put(kRuntimeCalEepromAddress, g_runtime_cal);
-  g_load_status = RuntimeCalLoadStatus::kLoadedFromEeprom;
   return true;
 }
 
 void runtimeCalResetDefaults() {
   applyDefaults(g_runtime_cal);
-  g_load_status = RuntimeCalLoadStatus::kDefaultsApplied;
 }
 
 const RuntimeCalibration& runtimeCalData() { return g_runtime_cal; }
 
-RuntimeCalLoadStatus runtimeCalLoadStatus() { return g_load_status; }
+bool runtimeCalIsZeroSet() { return hasFlag(kFlagZeroPosCaptured) && runtimeCalActuatorTrimValid(); }
 
-const char* runtimeCalLoadStatusName(RuntimeCalLoadStatus status) {
-  switch (status) {
-    case RuntimeCalLoadStatus::kLoadedFromEeprom:
-      return "loaded";
-    case RuntimeCalLoadStatus::kDefaultsApplied:
-      return "defaults";
-    case RuntimeCalLoadStatus::kUninitialized:
-    default:
-      return "uninitialized";
-  }
-}
-
-bool runtimeCalIsZeroSet() { return hasFlag(kFlagZeroAngleCaptured) && hasFlag(kFlagZeroPosCaptured); }
-
-bool runtimeCalIsZeroAngleCaptured() { return hasFlag(kFlagZeroAngleCaptured); }
+bool runtimeCalIsZeroAngleCaptured() { return runtimeCalActuatorTrimValid(); }
 
 bool runtimeCalIsZeroPosCaptured() { return hasFlag(kFlagZeroPosCaptured); }
 
@@ -430,8 +402,8 @@ bool runtimeCalIsSignSet() { return hasFlag(kFlagSignCaptured); }
 bool runtimeCalHasSonarCenter() { return hasFlag(kFlagZeroPosCaptured); }
 
 void runtimeCalMarkZeroAngleCaptured(bool enabled) {
-  setFlag(kFlagZeroAngleCaptured, enabled);
   g_runtime_cal.actuator_trim_valid = enabled ? 1u : 0u;
+  setFlag(kFlagZeroAngleCaptured, enabled);
 }
 
 void runtimeCalMarkZeroPosCaptured(bool enabled) { setFlag(kFlagZeroPosCaptured, enabled); }
@@ -464,10 +436,6 @@ SonarSignMode runtimeCalSonarSignMode() {
   return normalizeSonarSignMode(g_runtime_cal.sonar_sign_mode);
 }
 
-const char* runtimeCalSonarSignModeName(SonarSignMode mode) {
-  return (mode == SonarSignMode::kManual) ? "m" : "o";
-}
-
 void runtimeCalSetSonarSignMode(SonarSignMode mode) {
   g_runtime_cal.sonar_sign_mode = static_cast<uint8_t>(mode);
 }
@@ -485,20 +453,12 @@ CenterSource runtimeCalSonarCenterSource() {
   return normalizeCenterSource(g_runtime_cal.sonar_center_source);
 }
 
-const char* runtimeCalSonarCenterSourceName(CenterSource source) {
-  return (source == CenterSource::kManual) ? "m" : "a";
-}
-
 void runtimeCalSetSonarCenterSource(CenterSource source) {
   g_runtime_cal.sonar_center_source = static_cast<uint8_t>(source);
 }
 
 ActuatorTrimSource runtimeCalActuatorTrimSource() {
   return normalizeActuatorTrimSource(g_runtime_cal.actuator_trim_source);
-}
-
-const char* runtimeCalActuatorTrimSourceName(ActuatorTrimSource source) {
-  return (source == ActuatorTrimSource::kLearned) ? "l" : "m";
 }
 
 void runtimeCalSetActuatorTrimSource(ActuatorTrimSource source) {
@@ -532,6 +492,14 @@ float runtimeCalSonarLowerCm() { return g_runtime_cal.sonar_lower_cm; }
 
 float runtimeCalSonarUpperCm() { return g_runtime_cal.sonar_upper_cm; }
 
+float runtimeCalSonarNearCm() {
+  return runtimeCalUpperLimitNearSensor() ? g_runtime_cal.sonar_upper_cm : g_runtime_cal.sonar_lower_cm;
+}
+
+float runtimeCalSonarFarCm() {
+  return runtimeCalUpperLimitNearSensor() ? g_runtime_cal.sonar_lower_cm : g_runtime_cal.sonar_upper_cm;
+}
+
 void runtimeCalSetSonarLowerCm(float cm) { g_runtime_cal.sonar_lower_cm = cm; }
 
 void runtimeCalSetSonarUpperCm(float cm) { g_runtime_cal.sonar_upper_cm = cm; }
@@ -551,6 +519,9 @@ float runtimeCalActuatorMidpointDeg() { return actuatorMidpointDeg(g_runtime_cal
 
 float runtimeCalActiveSonarCenterCm() {
   if (!runtimeCalHasSonarCenter()) {
+    if (runtimeCalIsLimitsSet()) {
+      return derivedSonarCenterCm(g_runtime_cal);
+    }
     return g_runtime_cal.sonar_center_cm;
   }
   return activeSonarCenterCm(g_runtime_cal);

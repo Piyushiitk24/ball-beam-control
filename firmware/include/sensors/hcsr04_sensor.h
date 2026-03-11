@@ -14,10 +14,12 @@ class HCSR04Sensor {
   void begin();
   void service(uint32_t now_us, uint32_t now_ms);
 
+  bool hasSample() const;
   bool getPosition(float& x_cm, float& x_filt_cm, float& distance_raw_cm) const;
   bool hasFreshSample(uint32_t now_ms) const;
   uint32_t sampleAgeMs(uint32_t now_ms) const;
   bool hasTimeout() const;
+  uint16_t consecutiveMissCount() const;
   void getDiag(uint32_t now_ms, SonarDiag& diag) const;
 
   void handleEchoEdgeIsr(uint32_t now_us, bool level_high);
@@ -44,6 +46,7 @@ class HCSR04Sensor {
   float last_x_filt_cm_;
   uint32_t last_sample_ms_;
   uint16_t valid_streak_;
+  uint16_t consecutive_miss_count_;
   uint16_t timeout_count_;
   uint16_t jump_reject_count_;
 

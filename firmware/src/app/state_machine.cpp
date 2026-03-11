@@ -38,7 +38,7 @@ bool StateMachine::requestRun(const AppConditions& cond) {
 }
 
 void StateMachine::requestStop() {
-  if (state_ == AppState::RUNNING || state_ == AppState::CALIB_SCALE) {
+  if (state_ == AppState::RUNNING) {
     state_ = AppState::READY;
     return;
   }

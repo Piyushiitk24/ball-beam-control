@@ -16,6 +16,15 @@ COLUMNS = [
     "u_step_rate",
     "fault_flags",
     "x_ref_cm",
+    "sonar_age_ms",
+    "sonar_valid",
+    "sonar_miss_count",
+    "theta_cmd_unclamped_deg",
+    "theta_cmd_clamped_deg",
+    "theta_cmd_saturated",
+    "act_deg_abs",
+    "trim_deg",
+    "search_phase",
 ]
 
 
@@ -31,7 +40,7 @@ def parse_telemetry_lines(lines: list[str]) -> pd.DataFrame:
             line = line[4:]
 
         parts = [p.strip() for p in line.split(",")]
-        if len(parts) not in (8, 9):
+        if len(parts) < 8:
             continue
 
         try:
@@ -46,6 +55,15 @@ def parse_telemetry_lines(lines: list[str]) -> pd.DataFrame:
                     "u_step_rate": float(parts[6]),
                     "fault_flags": int(float(parts[7])),
                     "x_ref_cm": float(parts[8]) if len(parts) >= 9 else 0.0,
+                    "sonar_age_ms": int(float(parts[9])) if len(parts) >= 10 else 0,
+                    "sonar_valid": int(float(parts[10])) if len(parts) >= 11 else 0,
+                    "sonar_miss_count": int(float(parts[11])) if len(parts) >= 12 else 0,
+                    "theta_cmd_unclamped_deg": float(parts[12]) if len(parts) >= 13 else float(parts[5]),
+                    "theta_cmd_clamped_deg": float(parts[13]) if len(parts) >= 14 else float(parts[5]),
+                    "theta_cmd_saturated": int(float(parts[14])) if len(parts) >= 15 else 0,
+                    "act_deg_abs": float(parts[15]) if len(parts) >= 16 else float("nan"),
+                    "trim_deg": float(parts[16]) if len(parts) >= 17 else float("nan"),
+                    "search_phase": parts[17] if len(parts) >= 18 else "",
                 }
             )
         except ValueError:

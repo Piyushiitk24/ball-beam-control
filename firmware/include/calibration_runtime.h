@@ -15,8 +15,8 @@ enum class CenterSource : uint8_t {
 };
 
 enum class ActuatorTrimSource : uint8_t {
-  kMidpoint = 0,
-  kLearned = 1
+  kSearched = 0,
+  kSaved = 1
 };
 
 struct RuntimeCalibration {
@@ -30,7 +30,7 @@ struct RuntimeCalibration {
   uint8_t sonar_sign_mode = static_cast<uint8_t>(SonarSignMode::kOrientation);
   uint8_t sonar_center_source = static_cast<uint8_t>(CenterSource::kAuto);
   uint8_t actuator_trim_valid = 0;
-  uint8_t actuator_trim_source = static_cast<uint8_t>(ActuatorTrimSource::kMidpoint);
+  uint8_t actuator_trim_source = static_cast<uint8_t>(ActuatorTrimSource::kSearched);
   float sonar_center_cm = 0.0f;
   float as5600_lower_raw_deg = 0.0f;
   float as5600_upper_raw_deg = 0.0f;
@@ -40,20 +40,12 @@ struct RuntimeCalibration {
   uint16_t crc16 = 0;
 };
 
-enum class RuntimeCalLoadStatus : uint8_t {
-  kUninitialized = 0,
-  kLoadedFromEeprom,
-  kDefaultsApplied
-};
-
 void runtimeCalInit();
 bool runtimeCalLoad();
 bool runtimeCalSave();
 void runtimeCalResetDefaults();
 
 const RuntimeCalibration& runtimeCalData();
-RuntimeCalLoadStatus runtimeCalLoadStatus();
-const char* runtimeCalLoadStatusName(RuntimeCalLoadStatus status);
 
 bool runtimeCalIsZeroSet();
 bool runtimeCalIsZeroAngleCaptured();
@@ -80,17 +72,14 @@ void runtimeCalSetSonarPosSign(int8_t sign);
 bool runtimeCalUpperLimitNearSensor();
 void runtimeCalSetUpperLimitNearSensor(bool enabled);
 SonarSignMode runtimeCalSonarSignMode();
-const char* runtimeCalSonarSignModeName(SonarSignMode mode);
 void runtimeCalSetSonarSignMode(SonarSignMode mode);
 int8_t runtimeCalOrientationSonarSign();
 void runtimeCalApplyOrientationSonarSign();
 
 CenterSource runtimeCalSonarCenterSource();
-const char* runtimeCalSonarCenterSourceName(CenterSource source);
 void runtimeCalSetSonarCenterSource(CenterSource source);
 
 ActuatorTrimSource runtimeCalActuatorTrimSource();
-const char* runtimeCalActuatorTrimSourceName(ActuatorTrimSource source);
 void runtimeCalSetActuatorTrimSource(ActuatorTrimSource source);
 bool runtimeCalActuatorTrimValid();
 void runtimeCalSetActuatorTrimValid(bool enabled);
@@ -107,6 +96,8 @@ void runtimeCalSetAs5600UpperRawDeg(float deg);
 
 float runtimeCalSonarLowerCm();
 float runtimeCalSonarUpperCm();
+float runtimeCalSonarNearCm();
+float runtimeCalSonarFarCm();
 void runtimeCalSetSonarLowerCm(float cm);
 void runtimeCalSetSonarUpperCm(float cm);
 

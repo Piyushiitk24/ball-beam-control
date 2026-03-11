@@ -205,6 +205,22 @@ def _draw_events(axes: list[plt.Axes], events: list[dict[str, object]]) -> None:
         )
 
 
+def _shade_center_search(axes: list[plt.Axes], df: pd.DataFrame) -> None:
+    if "state" not in df.columns:
+        return
+    work = df.copy()
+    work["state"] = work["state"].fillna("")
+    mask = work["state"] == "CENTER_SEARCH"
+    if not mask.any():
+        return
+    groups = (mask != mask.shift(fill_value=False)).cumsum()
+    for _, seg in work[mask].groupby(groups[mask], sort=False):
+        t0 = float(seg["t_ms"].iloc[0]) / 1000.0
+        t1 = float(seg["t_ms"].iloc[-1]) / 1000.0
+        for ax in axes:
+            ax.axvspan(t0, t1, color="#ffbe0b", alpha=0.10)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Plot run telemetry with reference overlays and metrics")
     parser.add_argument("--input", type=Path, required=True, help="Path to *_telemetry.csv or *_clean.csv")
@@ -239,6 +255,19 @@ def main() -> None:
 
     axes[1].plot(t_s, df["theta_deg"], label="theta_deg", color="#e63946")
     axes[1].plot(t_s, df["theta_cmd_deg"], label="theta_cmd_deg", color="#f4a261", alpha=0.9)
+    if "theta_cmd_unclamped_deg" in df.columns:
+        axes[1].plot(
+            t_s,
+            df["theta_cmd_unclamped_deg"],
+            label="theta_cmd_unclamped_deg",
+            color="#6d597a",
+            linestyle="--",
+            alpha=0.8,
+        )
+    if "act_deg_abs" in df.columns and df["act_deg_abs"].notna().any():
+        axes[1].plot(t_s, df["act_deg_abs"], label="act_deg_abs", color="#264653", alpha=0.55)
+    if "trim_deg" in df.columns and df["trim_deg"].notna().any():
+        axes[1].plot(t_s, df["trim_deg"], label="trim_deg", color="#8d99ae", linestyle=":", alpha=0.9)
     axes[1].set_ylabel("Actuator (deg)")
     axes[1].legend()
     axes[1].grid(True, alpha=0.3)
@@ -255,6 +284,7 @@ def main() -> None:
     axes[3].grid(True, alpha=0.3)
 
     _draw_events(list(axes), events)
+    _shade_center_search(list(axes), df)
 
     fig.suptitle(f"Run Plot: {args.input.name}")
     fig.tight_layout()

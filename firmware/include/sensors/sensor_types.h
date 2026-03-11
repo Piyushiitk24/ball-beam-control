@@ -14,6 +14,7 @@ struct SonarDiag {
   float raw_cm = 0.0f;
   float filt_cm = 0.0f;
   uint16_t valid_streak = 0;
+  uint16_t consecutive_miss_count = 0;
   uint16_t timeout_count = 0;
   uint16_t jump_reject_count = 0;
 };

@@ -25,7 +25,12 @@ class PID {
   const PIDGains& gains() const;
 
   void reset();
-  float update(float error, float dt_s);
+  float update(float error,
+               float dt_s,
+               float out_min_override = 0.0f,
+               float out_max_override = 0.0f,
+               bool use_output_override = false,
+               float* unclamped_out = nullptr);
 
   float integral() const;
   float lastError() const;

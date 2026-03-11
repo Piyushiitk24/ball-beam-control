@@ -15,7 +15,20 @@ def main() -> None:
         "--metric",
         type=str,
         default="x_cm",
-        choices=["x_cm", "x_filt_cm", "x_ref_cm", "theta_deg", "theta_cmd_deg", "u_step_rate"],
+        choices=[
+            "x_cm",
+            "x_filt_cm",
+            "x_ref_cm",
+            "theta_deg",
+            "theta_cmd_deg",
+            "theta_cmd_unclamped_deg",
+            "theta_cmd_clamped_deg",
+            "act_deg_abs",
+            "trim_deg",
+            "u_step_rate",
+            "sonar_age_ms",
+            "sonar_miss_count",
+        ],
         help="Metric to compare",
     )
     parser.add_argument("--output", type=Path, default=Path("compare_runs.png"), help="Output plot path")
