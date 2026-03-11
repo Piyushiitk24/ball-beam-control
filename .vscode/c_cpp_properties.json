@@ -50,6 +50,7 @@
             "cppStandard": "gnu++11",
             "compilerPath": "/Users/piyush/.platformio/packages/toolchain-atmelavr/bin/avr-gcc",
             "compilerArgs": [
+                "-mrelax",
                 "-mmcu=atmega328p",
                 ""
             ]
