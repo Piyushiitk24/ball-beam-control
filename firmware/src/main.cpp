@@ -90,12 +90,14 @@ void applySafeDisable();
 void maybeStopJogAtLimits();
 void serviceControl(uint32_t now_ms);
 void syncLimitCaptureCacheFromRuntime();
-bool computeSetpointPresetsCm(float& near_mid_cm, float& far_mid_cm);
+bool computeSetpointPresetsCm(float& near_target_cm, float& far_target_cm);
 void setBallSetpointCm(float target_cm);
 void printSetpointStatus();
 void syncStepPositionToCurrentActuator();
 float currentStepperThetaDeg();
 float linearToCorrectedBallPosCm(float x_linear_cm, float theta_deg);
+float computeFeedbackBlend(float target_cm);
+void updateBallFeedbackPosition();
 bool effectiveActuatorStepBounds(int32_t& min_steps, int32_t& max_steps);
 NOINLINE float telemetryThetaCmdDeg();
 NOINLINE float telemetryThetaCmdUnclampedDeg();
@@ -132,18 +134,14 @@ void syncLimitCaptureCacheFromRuntime() {
   g_limit_upper_sonar_cm = runtimeCalSonarUpperCm();
 }
 
-bool computeSetpointPresetsCm(float& near_mid_cm, float& far_mid_cm) {
-  if (!runtimeCalIsLimitsSet() || !runtimeCalHasSonarCenter() || !runtimeCalActuatorTrimValid()) {
+bool computeSetpointPresetsCm(float& near_target_cm, float& far_target_cm) {
+  if (!runtimeCalIsLimitsSet() || !runtimeCalHasSonarCenter()) {
     return false;
   }
-  const float lower_x_cm =
-      linearToCorrectedBallPosCm(runtimeMapBallPosCm(runtimeCalSonarLowerCm()),
-                                 runtimeCalThetaLowerLimitDeg());
-  const float upper_x_cm =
-      linearToCorrectedBallPosCm(runtimeMapBallPosCm(runtimeCalSonarUpperCm()),
-                                 runtimeCalThetaUpperLimitDeg());
-  near_mid_cm = (lower_x_cm >= upper_x_cm) ? lower_x_cm : upper_x_cm;
-  far_mid_cm = (lower_x_cm <= upper_x_cm) ? lower_x_cm : upper_x_cm;
+  const float lower_x_cm = runtimeMapBallPosCm(runtimeCalSonarLowerCm());
+  const float upper_x_cm = runtimeMapBallPosCm(runtimeCalSonarUpperCm());
+  near_target_cm = (lower_x_cm >= upper_x_cm) ? lower_x_cm : upper_x_cm;
+  far_target_cm = (lower_x_cm <= upper_x_cm) ? lower_x_cm : upper_x_cm;
   return true;
 }
 
@@ -153,18 +151,18 @@ void setBallSetpointCm(float target_cm) {
 }
 
 void printSetpointStatus() {
-  float near_mid_cm = NAN;
-  float far_mid_cm = NAN;
-  computeSetpointPresetsCm(near_mid_cm, far_mid_cm);
+  float near_target_cm = NAN;
+  float far_target_cm = NAN;
+  computeSetpointPresetsCm(near_target_cm, far_target_cm);
 
   Serial.print(F("SET,"));
   Serial.print(millis());
   Serial.print(',');
   Serial.print(g_setpoint.ball_pos_cm_target, 4);
   Serial.print(',');
-  Serial.print(near_mid_cm, 4);
+  Serial.print(near_target_cm, 4);
   Serial.print(',');
-  Serial.println(far_mid_cm, 4);
+  Serial.println(far_target_cm, 4);
 }
 
 float currentActuatorDeg() {
@@ -202,6 +200,53 @@ float currentStepperThetaDeg() {
 
 float linearToCorrectedBallPosCm(float x_linear_cm, float theta_deg) {
   return x_linear_cm * cosf(theta_deg * kDegToRad);
+}
+
+float computeFeedbackBlend(float target_cm) {
+  if (fabsf(target_cm) <= 1.0e-4f) {
+    return 0.0f;
+  }
+
+  float near_target_cm = 0.0f;
+  float far_target_cm = 0.0f;
+  if (!computeSetpointPresetsCm(near_target_cm, far_target_cm)) {
+    return 0.0f;
+  }
+
+  const float side_endpoint_cm = (target_cm >= 0.0f) ? near_target_cm : fabsf(far_target_cm);
+  if (side_endpoint_cm <= 1.0e-4f) {
+    return 0.0f;
+  }
+
+  float blend = fabsf(target_cm) / side_endpoint_cm;
+  if (blend < 0.0f) {
+    blend = 0.0f;
+  }
+  if (blend > 1.0f) {
+    blend = 1.0f;
+  }
+  return blend;
+}
+
+void updateBallFeedbackPosition() {
+  g_sensor.ball_pos_ctrl_cm =
+      linearToCorrectedBallPosCm(g_sensor.ball_pos_linear_cm, g_sensor.beam_angle_deg);
+  g_sensor.ball_pos_ctrl_filt_cm =
+      linearToCorrectedBallPosCm(g_sensor.ball_pos_linear_filt_cm, g_sensor.beam_angle_deg);
+
+  g_sensor.feedback_blend = computeFeedbackBlend(g_setpoint.ball_pos_cm_target);
+  const float ctrl_weight = 1.0f - g_sensor.feedback_blend;
+  g_sensor.ball_pos_feedback_cm =
+      (ctrl_weight * g_sensor.ball_pos_ctrl_cm) +
+      (g_sensor.feedback_blend * g_sensor.ball_pos_linear_cm);
+  g_sensor.ball_pos_feedback_filt_cm =
+      (ctrl_weight * g_sensor.ball_pos_ctrl_filt_cm) +
+      (g_sensor.feedback_blend * g_sensor.ball_pos_linear_filt_cm);
+
+  g_sensor.ball_pos_cm = g_sensor.ball_pos_feedback_cm;
+  g_sensor.ball_pos_m = g_sensor.ball_pos_cm * kCmToM;
+  g_sensor.ball_pos_filt_cm = g_sensor.ball_pos_feedback_filt_cm;
+  g_sensor.ball_pos_filt_m = g_sensor.ball_pos_filt_cm * kCmToM;
 }
 
 void syncStepPositionToCurrentActuator() {
@@ -446,11 +491,8 @@ bool sampleSonarNow(uint32_t now_ms,
   g_sensor.ball_pos_linear_m = x_cm * kCmToM;
   g_sensor.ball_pos_linear_filt_cm = x_filt_cm;
   g_sensor.ball_pos_linear_filt_m = x_filt_cm * kCmToM;
-  g_sensor.ball_pos_cm = linearToCorrectedBallPosCm(x_cm, g_sensor.beam_angle_deg);
-  g_sensor.ball_pos_m = g_sensor.ball_pos_cm * kCmToM;
-  g_sensor.ball_pos_filt_cm = linearToCorrectedBallPosCm(x_filt_cm, g_sensor.beam_angle_deg);
-  g_sensor.ball_pos_filt_m = g_sensor.ball_pos_filt_cm * kCmToM;
   g_sensor.sonar_distance_raw_cm = dist_cm;
+  updateBallFeedbackPosition();
 
   const uint32_t stale_threshold_ms = activeStaleThresholdMs();
   const uint32_t sample_age_ms = g_hcsr04.sampleAgeMs(now_ms);
@@ -473,7 +515,7 @@ bool sampleSonarNow(uint32_t now_ms,
     // Track time of the last accepted sonar sample (not "last time we checked"),
     // so stale/fault timing is consistent even when we hold last-good on timeouts.
     g_last_valid_pos_ms = static_cast<uint32_t>(now_ms - sample_age_ms);
-    g_fault_flags.pos_oob = fabsf(g_sensor.ball_pos_filt_cm) > kBallPosHardLimitCm;
+    g_fault_flags.pos_oob = fabsf(g_sensor.ball_pos_linear_filt_cm) > kBallPosHardLimitCm;
   } else {
     g_fault_flags.pos_oob = false;
   }
@@ -677,7 +719,19 @@ void emitTelemetry(uint32_t now_ms) {
   Serial.print(',');
   Serial.print(runtimeCalActiveActuatorTrimDeg(), 4);
   Serial.print(',');
-  Serial.println(F("idle"));
+  Serial.print(F("idle"));
+  Serial.print(',');
+  Serial.print(g_sensor.ball_pos_linear_cm, 4);
+  Serial.print(',');
+  Serial.print(g_sensor.ball_pos_linear_filt_cm, 4);
+  Serial.print(',');
+  Serial.print(g_sensor.ball_pos_ctrl_cm, 4);
+  Serial.print(',');
+  Serial.print(g_sensor.ball_pos_ctrl_filt_cm, 4);
+  Serial.print(',');
+  Serial.print(g_sensor.ball_pos_feedback_filt_cm, 4);
+  Serial.print(',');
+  Serial.println(g_sensor.feedback_blend, 4);
 }
 
 void runJogBlocking(uint32_t timeout_ms) {

@@ -8,6 +8,9 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
+RUN_SOFT_LIMIT_BAND_DEG = 1.0
+RUN_HARD_LIMIT_MARGIN_DEG = 3.0
+
 
 def _parse_keyvals(prefix: str, line: str) -> dict[str, str]:
     out: dict[str, str] = {}
@@ -82,6 +85,35 @@ def _load_events(events_path: Path | None) -> list[dict[str, object]]:
             continue
         events.append({"t_s": t_ms / 1000.0, "label": label})
     return events
+
+
+def _load_cal_context(events_path: Path | None) -> dict[str, float]:
+    if events_path is None or not events_path.exists():
+        return {}
+
+    ctx: dict[str, float] = {}
+    for raw in events_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        _, _, payload = raw.partition("] ")
+        line = payload.strip() if payload else raw.strip()
+        if not line:
+            continue
+
+        if line.startswith("SET,"):
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) == 5:
+                try:
+                    ctx["near_target_cm"] = float(parts[3])
+                    ctx["far_target_cm"] = float(parts[4])
+                except ValueError:
+                    pass
+        elif line.startswith("CAL_LIMITS,"):
+            kv = _parse_keyvals("CAL_LIMITS,", line)
+            try:
+                ctx["theta_lower_limit_deg"] = float(kv["lower_deg"])
+                ctx["theta_upper_limit_deg"] = float(kv["upper_deg"])
+            except (KeyError, ValueError):
+                pass
+    return ctx
 
 
 def _find_hold_time(errors_cm: pd.Series, t_s: pd.Series, band_cm: float, hold_s: float) -> float:
@@ -243,12 +275,27 @@ def main() -> None:
 
     t_s = df["t_ms"] / 1000.0
     events = _load_events(events_path)
+    cal_ctx = _load_cal_context(events_path)
 
     fig, axes = plt.subplots(4, 1, figsize=(10.5, 9.5), sharex=True)
 
-    axes[0].plot(t_s, df["x_cm"], label="x_cm", color="#1d3557")
-    axes[0].plot(t_s, df["x_filt_cm"], label="x_filt_cm", color="#457b9d", alpha=0.9)
+    if "x_linear_filt_cm" in df.columns:
+        axes[0].plot(t_s, df["x_linear_filt_cm"], label="x_linear_filt_cm", color="#1d3557", alpha=0.9)
+    else:
+        axes[0].plot(t_s, df["x_cm"], label="x_cm", color="#1d3557")
+    if "x_ctrl_filt_cm" in df.columns:
+        axes[0].plot(t_s, df["x_ctrl_filt_cm"], label="x_ctrl_filt_cm", color="#457b9d", alpha=0.9)
+    else:
+        axes[0].plot(t_s, df["x_filt_cm"], label="x_filt_cm", color="#457b9d", alpha=0.9)
+    if "x_feedback_cm" in df.columns:
+        axes[0].plot(t_s, df["x_feedback_cm"], label="x_feedback_cm", color="#2a9d8f", linewidth=1.2)
+    else:
+        axes[0].plot(t_s, df["x_filt_cm"], label="x_filt_cm", color="#2a9d8f", linewidth=1.2)
     axes[0].plot(t_s, df["x_ref_cm"], label="x_ref_cm", color="#e76f51", linestyle="--", linewidth=1.4)
+    if "near_target_cm" in cal_ctx:
+        axes[0].axhline(cal_ctx["near_target_cm"], color="#adb5bd", linestyle=":", linewidth=0.9, alpha=0.7)
+    if "far_target_cm" in cal_ctx:
+        axes[0].axhline(cal_ctx["far_target_cm"], color="#adb5bd", linestyle=":", linewidth=0.9, alpha=0.7)
     axes[0].set_ylabel("Position (cm)")
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
@@ -268,11 +315,23 @@ def main() -> None:
         axes[1].plot(t_s, df["act_deg_abs"], label="act_deg_abs", color="#264653", alpha=0.55)
     if "trim_deg" in df.columns and df["trim_deg"].notna().any():
         axes[1].plot(t_s, df["trim_deg"], label="trim_deg", color="#8d99ae", linestyle=":", alpha=0.9)
+    if "theta_lower_limit_deg" in cal_ctx and "theta_upper_limit_deg" in cal_ctx:
+        lo = cal_ctx["theta_lower_limit_deg"]
+        hi = cal_ctx["theta_upper_limit_deg"]
+        axes[1].axhline(lo + RUN_SOFT_LIMIT_BAND_DEG, color="#6c757d", linestyle=":", linewidth=0.9, alpha=0.7)
+        axes[1].axhline(hi - RUN_SOFT_LIMIT_BAND_DEG, color="#6c757d", linestyle=":", linewidth=0.9, alpha=0.7)
+        axes[1].axhline(lo - RUN_HARD_LIMIT_MARGIN_DEG, color="#495057", linestyle="--", linewidth=0.9, alpha=0.7)
+        axes[1].axhline(hi + RUN_HARD_LIMIT_MARGIN_DEG, color="#495057", linestyle="--", linewidth=0.9, alpha=0.7)
     axes[1].set_ylabel("Actuator (deg)")
     axes[1].legend()
     axes[1].grid(True, alpha=0.3)
 
     axes[2].plot(t_s, df["u_step_rate"], label="u_step_rate", color="#2a9d8f")
+    if "feedback_blend" in df.columns:
+        ax2b = axes[2].twinx()
+        ax2b.plot(t_s, df["feedback_blend"], label="feedback_blend", color="#8338ec", alpha=0.5)
+        ax2b.set_ylabel("Blend")
+        ax2b.set_ylim(-0.05, 1.05)
     axes[2].set_ylabel("Step Rate (sps)")
     axes[2].legend()
     axes[2].grid(True, alpha=0.3)

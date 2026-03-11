@@ -25,6 +25,12 @@ COLUMNS = [
     "act_deg_abs",
     "trim_deg",
     "search_phase",
+    "x_linear_cm",
+    "x_linear_filt_cm",
+    "x_ctrl_cm",
+    "x_ctrl_filt_cm",
+    "x_feedback_cm",
+    "feedback_blend",
 ]
 
 
@@ -64,6 +70,12 @@ def parse_telemetry_lines(lines: list[str]) -> pd.DataFrame:
                     "act_deg_abs": float(parts[15]) if len(parts) >= 16 else float("nan"),
                     "trim_deg": float(parts[16]) if len(parts) >= 17 else float("nan"),
                     "search_phase": parts[17] if len(parts) >= 18 else "",
+                    "x_linear_cm": float(parts[18]) if len(parts) >= 19 else float(parts[2]),
+                    "x_linear_filt_cm": float(parts[19]) if len(parts) >= 20 else float(parts[3]),
+                    "x_ctrl_cm": float(parts[20]) if len(parts) >= 21 else float(parts[2]),
+                    "x_ctrl_filt_cm": float(parts[21]) if len(parts) >= 22 else float(parts[3]),
+                    "x_feedback_cm": float(parts[22]) if len(parts) >= 23 else float(parts[3]),
+                    "feedback_blend": float(parts[23]) if len(parts) >= 24 else 0.0,
                 }
             )
         except ValueError:

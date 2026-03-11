@@ -27,6 +27,11 @@ struct SensorData {
   float ball_pos_linear_m = 0.0f;
   float ball_pos_linear_filt_cm = 0.0f;
   float ball_pos_linear_filt_m = 0.0f;
+  float ball_pos_ctrl_cm = 0.0f;
+  float ball_pos_ctrl_filt_cm = 0.0f;
+  float ball_pos_feedback_cm = 0.0f;
+  float ball_pos_feedback_filt_cm = 0.0f;
+  float feedback_blend = 0.0f;
   float ball_pos_cm = 0.0f;
   float ball_pos_m = 0.0f;
   float ball_pos_filt_cm = 0.0f;

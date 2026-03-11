@@ -88,7 +88,8 @@ def _parse_tel(line: str) -> Optional[dict[str, object]]:
     # TEL,<t_ms>,<state>,<x_cm>,<x_filt_cm>,<theta_deg>,<theta_cmd_deg>,<u_step_rate>,<fault_flags>
     #   [,<x_ref_cm>,<sonar_age_ms>,<sonar_valid>,<sonar_miss_count>,
     #    <theta_cmd_unclamped_deg>,<theta_cmd_clamped_deg>,<theta_cmd_saturated>,
-    #    <act_deg_abs>,<trim_deg>,<search_phase>]
+    #    <act_deg_abs>,<trim_deg>,<search_phase>,
+    #    <x_linear_cm>,<x_linear_filt_cm>,<x_ctrl_cm>,<x_ctrl_filt_cm>,<x_feedback_cm>,<feedback_blend>]
     if not line.startswith("TEL,"):
         return None
     parts = [p.strip() for p in line.split(",")]
@@ -105,6 +106,12 @@ def _parse_tel(line: str) -> Optional[dict[str, object]]:
         act_deg_abs = float(parts[16]) if len(parts) >= 17 else math.nan
         trim_deg = float(parts[17]) if len(parts) >= 18 else math.nan
         search_phase = parts[18] if len(parts) >= 19 else ""
+        x_linear_cm = float(parts[19]) if len(parts) >= 20 else float(parts[3])
+        x_linear_filt_cm = float(parts[20]) if len(parts) >= 21 else float(parts[4])
+        x_ctrl_cm = float(parts[21]) if len(parts) >= 22 else float(parts[3])
+        x_ctrl_filt_cm = float(parts[22]) if len(parts) >= 23 else float(parts[4])
+        x_feedback_cm = float(parts[23]) if len(parts) >= 24 else float(parts[4])
+        feedback_blend = float(parts[24]) if len(parts) >= 25 else 0.0
         return {
             "t_ms": int(float(parts[1])),
             "state": parts[2],
@@ -124,6 +131,12 @@ def _parse_tel(line: str) -> Optional[dict[str, object]]:
             "act_deg_abs": act_deg_abs,
             "trim_deg": trim_deg,
             "search_phase": search_phase,
+            "x_linear_cm": x_linear_cm,
+            "x_linear_filt_cm": x_linear_filt_cm,
+            "x_ctrl_cm": x_ctrl_cm,
+            "x_ctrl_filt_cm": x_ctrl_filt_cm,
+            "x_feedback_cm": x_feedback_cm,
+            "feedback_blend": feedback_blend,
         }
     except ValueError:
         return None
@@ -140,6 +153,9 @@ def _parse_setpoint(line: str) -> Optional[dict[str, object]]:
         return {
             "t_ms": int(float(parts[1])),
             "x_ref_cm": float(parts[2]),
+            "near_target_cm": float(parts[3]),
+            "far_target_cm": float(parts[4]),
+            # Keep old keys as aliases for compatibility with older host code paths.
             "near_mid_cm": float(parts[3]),
             "far_mid_cm": float(parts[4]),
         }
@@ -236,6 +252,12 @@ class SerialLogger:
                 "act_deg_abs",
                 "trim_deg",
                 "search_phase",
+                "x_linear_cm",
+                "x_linear_filt_cm",
+                "x_ctrl_cm",
+                "x_ctrl_filt_cm",
+                "x_feedback_cm",
+                "feedback_blend",
                 "test_phase",
             ]
         )
@@ -337,6 +359,12 @@ class SerialLogger:
                     tel["act_deg_abs"],
                     tel["trim_deg"],
                     tel["search_phase"],
+                    tel["x_linear_cm"],
+                    tel["x_linear_filt_cm"],
+                    tel["x_ctrl_cm"],
+                    tel["x_ctrl_filt_cm"],
+                    tel["x_feedback_cm"],
+                    tel["feedback_blend"],
                     self._active_phase,
                 ]
             )
