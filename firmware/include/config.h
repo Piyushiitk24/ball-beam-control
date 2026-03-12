@@ -30,8 +30,19 @@ constexpr uint32_t kAs5600VerifyFaultMs = 250;
 // position, not derivative on setpoint error. Gains stay close to the working
 // sketch but are softened for this beam's higher overshoot tendency.
 constexpr float kPosPidKpStepsPerCm = 10.0f;
-constexpr float kPosPidKiStepsPerCmSec = 1.5f;
+constexpr float kPosPidKiStepsPerCmSec = 0.6f;
 constexpr float kPosPidKdStepsSecPerCm = 4.5f;
+constexpr float kCenterPidKpScale = 0.6f;
+constexpr float kCenterPidKiScale = 0.5f;
+constexpr float kCenterHoldPosTolCm = 0.7f;
+constexpr float kCenterHoldRateTolCmS = 2.0f;
+constexpr float kCenterIntegralBleedPerSec = 2.0f;
+constexpr float kCenterBiasLearnStepsPerCmSec = 0.25f;
+constexpr float kCenterBiasLearnPosWindowCm = 6.0f;
+constexpr float kCenterBiasLearnRateTolCmS = 10.0f;
+constexpr float kCenterBiasClampSteps = 160.0f;
+constexpr float kPositiveSideKpScale = 1.6f;
+constexpr float kPositiveSideKiScale = 1.2f;
 
 // Stepper angle (reference-style step-count angle source).
 #ifndef STEPPER_STEPS_PER_REV

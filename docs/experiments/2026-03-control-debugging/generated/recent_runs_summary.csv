@@ -1,0 +1,30 @@
+run_stem,timestamp,target_sequence,duration_s,fault_rows,fault_labels,diagnosis,final_state,final_x_filt_cm,final_theta_deg,center_crossings,invalid_rows,max_sonar_age_ms,near_end_error_cm,far_end_error_cm,center_end_error_cm
+run_20260310_101723,2026-03-10T10:17:23,q c -> q n -> q f,336.58,0,none,far-side shortfall,READY,4.632,-4.219,0,0,0,0.851,8.800,4.655
+run_20260310_103155,2026-03-10T10:31:55,q c -> q f -> q n,123.71,0,none,far-side shortfall,READY,8.732,24.908,0,0,0,4.582,12.805,8.296
+run_20260310_103642,2026-03-10T10:36:42,q c,3.15,0,none,tracking improved,SAFE_DISABLED,8.295,24.908,0,0,0,,,8.295
+run_20260310_103723,2026-03-10T10:37:23,q c -> q f -> q n,118.89,17,sonar_timeout,sonar validity dropout,READY,6.082,-4.175,0,0,0,1.649,10.108,5.983
+run_20260310_112753,2026-03-10T11:27:53,q c -> q n -> q f -> q c,119.43,393,sonar_timeout,sonar validity dropout,FAULT,12.561,-3.882,6,0,0,8.174,16.949,12.561
+run_20260310_120635,2026-03-10T12:06:35,q c,5.55,43,sonar_timeout,sonar validity dropout,SAFE_DISABLED,0.000,-42.100,0,53,0,,,0.000
+run_20260310_120720,2026-03-10T12:07:20,q c -> q f -> q n -> q f -> q c,141.00,172,sonar_timeout,sonar validity dropout,READY,8.565,-8.613,4,204,13577,4.032,12.811,8.565
+run_20260310_121428,2026-03-10T12:14:28,q c -> q f -> q n,123.76,252,sonar_timeout,sonar validity dropout,READY,7.543,-3.296,6,288,25973,2.122,12.413,7.177
+run_20260311_095911,2026-03-11T09:59:11,q c,530.55,3826,sonar_timeout,sonar validity dropout,FAULT,1.547,-10.156,16,206,10196,,,1.547
+run_20260311_101615,2026-03-11T10:16:15,q c -> q f -> q n,167.10,207,none,far-side shortfall,FAULT,1.166,22.133,0,1,41,-2.984,7.150,1.372
+run_20260311_111955,2026-03-11T11:19:55,q c -> q n -> q f -> q c,130.41,260,none,near-side undercommand,FAULT,-0.926,-5.850,1,1,40,-4.196,5.396,-0.926
+run_20260311_113038,2026-03-11T11:30:38,q c -> q n -> q f -> q c,200.75,164,none,far-side shortfall,FAULT,2.635,11.925,6,1,40,-1.063,7.864,2.635
+run_20260311_114412,2026-03-11T11:44:12,q c -> q n -> q f -> q c,170.51,199,sonar_timeout,sonar validity dropout,FAULT,3.930,9.000,14,83,4632,4.597,-4.516,3.930
+run_20260311_115944,2026-03-11T11:59:44,q c -> q f -> q n -> q f,205.50,168,angle_oob,travel-limit angle_oob,FAULT,-10.869,-12.037,36,15,783,-2.013,-5.259,-0.348
+run_20260311_120732,2026-03-11T12:07:32,q c -> q n -> q f,155.24,38,angle_oob,travel-limit angle_oob,RUNNING,0.397,-7.200,25,8,471,-2.225,5.569,0.357
+run_20260311_121358,2026-03-11T12:13:58,q c -> q f -> q n -> q c -> q f -> q n,208.42,0,none,tracking improved,RUNNING,8.773,11.475,17,86,1093,0.759,0.364,0.424
+run_20260312_101232,2026-03-12T10:12:32,q c -> q f -> q n -> q c,184.15,0,none,tracking improved,READY,-11.557,0.000,30,111,1334,0.000,-0.725,-11.557
+run_20260312_102210,2026-03-12T10:22:10,q c -> q f -> q n,180.84,0,none,tracking improved,READY,6.296,8.438,17,78,1278,-0.891,-0.479,4.092
+run_20260312_103903,2026-03-12T10:39:03,q c,206.47,2,sonar_timeout,sonar validity dropout,READY,5.949,9.113,38,108,1166,,,5.949
+run_20260312_105938,2026-03-12T10:59:38,q c,92.48,15,sonar_timeout,sonar validity dropout,READY,3.673,-4.275,20,64,2413,,,3.673
+run_20260312_110245,2026-03-12T11:02:45,q c,274.42,0,none,center oscillation,RUNNING,1.854,-0.900,74,204,1564,,,1.854
+run_20260312_111417,2026-03-12T11:14:17,q c,32.28,0,none,tracking improved,SAFE_DISABLED,-6.183,0.000,0,1,40,,,-6.183
+run_20260312_111454,2026-03-12T11:14:54,q c,225.54,240,sonar_timeout,sonar validity dropout,RUNNING,4.671,-6.300,1,258,47438,,,4.671
+run_20260312_112627,2026-03-12T11:26:27,q c,43.79,0,none,tracking improved,RUNNING,4.637,-6.750,1,14,875,,,4.637
+run_20260312_112718,2026-03-12T11:27:18,q c -> q f -> q n -> q c -> q f -> q n,531.68,207,sonar_timeout,sonar validity dropout,FAULT,7.533,-7.987,62,428,22883,-4.147,16.192,7.489
+run_20260312_113615,2026-03-12T11:36:15,q c,5.85,46,sonar_timeout,sonar validity dropout,SAFE_DISABLED,0.000,0.000,0,56,0,,,0.000
+run_20260312_113819,2026-03-12T11:38:19,q c,1.35,1,sonar_timeout,sonar validity dropout,SAFE_DISABLED,0.000,0.000,0,11,0,,,0.000
+run_20260312_113933,2026-03-12T11:39:33,q c -> q f -> q n -> q c,175.62,116,sonar_timeout,sonar validity dropout,FAULT,4.303,2.475,23,236,14085,-1.293,-1.220,4.303
+run_20260312_115937,2026-03-12T11:59:37,q c -> q f -> q n,122.77,81,sonar_timeout,sonar validity dropout,FAULT,-14.949,33.188,0,21,738,-21.192,-0.358,2.125

@@ -4,6 +4,256 @@ Stepper-driven ball-beam balancer: firmware (C++/PlatformIO) + first-principles 
 
 ---
 
+## Quick Start — Exact Commands
+
+This is the simplest full workflow:
+
+1. Build the firmware.
+2. Upload the firmware.
+3. Start the serial logger.
+4. Calibrate the system.
+5. Run closed-loop control.
+6. Plot the saved run.
+
+If you want a single copy-paste guide, use the steps below exactly.
+
+### 1. Build and Upload
+
+Run these in a normal terminal:
+
+```bash
+cd /Users/piyush/code/ball-beam-control
+
+# Build
+pio run -e nano_new
+
+# Upload
+pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
+```
+
+### 2. Start the Serial Logger
+
+Run this in the terminal after upload:
+
+```bash
+cd /Users/piyush/code/ball-beam-control
+./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1
+```
+
+After this, type the device commands below into the logger terminal and press Enter after each one.
+
+### 3. Fresh Calibration and First Run
+
+Use this exact command order:
+
+```text
+s
+d
+l
+u
+p
+e 1
+b
+v
+s
+t
+q c
+e 1
+r
+q f
+q n
+q c
+k
+e 0
+```
+
+### 4. What You Should Physically Do Before Each Command
+
+- Before `s`
+  - Do nothing special.
+  - This only prints status.
+
+- Before `d`
+  - Do nothing special.
+  - This clears old calibration.
+
+- Before `l`
+  - Move the beam fully down by hand.
+  - Keep the ball at the far end, away from the ultrasonic sensor.
+  - Hold it steady.
+
+- Before `u`
+  - Move the beam fully up by hand.
+  - Keep the ball at the near end, close to the ultrasonic sensor.
+  - Hold it steady.
+
+- Before `p`
+  - Place the ball at the physical center of the runner.
+  - Hold it steady.
+
+- Before `e 1`
+  - Keep your hands clear of the mechanism.
+  - This enables the driver.
+
+- Before `b`
+  - Keep fully clear.
+  - The motor will jog by itself.
+
+- Before `v`
+  - Do nothing special.
+  - This saves calibration.
+
+- Before the second `s`
+  - Do nothing special.
+  - Check that calibration is complete.
+
+- Before `t`
+  - Do nothing special.
+  - This turns telemetry on.
+
+- Before `q c`
+  - Do nothing special.
+  - This sets the target to runner center.
+
+- Before `r`
+  - Keep your hands off the beam and ball.
+  - The controller will start running.
+
+- Before `q f`
+  - Do nothing special.
+  - This changes the target to the far endpoint while running.
+
+- Before `q n`
+  - Do nothing special.
+  - This changes the target to the near endpoint while running.
+
+- Before the final `q c`
+  - Do nothing special.
+  - This changes the target back to center.
+
+- Before `k`
+  - Do nothing special.
+  - This stops the run.
+
+- Before `e 0`
+  - Do nothing special.
+  - This disables the driver.
+
+### 5. What the Main Commands Mean
+
+- `s`
+  - Show status.
+
+- `d`
+  - Reset calibration.
+
+- `l`
+  - Capture lower beam limit and far ball endpoint.
+
+- `u`
+  - Capture upper beam limit and near ball endpoint.
+
+- `p`
+  - Capture ball center.
+
+- `e 1`
+  - Enable motor driver.
+
+- `b`
+  - Jog motor and check direction/sign.
+
+- `v`
+  - Save calibration.
+
+- `t`
+  - Turn telemetry on or off.
+
+- `q c`
+  - Set target to center.
+
+- `q n`
+  - Set target to near endpoint.
+
+- `q f`
+  - Set target to far endpoint.
+
+- `r`
+  - Start closed-loop control.
+
+- `k`
+  - Stop closed-loop control.
+
+- `e 0`
+  - Disable motor driver.
+
+### 6. What You Want to See After Calibration
+
+After the second `s`, you want these:
+
+- `CAL,zero_calibrated=yes`
+- `CAL,limits_calibrated=yes`
+- `CAL,sign_calibrated=yes`
+- `ACT_CFG,...,v=1`
+
+If any of these are missing, redo calibration before running.
+
+### 7. Plot the Results After the Run
+
+If you want to plot a specific run, use its telemetry file directly:
+
+```bash
+cd /Users/piyush/code/ball-beam-control
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python analysis/plot_run.py --input data/runs/run_20260312_101232_telemetry.csv
+```
+
+Then open the PNG:
+
+```bash
+open data/runs/run_20260312_101232_telemetry.png
+```
+
+If you want to plot the most recent run automatically:
+
+```bash
+cd /Users/piyush/code/ball-beam-control
+LATEST="$(ls -t data/runs/run_*_telemetry.csv | head -n 1)"
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python analysis/plot_run.py --input "$LATEST"
+open "${LATEST%.csv}.png"
+```
+
+If you want the curated recent-runs report used for debugging history and thesis/report work:
+
+```bash
+cd /Users/piyush/code/ball-beam-control
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python analysis/report_recent_runs.py
+```
+
+That writes:
+- `docs/experiments/2026-03-control-debugging/generated/recent_runs_summary.csv`
+- `docs/experiments/2026-03-control-debugging/generated/recent_runs_summary.md`
+- `docs/experiments/2026-03-control-debugging/generated/plots/`
+
+### 8. Daily Use After Calibration Is Already Saved
+
+If you already calibrated and nothing changed mechanically, you can skip `d l u p b v`.
+
+Use:
+
+```text
+s
+t
+q c
+e 1
+r
+q f
+q n
+q c
+k
+e 0
+```
+
+---
+
 ## 1 — Build & Upload (One-Time or After Code Changes)
 
 ```bash
@@ -473,6 +723,7 @@ LATEST="$(ls -t data/runs/run_*_telemetry.csv | head -n 1)"
 
 - Canonical modeling reference: `docs/modeling.md`
 - Plotting/tuning workflow: `docs/tuning.md`
+- Debugging/report record: `docs/experiments/2026-03-control-debugging/README.md`
 
 ## VS Code One-Click Tasks
 

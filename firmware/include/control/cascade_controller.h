@@ -9,6 +9,7 @@ class CascadeController {
   CascadeController();
 
   void reset();
+  void clearAdaptiveCenterBias();
   ActuatorCmd update(const SensorData& sensor,
                      const Setpoint& setpoint,
                      float dt_s,
@@ -27,6 +28,7 @@ class CascadeController {
   float last_target_steps_unclamped_;
   bool last_target_saturated_;
   float last_signed_rate_sps_;
+  float center_bias_steps_;
 };
 
 }  // namespace bb

@@ -35,6 +35,7 @@ constexpr float kRunSoftLimitBandDeg = 1.0f;
 // Slightly wider than the nominal 2 deg to avoid nuisance angle_oob faults
 // from small AS5600/calibration mismatch near the travel ends.
 constexpr float kRunHardLimitMarginDeg = 3.0f;
+constexpr float kCenterFeedbackBlend = 0.40f;
 
 StepperTMC2209 g_stepper(PIN_STEP, PIN_DIR, PIN_EN);
 AS5600Sensor g_as5600;
@@ -203,19 +204,19 @@ float linearToCorrectedBallPosCm(float x_linear_cm, float theta_deg) {
 }
 
 float computeFeedbackBlend(float target_cm) {
-  if (fabsf(target_cm) <= 1.0e-4f) {
-    return 0.0f;
-  }
-
   float near_target_cm = 0.0f;
   float far_target_cm = 0.0f;
   if (!computeSetpointPresetsCm(near_target_cm, far_target_cm)) {
-    return 0.0f;
+    return kCenterFeedbackBlend;
+  }
+
+  if (fabsf(target_cm) <= 1.0e-4f) {
+    return kCenterFeedbackBlend;
   }
 
   const float side_endpoint_cm = (target_cm >= 0.0f) ? near_target_cm : fabsf(far_target_cm);
   if (side_endpoint_cm <= 1.0e-4f) {
-    return 0.0f;
+    return kCenterFeedbackBlend;
   }
 
   float blend = fabsf(target_cm) / side_endpoint_cm;
@@ -225,7 +226,7 @@ float computeFeedbackBlend(float target_cm) {
   if (blend > 1.0f) {
     blend = 1.0f;
   }
-  return blend;
+  return kCenterFeedbackBlend + ((1.0f - kCenterFeedbackBlend) * blend);
 }
 
 void updateBallFeedbackPosition() {
@@ -498,8 +499,10 @@ bool sampleSonarNow(uint32_t now_ms,
   const uint32_t sample_age_ms = g_hcsr04.sampleAgeMs(now_ms);
   const uint16_t miss_count = g_hcsr04.consecutiveMissCount();
   const bool fresh = g_hcsr04.hasFreshSample(now_ms);
-  const bool usable = (sample_age_ms <= stale_threshold_ms) &&
-                      (miss_count <= static_cast<uint16_t>(kSonarMaxConsecutiveMisses));
+  // Intermittent HC-SR04 miss bursts are common near the runner ends. Hold the
+  // last good sample until it is truly stale instead of disabling control after
+  // only a few missed pings.
+  const bool usable = sample_age_ms <= stale_threshold_ms;
 
   g_sensor.sonar_age_ms = sample_age_ms;
   g_sensor.sonar_miss_count = miss_count;
@@ -1081,6 +1084,7 @@ bool captureZeroPosition() {
   runtimeCalSetActuatorTrimDeg(runtimeMapActuatorDeg(raw_deg));
   runtimeCalSetActuatorTrimValid(true);
   runtimeCalSetActuatorTrimSource(ActuatorTrimSource::kSaved);
+  g_controller.clearAdaptiveCenterBias();
   g_stepper.resetPositionSteps(0);
   g_sensor.beam_angle_deg = 0.0f;
   g_sensor.beam_angle_rad = 0.0f;
@@ -1117,6 +1121,7 @@ bool finalizeNormalizedLimitSpan() {
   runtimeCalSetActuatorTrimValid(false);
   runtimeCalSetUpperLimitNearSensor(true);
   runtimeCalApplyOrientationSonarSign();
+  g_controller.clearAdaptiveCenterBias();
   resetAs5600Filter();
 
   if (runtimeCalHasSonarCenter()) {
@@ -1166,6 +1171,7 @@ bool captureDownLimit() {
   runtimeCalSetAs5600LowerRawDeg(raw_deg);
   runtimeCalSetSonarLowerCm(dist_cm);
   runtimeCalSetActuatorTrimValid(false);
+  g_controller.clearAdaptiveCenterBias();
   runtimeCalMarkLowerLimitCaptured(true);
   g_runtime_cal_dirty = true;
 
@@ -1197,6 +1203,7 @@ bool captureUpLimit() {
   runtimeCalSetAs5600UpperRawDeg(raw_deg);
   runtimeCalSetSonarUpperCm(dist_cm);
   runtimeCalSetActuatorTrimValid(false);
+  g_controller.clearAdaptiveCenterBias();
   runtimeCalMarkUpperLimitCaptured(true);
   g_runtime_cal_dirty = true;
 
@@ -1388,6 +1395,7 @@ void handleCommand(char* line) {
         g_runtime_cal_dirty = false;
         g_prev_step_rate_sps = 0.0f;
         g_actuator_drift_since_ms = 0u;
+        g_controller.clearAdaptiveCenterBias();
         g_stepper.resetPositionSteps(0);
         Serial.println(F("OK,cal_reset_saved"));
         printGuideNextAction();
@@ -1452,7 +1460,6 @@ void serviceControl(uint32_t now_ms) {
     }
 
     g_setpoint.ball_pos_m_target = g_setpoint.ball_pos_cm_target * kCmToM;
-
     int32_t pos_min_steps = 0;
     int32_t pos_max_steps = 0;
     if (!effectiveActuatorStepBounds(pos_min_steps, pos_max_steps)) {

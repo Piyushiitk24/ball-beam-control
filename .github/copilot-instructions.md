@@ -2,66 +2,82 @@
 
 ## Architecture
 
-Three subsystems that must stay in sync:
+The repo now has two controller tracks that must be documented differently:
 
-| Subsystem | Path | Language | Purpose |
-|-----------|------|----------|---------|
-| **Firmware** | `firmware/` | C++/Arduino (ATmega328P, PlatformIO) | Cascade PID at 50 Hz, Timer1 ISR step-pulse generation |
-| **Model** | `model/first_principles/` | Python | First-principles plant + gain design → auto-generates `firmware/include/generated/controller_gains.h` |
-| **Analysis** | `analysis/` | Python | Parse, clean, and plot serial telemetry from `data/runs/` |
+| Track | Path | Status | Purpose |
+| --- | --- | --- | --- |
+| **Runtime controller** | `firmware/` | **Authoritative** | Current single position PID, dual-coordinate ball feedback, AS5600 safety/verification, HC-SR04-based runner control |
+| **Archived design model** | `model/first_principles/` | Historical/reference | First-principles nonlinear plant, linearization, and old cascade gain-design pipeline |
+| **Analysis/reporting** | `analysis/` | Active | Serial logging, plotting, run comparison, and thesis/report record generation |
 
-**Active sensors:** HC-SR04 ultrasonic (position, D8 trig / D9 echo) + AS5600 (angle, I2C). Sharp IR and TFMini code is legacy — in `firmware/experiments/backup/`.
+Current firmware state machine: `SAFE_DISABLED -> CALIB_SIGN -> READY -> RUNNING -> FAULT`
 
-State machine: `SAFE_DISABLED → CALIB_SIGN → READY ⇄ CALIB_SCALE → RUNNING → FAULT`
+Active sensors and their roles:
+- **HC-SR04**: ball position along the runner; control-relevant signal with hold-last-good timeout policy
+- **AS5600**: actuator travel calibration, run-start synchronization, travel-limit safety, and drift verification
 
-## Build & Deploy
+## Current Runtime Controller
+
+The runtime controller is **not** the old cascade controller from the first-principles design scripts.
+
+The current firmware uses:
+- `l`, `u`, `p` calibration frame
+- physical runner position `x_linear`
+- angle-corrected position `x_ctrl = x_linear * cos(theta_est)`
+- blended feedback position `x_feedback`
+- a **single position PID** that outputs an absolute actuator target in step counts
+- a motion generator that converts actuator position error to signed step rate
+- center-only bias adaptation and center hold logic
+- positive-side gain scaling to handle near-end asymmetry
+
+Key implementation references:
+- current controller: `firmware/src/control/cascade_controller.cpp`
+- runtime wiring/calibration/control loop: `firmware/src/main.cpp`
+- constants/tuning: `firmware/include/config.h`
+- telemetry/state types: `firmware/include/types.h`
+
+## Build, Upload, Logging, and Reporting
 
 ```bash
-# Gain pipeline (after editing params_measured_v1.yaml)
-./.venv/bin/python model/first_principles/design_cascade_pid.py --params model/first_principles/params_measured_v1.yaml
-./.venv/bin/python model/first_principles/export_gains.py
+# Build
+pio run -e nano_new
 
-# Build + upload
-cd firmware && pio run -e nano_new -t upload
+# Upload
+pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
 
-# Host logger (recommended)
+# Host logger
 ./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1
-```
 
-Use `nano_old` env only for old-bootloader Nanos. VS Code tasks wrap these commands.
+# Single-run plot
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python analysis/plot_run.py --input data/runs/<run>_telemetry.csv
+
+# Curated recent-runs report
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python analysis/report_recent_runs.py
+```
 
 ## Critical Rules
 
-1. **Never edit `controller_gains.h`** — always regenerate via the design + export pipeline.
-2. **Never add float math or `digitalWrite()` in ISRs** — use direct port manipulation, flags/timestamps only.
-3. **Always use `F()` macro** for `Serial.print` string literals (saves RAM on ATmega328P).
-4. **Check flash after every change** — `pio run -e nano_new` reports usage. Budget: 30,720 bytes flash, 2,048 bytes RAM.
+1. **Treat `docs/modeling.md` as the canonical math document.** If firmware behavior changes, update the math doc in the same change set.
+2. **Do not describe `controller_gains.h` as the active runtime controller path.** It belongs to the archived design pipeline unless a task is explicitly about that path.
+3. **Always check flash after firmware changes.** Budget: 30,720 bytes flash, 2,048 bytes RAM.
+4. **Use `F()` for `Serial.print` string literals and keep ISR work minimal.**
+5. **When documenting debugging progress, use the curated experiment record in `docs/experiments/2026-03-control-debugging/` rather than reconstructing history ad hoc.**
 
-## Conventions
-
-- **Units:** SI internally (`m`, `rad`, `s`); human-readable in telemetry (`cm`, `deg`).
-- **Float literals:** Always use `f` suffix (`0.01745f`).
-- **Naming:** `namespace bb`, `g_` globals, `k` constants, `m_` members.
-- **Telemetry format:** `TEL,<t_ms>,<state>,<x_cm>,<x_filt_cm>,<theta_deg>,<theta_cmd_deg>,<u_step_rate>,<fault_flags>`
-- **Sensor protocol:** HC-SR04 uses the `sonar diag`, `SONAR_DIAG,...` protocol for diagnostics. Host tools work unchanged.
-- **Plant parameters:** Single source of truth is `model/first_principles/params_measured_v1.yaml`.
-
-## Key References
+## Current Sources of Truth
 
 | Topic | File |
-|-------|------|
-| Loop rates, limits, constants | `firmware/include/config.h` |
-| Data structures | `firmware/include/types.h` |
-| Cascade controller | `firmware/include/control/cascade_controller.h` |
-| Calibration signs | `docs/calibration_signs.md` |
-| Modeling derivations | `docs/modeling_source_of_truth.md` |
-| Wiring | `docs/wiring.md` |
-| Serial command reference | `commands.md` |
-| Calibration workflow | `README.md` §3 |
+| --- | --- |
+| Canonical math / controller description | `docs/modeling.md` |
+| Debugging chronology and representative runs | `docs/experiments/2026-03-control-debugging/README.md` |
+| Generated run index / plots | `docs/experiments/2026-03-control-debugging/generated/` |
+| Current firmware tuning knobs | `firmware/include/config.h` |
+| Calibration workflow / commands | `README.md`, `commands.md` |
+| Current telemetry plotting | `analysis/plot_run.py` |
+| Recent run report generation | `analysis/report_recent_runs.py` |
 
 ## Scoped Guidance
 
-Detailed area-specific instructions are in `.github/instructions/`:
-- `firmware.instructions.md` — C++ firmware conventions, ISR safety, flash budget, HC-SR04 notes
-- `model.instructions.md` — Gain design pipeline, parameter file conventions
-- `analysis.instructions.md` — Python analysis scripts, telemetry parsing, plotting
+Detailed area-specific instructions live in `.github/instructions/`:
+- `firmware.instructions.md` — current runtime controller, calibration, safety, flash budget
+- `model.instructions.md` — archived first-principles pipeline and how it relates to runtime
+- `analysis.instructions.md` — telemetry schema, plotting, and experiment-record generation

@@ -1,353 +1,337 @@
-# First-Principles Modeling (Canonical + Educational)
+# Modeling and Control Reference
 
-This is the canonical modeling reference for the repo.
-If code and docs diverge, reconcile both in the same change set (do not let them drift).
+This is the canonical math and control document for the repo.
 
-Implementation references:
-- `model/first_principles/first_principles_core.py`
+If firmware and docs diverge, update them together.
+
+The repo currently has **two controller tracks**:
+- **Track A — Archived design history:** first-principles plant, linearization, and the older cascade gain-design pipeline in `model/first_principles/`
+- **Track B — Current implemented controller:** the single-PID runtime controller in `firmware/`
+
+Track B is the authoritative description of the firmware that is currently flashed and tested on hardware.
+
+## 1. Current Physical Setup
+
+Measured/control-relevant quantities:
+- `d` [cm]: HC-SR04 distance to the ball-side reflector target
+- `theta_est` [deg]: actuator angle estimate from step counts, synchronized to AS5600 at run start
+- `theta_abs` [deg]: AS5600-derived absolute actuator pose in the calibrated actuator frame
+
+Runtime roles:
+- HC-SR04 provides the control-relevant runner position
+- AS5600 provides actuator travel calibration, run-start synchronization, travel-limit safety, and drift verification
+- the stepper executes signed step-rate commands from the motion generator
+
+State machine:
+- `SAFE_DISABLED`
+- `CALIB_SIGN`
+- `READY`
+- `RUNNING`
+- `FAULT`
+
+## 2. Calibration Frame Used by the Current Firmware
+
+The current controller is **ball-centric**, not beam-level-centric.
+
+### 2.1 Calibration commands
+- `l`: capture lower actuator limit and one runner endpoint
+- `u`: capture upper actuator limit and the other runner endpoint
+- `p`: place the ball at the physical runner center and capture the sonar center plus the current actuator trim/origin
+- `b`: stepper direction/sign jog
+
+### 2.2 Stored runtime quantities
+From `l/u/p`, the firmware stores:
+- lower/upper raw AS5600 angles
+- lower/upper sonar distances
+- sonar center distance
+- actuator trim/origin in the normalized actuator frame
+- sign conventions for AS5600, sonar, and stepper direction
+
+### 2.3 Sign conventions
+Current hardware convention is fixed in firmware as:
+- upper actuator limit = ball nearer to the sensor
+- lower actuator limit = ball farther from the sensor
+
+The sonar sign is therefore derived from hardware orientation, not from a user guess.
+
+## 3. Track B — Current Implemented Runtime Controller
+
+This section is the authoritative implementation model.
+
+### 3.1 Actuator coordinates
+The current runtime controller operates in a step-count actuator frame.
+
+Definitions:
+- `k_step = kStepperDegPerStep`
+- `n` = relative stepper position in microsteps
+- `theta_est_deg = n * k_step`
+- `theta_est_rad = theta_est_deg * pi / 180`
+
+At run start, step counts are synchronized from AS5600:
+- `theta_abs_deg = runtimeMapActuatorDeg(raw_as5600_deg)`
+- `theta_est_deg <- theta_abs_deg - trim_deg`
+
+So the step-count frame is re-anchored to the calibrated actuator trim before entering `RUNNING`.
+
+### 3.2 Ball-position coordinates
+The current controller uses three related runner coordinates.
+
+#### Physical runner coordinate
+`x_linear_cm = sonar_sign * (d_cm - sonar_center_cm)`
+
+This is the direct physical runner coordinate in the `p`-captured center frame.
+
+#### Angle-corrected coordinate
+`x_ctrl_cm = x_linear_cm * cos(theta_est_rad)`
+
+This compensates for beam tilt changing the apparent sonar geometry.
+
+#### Blended control coordinate
+Let `b = feedback_blend` with `0 <= b <= 1`.
+
+`x_feedback_cm = (1 - b) * x_ctrl_cm + b * x_linear_cm`
+
+The same structure is applied to filtered signals:
+`x_feedback_filt_cm = (1 - b) * x_ctrl_filt_cm + b * x_linear_filt_cm`
+
+### 3.3 Setpoint semantics
+- `q c`: target the physical runner center, `x_ref = 0`
+- `q n`: target the calibrated **near endpoint** from `l/u`
+- `q f`: target the calibrated **far endpoint** from `l/u`
+- `q <cm>`: target an explicit physical runner offset from center
+
+`q n` and `q f` are literal physical endpoints derived from the stored `l/u` sonar captures.
+
+### 3.4 Feedback blend law
+The firmware computes a target-dependent blend:
+
+For calibrated near/far endpoint magnitudes `x_near > 0`, `x_far < 0`:
+- if `x_ref = 0`, `b = kCenterFeedbackBlend`
+- otherwise let `x_side = x_near` for positive targets and `|x_far|` for negative targets
+- `b = kCenterFeedbackBlend + (1 - kCenterFeedbackBlend) * clamp(|x_ref| / x_side, 0, 1)`
+
+Interpretation:
+- near the center, use more angle-corrected information
+- near the endpoints, rely more on the physical runner coordinate
+
+### 3.5 Center-mode special case
+The current controller intentionally overrides the general blended measurement at the center.
+
+In `q c` mode:
+- measurement = `x_linear_filt_cm`
+- error = `-x_linear_filt_cm`
+
+So center regulation uses the direct linear runner coordinate and separate center-only logic, rather than the generic `x_feedback` path.
+
+### 3.6 Single-PID control law
+The active runtime controller is in `firmware/src/control/cascade_controller.cpp`.
+
+Base gains from `firmware/include/config.h`:
+- `Kp = kPosPidKpStepsPerCm`
+- `Ki = kPosPidKiStepsPerCmSec`
+- `Kd = kPosPidKdStepsSecPerCm`
+
+For each control tick with sample time `dt`:
+- `e = x_ref - x_meas`
+- `x_dot_meas ~= (x_meas - x_meas_prev) / dt`
+- proportional term: `P = Kp_eff * e`
+- derivative term: `D = -Kd * x_dot_meas`
+- integral term is clamped and updated with anti-windup
+
+The controller output is an **absolute actuator target** in step counts:
+
+`n_cmd_unclamped = bias_center + P + I + D`
+
+`n_cmd = clamp(n_cmd_unclamped, n_min, n_max)`
+
+where `n_min`, `n_max` are the calibrated actuator soft limits expressed in step counts.
+
+### 3.7 Center-only modifications
+When `q c` is active, the controller adds center-specific behavior.
+
+#### Reduced center gains
+- `Kp_eff = Kp * kCenterPidKpScale`
+- `Ki_eff = Ki * kCenterPidKiScale`
+
+#### Hold zone
+If both are true:
+- `|x_linear_filt_cm| <= kCenterHoldPosTolCm`
+- `|dx/dt| <= kCenterHoldRateTolCmS`
+
+then:
+- the control error is forced to zero
+- the integral term is bled toward zero with `kCenterIntegralBleedPerSec`
+
+This creates a neutral hold region around the center instead of continuously chasing tiny crossings.
+
+#### Adaptive center bias
+A runtime-only center bias is learned during center operation:
+
+`bias_center <- clamp(bias_center + kCenterBiasLearnStepsPerCmSec * e * dt, -kCenterBiasClampSteps, +kCenterBiasClampSteps)`
+
+This bias is used only in center mode and is cleared by recalibration.
+
+### 3.8 Positive-side asymmetry compensation
+When the target is positive (`q n` side), the controller can scale gains upward:
+- `Kp_eff *= kPositiveSideKpScale`
+- `Ki_eff *= kPositiveSideKiScale`
+
+This is an empirical correction for the observed plant asymmetry where the near side required more actuator command than the far side.
+
+### 3.9 Motion generator
+The PID does not directly output a step rate.
+
+Instead, it outputs a target actuator position `n_cmd`, and a motion generator converts actuator position error into signed step rate.
+
+Let:
+- `e_n = n_cmd - n_est`
+- `a_run = kRunMotionAccelSps2`
+
+If `|e_n| <= kRunPositionDeadbandSteps`, command zero rate.
+
+Otherwise:
+
+`u_desired = sign(e_n) * min(sqrt(2 * a_run * |e_n|), kMaxStepRateSps)`
+
+Then apply a per-tick slew limit based on `kMaxStepRateChangeSpsPerTick`.
+
+This makes the actuator command behave like a bounded position servo using rate-limited stepper motion.
+
+## 4. HC-SR04 Runtime Validity and Fault Policy
+
+The current firmware uses a hold-last-good policy.
+
+### 4.1 Filtering path
+HC-SR04 processing uses:
+- range validity check
+- jump clamp on raw distance
+- rolling median window
+- EMA smoothing
+
+### 4.2 Validity logic
+The last good sample remains usable until it becomes truly stale.
+
+Current effective rule:
+- `valid_pos = (sample_age_ms <= stale_threshold_ms)`
+
+Miss counts are still recorded (`sonar_miss_count`) but are diagnostic only; they do not by themselves disable control.
+
+### 4.3 Fault timing
+A `sonar_timeout` fault is raised only when the time since the last accepted sonar sample exceeds the active stale threshold.
+
+Thresholds are wider in `RUNNING` than in bring-up.
+
+This preserves control through short HC-SR04 miss bursts, especially near the runner ends.
+
+## 5. AS5600 Safety and Verification
+
+AS5600 is no longer the primary ball-position signal, but it remains essential for actuator supervision.
+
+### 5.1 Travel limits
+Actuator travel limits are derived from the calibrated AS5600 span.
+
+Soft limits are used for commanded actuator bounds.
+Hard margins are used for `angle_oob` fault detection.
+
+### 5.2 Drift verification
+During `RUNNING`, the firmware compares:
+- AS5600-derived actuator pose relative to trim
+- step-count-derived actuator pose
+
+Verification error:
+
+`e_verify_deg = (theta_abs_deg - trim_deg) - theta_est_deg`
+
+If `|e_verify_deg|` stays above the configured threshold for the configured dwell time, the controller raises `actuator_drift`.
+
+## 6. Runtime Fault Set
+
+Current runtime fault bits:
+- `0x01`: `sonar_timeout`
+- `0x02`: `i2c_error`
+- `0x04`: `angle_oob`
+- `0x08`: `pos_oob`
+- `0x10`: `actuator_drift`
+
+Important runtime interpretations:
+- `pos_oob` is checked on the **linear** runner coordinate
+- `angle_oob` is checked from the calibrated actuator frame
+- `sonar_timeout` is an age-based stale-sample fault
+
+## 7. Track A — Archived First-Principles Design Path
+
+This section preserves the original design and thesis history.
+It is no longer the authoritative runtime controller description.
+
+### 7.1 Archived plant states
+The first-principles derivation models:
+- ball position `x`, velocity `x_dot`
+- beam angle `theta`, rate `theta_dot`
+- actuator input mapped through `theta = f(phi)`
+- sonar map `x = g(d, theta)`
+
+### 7.2 Archived nonlinear coupled equations
+The archived coupled model uses:
+- rolling effective mass
+- beam inertia and COM terms
+- actuator torque model
+- rolling and pivot damping/friction
+
+In compact form:
+
+`m_e * x_ddot + m_e * R * theta_ddot = m * x * theta_dot^2 + m * g * sin(theta) + Q_x`
+
+`m_e * R * x_ddot + (J + m_e * R^2 + m * x^2) * theta_ddot = Q_theta + gravity/coriolis terms`
+
+This model remains useful for thesis derivation and offline simulation.
+
+### 7.3 Archived linearized cascade design
+The older design pipeline treated the plant as:
+- outer loop: reduced double-integrator `x_ddot = k * theta`
+- inner loop: stepper/beam integrator
+
+That pipeline lives in:
 - `model/first_principles/derive_nonlinear.py`
 - `model/first_principles/linearize.py`
 - `model/first_principles/design_cascade_pid.py`
 - `model/first_principles/export_gains.py`
 
-Primary parameter file for current hardware:
-- `model/first_principles/params_measured_v1.yaml`
-
-Companion measured-data worksheet:
-- `docs/modeling_measured_calculations_v1.md`
-
-## 1) System Definition
-
-Measured quantities:
-- Beam angle `theta` from AS5600 (mounted on beam pivot).
-- Position range `d` from HC-SR04 ultrasonic distance sensor (D8/D9).
-
-Physical plant states:
-- Ball position `x` (along beam) and velocity `x_dot`.
-- Beam angle `theta` and rate `theta_dot`.
-
-Sign convention (must stay aligned with firmware sign calibration):
-- `x > 0`: chosen positive beam direction.
-- `theta > 0`: tilt that drives ball toward `+x` at small angles.
-- Positive control command should increase `theta`.
-
-Therefore the end-to-end model always includes:
-- `theta = f(phi)` (motor-to-beam mapping).
-- `x = g(d, theta)` (sonar-to-position mapping).
-
-## 2) Parameter Dictionary and YAML Mapping
-
-### 2.1 Core physical symbols
-
-- `m` [kg]: ball mass -> `plant.ball_mass_kg`
-- `R` [m]: ball radius -> `plant.ball_radius_m`
-- `I` [kg*m^2]: ball inertia
-  - from `plant.ball_inertia_kgm2`, or
-  - from `plant.ball_inertia_ratio * m * R^2`, or
-  - from legacy `plant.rolling_factor`
-- `m_e = m + I/R^2` [kg]: effective rolling mass
-- `J` [kg*m^2]: beam+attachments inertia about pivot -> `plant.beam_inertia_kgm2`
-- `M_b` [kg]: beam+attachments mass (excluding ball) -> `plant.beam_mass_kg`
-- `l_b` [m]: beam+attachments COM along beam from pivot -> `plant.beam_com_l_m`
-- `h_b` [m]: beam+attachments COM normal offset from pivot -> `plant.beam_com_h_m`
-- `g` [m/s^2]: gravity -> `plant.gravity_mps2`
-
-### 2.2 Dissipation/friction symbols
-
-- `b_x` [N*s/m]: rolling viscous resistance -> `plant.rolling_damping_ns_per_m`
-  - legacy fallback: `plant.viscous_damping_1ps * m_e`
-- `F_cx` [N]: rolling Coulomb resistance -> `plant.rolling_coulomb_n`
-- `c_theta` [N*m*s]: pivot viscous damping -> `plant.pivot_damping_nms`
-- `tau_c_theta` [N*m]: pivot Coulomb friction -> `plant.pivot_coulomb_nm`
-
-### 2.3 Actuator and map parameters
-
-- `phi_tau` [s]: first-order motor-angle lag -> `actuator.phi_tau_s` (used in nonlinear simulation only)
-- `steps_per_rev`: microsteps per motor revolution -> `actuator.stepper_steps_per_rev` (default 3200 = 200 full-steps × 16 µsteps)
-- `linkage_ratio` [–]: crank-rocker ratio `r_crank / L_arm` -> `actuator.linkage_ratio` (beam angle per motor angle)
-- `K_step_motor` [rad/step]: `2π / steps_per_rev`
-- `K_beam` [rad_beam/step]: `K_step_motor × linkage_ratio` — the inner-loop plant gain
-- `tau_limit` [N*m]: actuator saturation -> `actuator.torque_limit_nm`
-- `f(phi)` configuration -> `calibration.theta_from_phi`
-- `g(d,theta)` configuration -> `calibration.x_from_d_theta`
-
-### 2.4 Which values are measured vs estimated vs identified
-
-Measured now (from hardware):
-- `m`, `R`, `M_b`, `l_b`, geometry notes in `params_measured_v1.yaml`.
-
-Estimated currently:
-- `J` (initial estimate).
-- `h_b` set to `0` placeholder.
-
-To be identified experimentally:
-- `b_x`, `F_cx`, `c_theta`, `tau_c_theta`
-- full calibrated `f(phi)` and `g(d,theta)` maps.
-
-## 3) First-Principles Plant Derivation
-
-Define generalized dissipative terms:
-- `Q_x = -b_x*x_dot - F_cx*sgn(x_dot)`
-- `Q_theta = tau_act - c_theta*theta_dot - tau_c_theta*sgn(theta_dot)`
-
-Define effective mass:
-- `m_e = m + I/R^2`
-
-Coupled equations used in code (`full_coupled_accels`):
-
-`m_e*x_ddot + m_e*R*theta_ddot = m*x*theta_dot^2 + m*g*sin(theta) + Q_x`
-
-`m_e*R*x_ddot + (J + m_e*R^2 + m*x^2)*theta_ddot =`
-`Q_theta - 2*m*x*x_dot*theta_dot + m*g*(x*cos(theta) + R*sin(theta)) + M_b*g*(l_b*cos(theta) + h_b*sin(theta))`
-
-Matrix form:
-
-`[m_e, m_e*R; m_e*R, J + m_e*R^2 + m*x^2] * [x_ddot, theta_ddot]^T = [rhs_x, rhs_theta]^T`
-
-where:
-- `rhs_x = m*x*theta_dot^2 + m*g*sin(theta) + Q_x`
-- `rhs_theta = Q_theta - 2*m*x*x_dot*theta_dot + m*g*(x*cos(theta)+R*sin(theta)) + M_b*g*(l_b*cos(theta)+h_b*sin(theta))`
-
-Small-angle/slow-motion reduction (outer-loop model basis):
-- `x_ddot ~= alpha*g*theta - beta*x_dot`
-- `alpha = m/m_e`
-- `beta = b_x/m_e`
-
-Sign check:
-- `theta > 0` implies `x_ddot > 0` at equilibrium neighborhood.
-
-## 4) Measurement Maps and Inverse Availability
-
-Implemented in `first_principles_core.py`:
-
-### 4.1 Beam map `theta = f(phi)`
-
-Modes:
-- `linear`
-- `poly`
-- `lut`
-
-Optional hysteresis:
-- `hysteresis.enabled = true`
-- branch LUTs: `up`, `down`
-- selected by motion direction.
-
-Inverse `phi = f^{-1}(theta)`:
-- supported for `linear`, `lut`, `poly` (iterative Newton solve).
-
-### 4.2 Sonar map `x = g(d,theta)`
-
-Modes:
-- `linear`
-- `affine_theta`
-- `lut1d`
-- `lut2d` (forward map only for inverse).
-
-Inverse `d = g^{-1}(x,theta)`:
-- supported for `linear`, `affine_theta`, `lut1d`
-- not implemented for `lut2d`.
-
-## 5) Actuator Model
-
-### 5.1 Physical actuator chain
-
-Motor: NEMA 17 (17HS4401-D), 0.40 N·m holding torque, 1.7 A rated.  
-Driver: TMC2209 in STEP/DIR mode, 1/16 microstepping (hardware DIP), 12 V supply.  
-Linkage: Crank-rocker — motor shaft → lower arm (`r_crank = 47.65 mm`) → bolt joint → upper arm → beam pivot (`L_arm = 323.08 mm`).  
-Linkage ratio: `linkage_ratio = r_crank / L_arm = 0.1475`.
-
-### 5.2 Inner-loop plant model (for PID gain design)
-
-The firmware inner loop measures **beam angle** `theta` (AS5600) and outputs
-**motor step rate** `u` (microsteps/s).  The stepper is treated as a pure
-integrator — each microstep rotates the motor by a fixed angle, and the
-motor angle maps to beam angle through the linkage ratio:
-
-```
-θ_beam(s) / u(s) = K_beam / s
-```
-
-where:
-- `K_step_motor = 2π / steps_per_rev = 2π / 3200 ≈ 0.001963 rad_motor/step`
-- `K_beam = K_step_motor × linkage_ratio = 0.001963 × 0.1475 ≈ 0.000289 rad_beam/step`
-
-This is a single integrator, so a PI controller yields a second-order closed loop.
-
-### 5.3 Nonlinear simulation torque model (separate)
-
-The nonlinear time-domain simulation in `first_principles_core.py` still uses
-a first-order motor-angle lag and torque law for numerical integration:
-1. `phi_dot = (phi_cmd - phi) / phi_tau`
-2. `theta_ref = f(phi)`
-3. `tau_act = sat(Kp_theta*(theta_ref - theta) - Kd_theta*theta_dot, ± tau_limit)`
-4. Coupled equations for `x_ddot`, `theta_ddot`.
-
-This captures transient dynamics beyond the integrator approximation and is useful
-for full-system simulation but is **not** the model used for PID gain synthesis.
-
-## 6) Controller Design Derivation (matches `design_cascade_pid.py`)
-
-### 6.1 Outer reduced plant for gain synthesis
-
-Use reduced form:
-- `x_ddot = k*theta` with `k = alpha*g`
-
-### 6.2 Inner gain synthesis (stepper integrator plant)
-
-Inner design treats the stepper + linkage as a pure integrator:
-- Plant: `theta_beam(s) / u(s) = K_beam / s`
-- `K_beam = (2π / steps_per_rev) × linkage_ratio`
-
-PI controller `C(s) = Kp_i + Ki_i/s` on integrator plant gives closed-loop:
-- `s^2 + Kp_i·K_beam·s + Ki_i·K_beam = 0`
-
-Matched to standard second-order `s^2 + 2·ζ·ωn·s + ωn² = 0`:
-
-Code formulas (in `design_cascade_pid.py`):
-- `K_beam = (2π / stepper_steps_per_rev) × linkage_ratio`
-- `Kp_i = max(0.05, 2·ζ_i·ωn_i / K_beam)`
-- `Ki_i = max(0.05, ωn_i² / K_beam)`
-- `Kd_i = 0`
-
-### 6.3 Outer PID pole matching
-
-Target 3rd-order polynomial via damping/zeta and extra pole:
-- `wn_o = 2*pi*outer_bw_hz`
-- `p3 = extra_pole_factor*wn_o`
-- `a2 = 2*zeta_o*wn_o + p3`
-- `a1 = wn_o^2 + 2*zeta_o*wn_o*p3`
-- `a0 = wn_o^2*p3`
-
-For plant `k/s^2` with PID:
-- `s^3 + k*Kd_o*s^2 + k*Kp_o*s + k*Ki_o = 0`
-
-Hence:
-- `Kp_o = a1/k`
-- `Kd_o = a2/k`
-- `Ki_o = a0/k`
-
-### 6.4 Anti-windup/integral limit formulas
-
-Inner:
-- `inner_i_lim = step_rate_limit / |Ki_i|`
-
-Outer:
-- `outer_i_lim = theta_cmd_limit_rad / |Ki_o|`
-
-## 7) Worked Numeric Example (from `params_measured_v1.yaml`)
-
-Parameter file:
-- `model/first_principles/params_measured_v1.yaml`
-
-### 7.1 Given plant parameters
-
-- `m = 0.0028 kg`
-- `R = 0.020035 m`
-- `ball_inertia_ratio = 0.6667` (thin-shell hollow sphere)
-- `J = 0.00439 kg·m²`
-- `M_b = 0.1392 kg`
-- `l_b = 0.145042 m`
-- `b_x = 0.0125 N·s/m`
-- `g = 9.81 m/s²`
-
-### 7.2 Actuator parameters
-
-- `stepper_steps_per_rev = 3200` (200 full-steps × 16 µsteps)
-- `linkage_ratio = 0.1475` (r_crank / L_arm = 47.65 mm / 323.08 mm)
-- `step_rate_limit = 5000 sps`
-- `theta_cmd_limit = 8° = 0.1396 rad`
-
-### 7.3 Derived quantities
-
-Ball dynamics:
-- `I = (2/3)·m·R² = 7.49e-7 kg·m²`
-- `m_e = m + I/R² = 0.00467 kg`
-- `α = m/m_e = 0.6`
-- `β = b_x/m_e = 2.679 s⁻¹`
-- `k = α·g = 5.886 m/s²/rad`
-
-Inner plant gain:
-- `K_step_motor = 2π / 3200 = 0.001963 rad_motor/step`
-- `K_beam = K_step_motor × 0.1475 = 0.000289 rad_beam/step`
-
-### 7.4 Design bandwidth targets
-
-- Inner: `ωn_i = 2π × 4.0 = 25.13 rad/s`, `ζ_i = 0.9`
-- Outer: `ωn_o = 2π × 1.1 = 6.912 rad/s`, `ζ_o = 0.85`, `extra_pole_factor = 4.0`
-
-### 7.5 Gain computation
-
-Inner PI (on integrator plant `K_beam/s`):
-- `Kp_i = 2·ζ_i·ωn_i / K_beam = 2 × 0.9 × 25.13 / 0.000289 = 156,203`
-- `Ki_i = ωn_i² / K_beam = 25.13² / 0.000289 = 2,181,011`
-- `i_lim = step_rate_limit / Ki_i = 5000 / 2,181,011 = ±0.00229 rad·s`
-- `out = ±5000 sps`
-
-Outer PID (on double-integrator plant `k/s²`):
-- `p3 = 4.0 × 6.912 = 27.65`
-- `a2 = 2 × 0.85 × 6.912 + 27.65 = 39.40`
-- `a1 = 6.912² + 2 × 0.85 × 6.912 × 27.65 = 372.38`
-- `a0 = 6.912² × 27.65 = 1321.0`
-- `Kp_o = 372.38 / 5.886 = 63.30`
-- `Kd_o = 39.40 / 5.886 = 6.693`
-- `Ki_o = 1321.0 / 5.886 = 224.4`
-- `out = ±0.1396 rad (±8°)`
-- `i_lim = 0.1396 / 224.4 = ±0.000622 m·s`
-
-### 7.6 Current gain snapshot (`controller_gains.h`)
-
-- Inner:
-  - `kp = 156,203.39`
-  - `ki = 2,181,010.76`
-  - `kd = 0.0`
-  - `out = ±5000 step/s`
-  - `i_lim = ±0.00229`
-- Outer:
-  - `kp = 63.30`
-  - `ki = 224.37`
-  - `kd = 6.693`
-  - `out = ±0.1396 rad`
-  - `i_lim = ±0.000622`
-
-> **Warning:** These are snapshot values and must be regenerated whenever params change.
-> Run `design_cascade_pid.py` then `export_gains.py` to update.
-
-## 8) Reproducible Commands
-
-From repo root:
-
-```bash
-python model/first_principles/derive_nonlinear.py --params model/first_principles/params_measured_v1.yaml
-python model/first_principles/linearize.py --params model/first_principles/params_measured_v1.yaml
-python model/first_principles/design_cascade_pid.py --params model/first_principles/params_measured_v1.yaml
-python model/first_principles/export_gains.py
-```
-
-Generated artifacts:
-- `model/first_principles/open_loop_nonlinear.csv`
-- `model/first_principles/open_loop_nonlinear.png`
-- `model/first_principles/linearized_model.json`
+Its outputs include:
 - `model/first_principles/controller_initial_gains.json`
-- `firmware/include/generated/controller_gains.h` (consumed by firmware controller)
-
-## 9) Assumptions, Limits, and Pending Identification
-
-Current assumptions/defaults in measured file:
-- `beam_com_h_m = 0.0` placeholder
-- damping/friction values are initial placeholders pending identification
-- map defaults are currently linear (`theta_from_phi`, `x_from_d_theta`)
-
-Post-assembly tasks to finalize model quality:
-1. Identify `b_x`, `F_cx`, `c_theta`, `tau_c_theta` from hardware data.
-2. Calibrate `theta = f(phi)` with up/down sweeps (hysteresis/backlash aware).
-3. Calibrate `x = g(d,theta)` using marked positions (and optional theta dependence).
-4. Replace estimated `J` with CAD inertia export or experimental identification.
-
-## 10) Practical Validation Checklist
-
-1. Keep sign convention aligned with `docs/calibration_signs.md`.
-2. Re-run the four commands in Section 8 after each significant calibration update.
-3. Confirm consistency across:
-- `params_measured_v1.yaml`
-- `controller_initial_gains.json`
 - `firmware/include/generated/controller_gains.h`
+
+These outputs should be treated as **archived design artifacts** unless the firmware is explicitly switched back to consume them.
+
+## 8. Relationship Between Track A and Track B
+
+The archived first-principles model remains valuable for:
+- plant interpretation
+- controller-design history
+- thesis/report derivations
+- explaining why the project initially pursued a cascade design
+
+The current runtime diverged from that path because hardware debugging showed that the implemented controller needed to address:
+- sonar geometry and dropouts
+- actuator-frame calibration drift
+- near/far asymmetry
+- center-only neutral bias behavior
+
+The experiment/debugging evidence for that evolution is recorded in:
+- `docs/experiments/2026-03-control-debugging/README.md`
+
+## 9. Files to Keep Synchronized
+
+If the runtime controller changes, update these together:
+- `firmware/src/main.cpp`
+- `firmware/src/control/cascade_controller.cpp`
+- `firmware/include/config.h`
+- `docs/modeling.md`
+- `docs/tuning.md`
+- `.github/copilot-instructions.md`
+- `.github/instructions/firmware.instructions.md`
+- `.github/instructions/analysis.instructions.md`
+
+If the archived design/model changes, update:
+- `model/first_principles/*`
+- `docs/modeling.md` Track A sections
+- `.github/instructions/model.instructions.md`
