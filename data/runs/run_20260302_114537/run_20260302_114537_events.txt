@@ -1,0 +1,180 @@
+[11:45:37] sent: s
+[11:45:39] BALL_BEAM_BOOT
+[11:45:39] HELP,keys
+[11:45:39] STATE,SAFE_DISABLED
+[11:45:39] SENSORS,angle=bad,pos=bad
+[11:45:39] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[11:45:39] AGE,angle_ms=1,pos_ms=1
+[11:45:39] FAULTS,bits=0
+[11:45:39] CAL,zero_calibrated=no,limits_calibrated=no,sign_calibrated=no
+[11:45:39] CAL_STORE,status=loaded
+[11:45:39] TEL,enabled=1
+[11:45:39] FAULT_INFO,bits=0
+[11:45:39] FAULT_INFO,mode=bringup_warning
+[11:45:39] FAULT_INFO,none
+[11:45:45] sent: d
+[11:45:45] OK,cal_reset_saved
+[11:45:47] sent: t
+[11:45:47] OK,telemetry=0
+[11:45:48] sent: d
+[11:45:48] OK,cal_reset_saved
+[11:45:52] sent: e 0
+[11:45:52] OK,driver_disabled
+[11:46:09] sent: a
+[11:46:09] OK,cal_zero_angle_set=330.556640
+[11:46:09] CAL_ZERO,as5600_zero_deg=330.556640,sonar_center_cm=20.000000,zero_calibrated=no
+[11:46:13] sent: p
+[11:46:13] OK,cal_zero_position_set=30.003095
+[11:46:13] CAL_ZERO,as5600_zero_deg=330.556640,sonar_center_cm=30.003095,zero_calibrated=yes
+[11:46:41] sent: l
+[11:46:41] OK,cal_limit_down_set=14.501954
+[11:46:41] CAL_LIMITS,lower_deg=14.501954,upper_deg=5.000000,limits_calibrated=no
+[11:46:55] sent: u
+[11:46:55] OK,cal_limit_up_set=-39.375000
+[11:46:55] OK,as5600_sign=-1
+[11:46:55] CAL_LIMITS,lower_deg=-14.501954,upper_deg=39.375000,limits_calibrated=yes
+[11:47:14] sent: b
+[11:47:14] OK,stepper_sign=-1
+[11:47:19] sent: v
+[11:47:19] OK,cal_saved
+[11:47:22] sent: s
+[11:47:22] STATE,READY
+[11:47:22] SENSORS,angle=ok,pos=ok
+[11:47:22] MEAS,theta_deg=1.6704,x_cm=-0.4969,x_filt_cm=-0.6969
+[11:47:22] AGE,angle_ms=8,pos_ms=9
+[11:47:22] FAULTS,bits=0
+[11:47:22] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[11:47:22] CAL_STORE,status=loaded
+[11:47:22] TEL,enabled=0
+[11:47:22] FAULT_INFO,bits=0
+[11:47:22] FAULT_INFO,mode=bringup_warning
+[11:47:22] FAULT_INFO,none
+[11:53:49] sent: r
+[11:53:49] OK,running
+[11:53:54] sent: k
+[11:53:54] OK,stopped
+[11:54:45] sent: t
+[11:54:46] OK,telemetry=0
+[11:54:48] sent: t
+[11:54:48] OK,telemetry=1
+[11:54:52] sent: r
+[11:54:52] ERR,run_blocked
+[11:55:04] sent: d
+[11:55:05] OK,cal_reset_saved
+[11:55:09] sent: e 0
+[11:55:09] OK,driver_disabled
+[11:55:19] sent: a
+[11:55:19] OK,cal_zero_angle_set=326.865234
+[11:55:19] CAL_ZERO,as5600_zero_deg=326.865234,sonar_center_cm=20.000000,zero_calibrated=no
+[11:55:20] sent: p
+[11:55:21] OK,cal_zero_position_set=30.007587
+[11:55:21] CAL_ZERO,as5600_zero_deg=326.865234,sonar_center_cm=30.007587,zero_calibrated=yes
+[11:55:29] sent: l
+[11:55:29] OK,cal_limit_down_set=16.347656
+[11:55:29] CAL_LIMITS,lower_deg=16.347656,upper_deg=5.000000,limits_calibrated=no
+[11:55:36] sent: u
+[11:55:36] OK,cal_limit_up_set=-36.123046
+[11:55:36] OK,as5600_sign=-1
+[11:55:36] CAL_LIMITS,lower_deg=-16.347656,upper_deg=36.123046,limits_calibrated=yes
+[11:55:47] sent: b
+[11:55:47] ERR,cannot_enter_calib_sign
+[11:55:54] sent: v
+[11:55:54] OK,cal_saved
+[11:55:59] sent: b
+[11:55:59] ERR,cannot_enter_calib_sign
+[11:56:03] sent: d
+[11:56:03] OK,cal_reset_saved
+[11:56:06] sent: t
+[11:56:06] OK,telemetry=0
+[11:56:08] sent: d
+[11:56:08] OK,cal_reset_saved
+[11:56:10] sent: e 0
+[11:56:10] OK,driver_disabled
+[11:56:16] sent: a
+[11:56:16] OK,cal_zero_angle_set=326.865234
+[11:56:16] CAL_ZERO,as5600_zero_deg=326.865234,sonar_center_cm=20.000000,zero_calibrated=no
+[11:56:20] sent: p
+[11:56:20] OK,cal_zero_position_set=30.000028
+[11:56:20] CAL_ZERO,as5600_zero_deg=326.865234,sonar_center_cm=30.000028,zero_calibrated=yes
+[11:56:30] sent: ll
+[11:56:30] ERR,unknown_command,try=h
+[11:56:32] sent: l
+[11:56:32] OK,cal_limit_down_set=16.347656
+[11:56:32] CAL_LIMITS,lower_deg=16.347656,upper_deg=5.000000,limits_calibrated=no
+[11:56:40] sent: u
+[11:56:40] OK,cal_limit_up_set=-30.937500
+[11:56:40] OK,as5600_sign=-1
+[11:56:40] CAL_LIMITS,lower_deg=-16.347656,upper_deg=30.937500,limits_calibrated=yes
+[11:56:56] sent: u
+[11:56:56] OK,cal_limit_up_set=0.000000
+[11:56:56] OK,as5600_sign=-1
+[11:56:56] CAL_LIMITS,lower_deg=-16.347656,upper_deg=0.000000,limits_calibrated=yes
+[11:57:01] sent: b
+[11:57:01] ERR,cannot_enter_calib_sign
+[11:57:12] sent: b
+[11:57:12] ERR,cannot_enter_calib_sign
+[11:57:17] sent: v
+[11:57:17] OK,cal_saved
+[11:57:19] sent: s
+[11:57:19] STATE,FAULT
+[11:57:19] SENSORS,angle=ok,pos=ok
+[11:57:19] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[11:57:19] AGE,angle_ms=10,pos_ms=239
+[11:57:19] FAULTS,bits=0
+[11:57:19] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=no
+[11:57:19] CAL_STORE,status=loaded
+[11:57:19] TEL,enabled=0
+[11:57:19] FAULT_INFO,bits=0
+[11:57:19] FAULT_INFO,mode=bringup_warning
+[11:57:19] FAULT_INFO,none
+[11:57:21] sent: r
+[11:57:22] ERR,run_blocked
+[11:57:22] BLOCK,sign
+[11:57:42] sent: e 0
+[11:57:42] OK,driver_disabled
+[12:01:50] sent: f
+[12:01:50] OK,fault_cleared
+[12:01:50] FAULT_INFO,bits=0
+[12:01:50] FAULT_INFO,mode=bringup_warning
+[12:01:50] FAULT_INFO,none
+[12:02:03] sent: d
+[12:02:03] OK,cal_reset_saved
+[12:02:08] sent: a
+[12:02:08] OK,cal_zero_angle_set=326.865234
+[12:02:08] CAL_ZERO,as5600_zero_deg=326.865234,sonar_center_cm=20.000000,zero_calibrated=no
+[12:02:10] sent: p
+[12:02:10] OK,cal_zero_position_set=30.000204
+[12:02:10] CAL_ZERO,as5600_zero_deg=326.865234,sonar_center_cm=30.000204,zero_calibrated=yes
+[12:02:21] sent: l
+[12:02:21] OK,cal_limit_down_set=14.765625
+[12:02:21] CAL_LIMITS,lower_deg=14.765625,upper_deg=5.000000,limits_calibrated=no
+[12:02:33] sent: u
+[12:02:33] OK,cal_limit_up_set=-25.312500
+[12:02:33] OK,as5600_sign=-1
+[12:02:33] CAL_LIMITS,lower_deg=-14.765625,upper_deg=25.312500,limits_calibrated=yes
+[12:02:45] sent: b
+[12:02:45] OK,stepper_sign=-1
+[12:02:52] sent: v
+[12:02:52] OK,cal_saved
+[12:02:55] sent: s
+[12:02:55] STATE,READY
+[12:02:55] SENSORS,angle=ok,pos=ok
+[12:02:55] MEAS,theta_deg=-0.4395,x_cm=0.0002,x_filt_cm=0.0002
+[12:02:55] AGE,angle_ms=6,pos_ms=27
+[12:02:55] FAULTS,bits=0
+[12:02:55] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[12:02:55] CAL_STORE,status=loaded
+[12:02:55] TEL,enabled=0
+[12:02:55] FAULT_INFO,bits=0
+[12:02:55] FAULT_INFO,mode=bringup_warning
+[12:02:55] FAULT_INFO,none
+[12:03:01] sent: t
+[12:03:01] OK,telemetry=1
+[12:03:05] sent: r
+[12:03:05] OK,running
+[12:03:09] sent: k
+[12:03:09] OK,stopped
+[12:03:20] sent: t
+[12:03:20] OK,telemetry=0
+[12:08:50] sent: k
+[12:08:50] sent: e 0

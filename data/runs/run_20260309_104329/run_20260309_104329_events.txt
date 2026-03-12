@@ -1,0 +1,58 @@
+[10:43:29] sent: s
+[10:43:31] BALL_BEAM_BOOT
+[10:43:31] HELP,keys
+[10:43:31] STATE,SAFE_DISABLED
+[10:43:31] SENSORS,angle=bad,pos=bad
+[10:43:31] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[10:43:31] AGE,angle_ms=1,pos_ms=1
+[10:43:31] FAULTS,bits=0
+[10:43:31] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[10:43:31] CAL_STORE,status=loaded
+[10:43:31] TEL,enabled=1
+[10:43:31] FAULT_INFO,bits=0
+[10:43:31] FAULT_INFO,mode=bringup_warning
+[10:43:31] FAULT_INFO,none
+[10:43:35] sent: t
+[10:43:35] OK,telemetry=0
+[10:43:40] sent: s
+[10:43:40] STATE,SAFE_DISABLED
+[10:43:40] SENSORS,angle=ok,pos=ok
+[10:43:40] MEAS,theta_deg=0.5273,x_cm=18.2863,x_filt_cm=18.2863
+[10:43:40] AGE,angle_ms=14,pos_ms=25
+[10:43:40] FAULTS,bits=0
+[10:43:40] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[10:43:40] CAL_STORE,status=loaded
+[10:43:40] TEL,enabled=0
+[10:43:40] FAULT_INFO,bits=0
+[10:43:40] FAULT_INFO,mode=bringup_warning
+[10:43:40] FAULT_INFO,none
+[10:43:46] sent: sonar diag
+[10:43:47] SONAR_DIAG,has_sample=1,fresh=1,timeout=0,age_ms=18,raw_cm=11.7306,filt_cm=11.7306,valid_streak=386,timeout_cnt=0,jump_reject_cnt=0
+[10:43:59] sent: as5600 diag
+[10:43:59] AS5600_DIAG,1,330.4688,0.5273,0,76.92
+[10:44:37] sent: a
+[10:44:37] OK,cal_zero_angle_set=330.468750
+[10:44:37] CAL_ZERO,as5600_zero_deg=330.468750,sonar_center_cm=30.016897,zero_calibrated=yes
+[10:45:12] sent: p
+[10:45:12] OK,cal_zero_position_set=12.005002
+[10:45:12] CAL_ZERO,as5600_zero_deg=330.468750,sonar_center_cm=12.005002,zero_calibrated=yes
+[10:45:28] sent: l
+[10:45:28] OK,cal_limit_down_set=-14.677735
+[10:45:28] OK,as5600_sign=1
+[10:45:28] CAL_LIMITS,lower_deg=14.677735,upper_deg=29.531250,limits_calibrated=yes
+[10:45:37] sent: u
+[10:45:38] OK,cal_limit_up_set=-37.968750
+[10:45:38] OK,as5600_sign=-1
+[10:45:38] CAL_LIMITS,lower_deg=-14.677735,upper_deg=37.968750,limits_calibrated=yes
+[10:45:49] sent: e 1
+[10:45:49] OK,driver_enabled
+[10:45:54] sent: b
+[10:46:02] OK,stepper_sign=-1,delta=0.0000
+[10:46:09] sent: g
+[10:46:09] ERR,unknown_command,try=h
+[10:46:13] sent: g
+[10:46:13] ERR,unknown_command,try=h
+[10:46:16] sent: g
+[10:46:16] ERR,unknown_command,try=h
+[10:50:26] sent: k
+[10:50:26] sent: e 0

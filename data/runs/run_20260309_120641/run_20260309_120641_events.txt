@@ -1,0 +1,22 @@
+[12:06:41] sent: s
+[12:06:43] ALL_BEAM_BOOT
+[12:06:43] ELP,kes
+[12:06:43] ����������������SENSORS,ngle=badpb
+[12:06:43] xc=0.00,xfc0000AGE,angle_ms=0,pos_ms=0
+[12:06:43] FAULTSbt=0
+[12:06:43] _clbde,imt_aibae=sgn_calibrated=yes
+[12:06:43] CAL_STORE,status=loaded
+[12:06:43] SONAR_CFG,s=-1,m=o,u=1TEL,enale=ATIFiAImodebrnua
+[12:06:43] HOST_WARN,unknown_firmware_protocol: device output does not look like BallBeam (BALL_BEAM_BOOT/TEL/STATE) or AS5600_CHECK. You may have flashed a different Arduino sketch. First lines: ALL_BEAM_BOOT | ELP,kes | ����������������SENSORS,ngle=badpb
+[12:06:49] sent: t
+[12:06:57] sent: s
+[12:07:00] sent: d
+[12:07:10] sent: a
+[12:07:13] sent: p
+[12:07:22] sent: l
+[12:07:30] sent: u
+[12:07:34] sent: e 1
+[12:07:38] sent: b
+[12:07:42] sent: v
+[12:07:46] sent: k
+[12:07:46] sent: e 0

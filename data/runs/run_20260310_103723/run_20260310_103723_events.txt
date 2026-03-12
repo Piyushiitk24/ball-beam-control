@@ -1,0 +1,89 @@
+[10:37:23] sent: s
+[10:37:25] BALL_BEAM_BOOT
+[10:37:25] HELP,keys
+[10:37:25] STATE,SAFE_DISABLED
+[10:37:25] SENSORS,angle=bad,pos=bad
+[10:37:25] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[10:37:25] AGE,angle_ms=0,pos_ms=0
+[10:37:25] FAULTS,bits=0
+[10:37:25] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[10:37:25] CAL_STORE,status=loaded
+[10:37:25] SONAR_CFG,s=-1,m=o,u=1
+[10:37:25] ACT_CFG,t=26.3140,s=m,c=a
+[10:37:25] TEL,enabled=1
+[10:37:25] FAULT_INFO,bits=0
+[10:37:25] FAULT_INFO,mode=bringup_warning
+[10:37:25] FAULT_INFO,none
+[10:37:28] sent: t
+[10:37:28] OK,telemetry=0
+[10:37:30] sent: s
+[10:37:30] STATE,SAFE_DISABLED
+[10:37:30] SENSORS,angle=ok,pos=bad
+[10:37:30] MEAS,theta_deg=-3.9204,x_cm=0.0000,x_filt_cm=0.0000
+[10:37:30] AGE,angle_ms=12,pos_ms=4282
+[10:37:30] FAULTS,bits=1
+[10:37:30] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[10:37:30] CAL_STORE,status=loaded
+[10:37:30] SONAR_CFG,s=-1,m=o,u=1
+[10:37:30] ACT_CFG,t=26.3140,s=m,c=a
+[10:37:30] TEL,enabled=0
+[10:37:30] FAULT_INFO,bits=1
+[10:37:30] FAULT_INFO,mode=bringup_warning
+[10:37:30] FAULT_INFO,sonar_timeout=1
+[10:37:32] sent: d
+[10:37:32] OK,cal_reset_saved
+[10:37:43] sent: l
+[10:37:43] OK,cal_limit_down_set=0.000000
+[10:37:43] CAL_LIMITS,lower_deg=-10.942383,upper_deg=10.942383,limits_calibrated=no
+[10:37:55] sent: u
+[10:37:57] ERR,sonar_not_ready
+[10:37:57] SONAR_DIAG,fresh=0,age_ms=3362,raw_cm=4.4590,filt_cm=4.7746,jump_reject_cnt=55
+[10:38:05] sent: u
+[10:38:06] OK,cal_limit_up_set=41.923828
+[10:38:06] OK,as5600_sign=-1,sonar_sign=-1
+[10:38:06] INFO,limits_sonar_ok
+[10:38:06] CAL_LIMITS,lower_deg=-20.961914,upper_deg=20.961914,limits_calibrated=yes
+[10:38:24] sent: e 1
+[10:38:24] OK,driver_enabled
+[10:38:30] sent: b
+[10:38:32] OK,stepper_sign=-1,delta=-22.6758
+[10:38:36] sent: v
+[10:38:36] OK,cal_saved
+[10:38:39] sent: s
+[10:38:39] STATE,READY
+[10:38:39] SENSORS,angle=ok,pos=ok
+[10:38:39] MEAS,theta_deg=-9.7998,x_cm=2.6566,x_filt_cm=2.3113
+[10:38:39] AGE,angle_ms=7,pos_ms=39
+[10:38:39] FAULTS,bits=0
+[10:38:39] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[10:38:39] CAL_STORE,status=loaded
+[10:38:39] SONAR_CFG,s=-1,m=o,u=1
+[10:38:39] ACT_CFG,t=20.9619,s=m,c=a
+[10:38:39] TEL,enabled=0
+[10:38:39] FAULT_INFO,bits=0
+[10:38:39] FAULT_INFO,mode=bringup_warning
+[10:38:39] FAULT_INFO,none
+[10:38:43] sent: q c
+[10:38:43] SET,77915,0.0000,4.4331,-4.4331
+[10:38:47] sent: r
+[10:38:47] OK,running
+[10:38:53] sent: q f
+[10:38:53] SET,87724,-4.4331,4.4331,-4.4331
+[10:39:02] sent: t
+[10:39:02] OK,telemetry=0
+[10:39:05] sent: t
+[10:39:05] OK,telemetry=1
+[10:39:08] sent: q f
+[10:39:08] SET,102649,-4.4331,4.4331,-4.4331
+[10:39:12] sent: q n
+[10:39:12] SET,107003,4.4331,4.4331,-4.4331
+[10:39:19] sent: k
+[10:39:19] OK,stopped
+[10:39:21] sent: e 0
+[10:39:21] OK,driver_disabled
+[10:39:24] sent: t
+[10:39:24] OK,telemetry=0
+[11:27:03] HOST_ERR,send_failed,write failed: [Errno 6] Device not configured
+[11:27:05] HOST_ERR,send_failed,write failed: [Errno 6] Device not configured
+[11:27:09] HOST_ERR,send_failed,write failed: [Errno 6] Device not configured
+[11:27:09] HOST_ERR,send_failed,write failed: [Errno 6] Device not configured

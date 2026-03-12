@@ -1,0 +1,63 @@
+[12:39:29] sent: s
+[12:39:31] BALL_BEAM_BOOT
+[12:39:31] HELP,keys
+[12:39:31] STATE,SAFE_DISABLED
+[12:39:31] SENSORS,angle=bad,pos=bad
+[12:39:31] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[12:39:31] AGE,angle_ms=1,pos_ms=1
+[12:39:31] FAULTS,bits=0
+[12:39:31] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[12:39:31] CAL_STORE,status=loaded
+[12:39:31] TEL,enabled=1
+[12:39:31] FAULT_INFO,bits=0
+[12:39:31] FAULT_INFO,mode=bringup_warning
+[12:39:31] FAULT_INFO,none
+[12:39:38] sent: t
+[12:39:38] OK,telemetry=0
+[12:39:48] sent: d
+[12:39:48] OK,cal_reset_saved
+[12:40:00] sent: a
+[12:40:00] OK,cal_zero_angle_set=330.644531
+[12:40:00] CAL_ZERO,as5600_zero_deg=330.644531,sonar_center_cm=20.000000,zero_calibrated=no
+[12:40:02] sent: p
+[12:40:03] OK,cal_zero_position_set=30.000000
+[12:40:03] CAL_ZERO,as5600_zero_deg=330.644531,sonar_center_cm=30.000000,zero_calibrated=yes
+[12:40:08] sent: l
+[12:40:08] OK,cal_limit_down_set=10.722657
+[12:40:08] CAL_LIMITS,lower_deg=10.722657,upper_deg=3.000000,limits_calibrated=no
+[12:40:15] sent: u
+[12:40:15] OK,cal_limit_up_set=-32.783203
+[12:40:15] OK,as5600_sign=-1
+[12:40:15] CAL_LIMITS,lower_deg=-10.722657,upper_deg=32.783203,limits_calibrated=yes
+[12:40:25] sent: t
+[12:40:25] OK,telemetry=1
+[12:40:27] sent: b
+[12:40:30] OK,stepper_sign=-1,delta=-21.6430
+[12:40:32] sent: t
+[12:40:32] OK,telemetry=0
+[12:40:39] sent: v
+[12:40:39] OK,cal_saved
+[12:40:42] sent: s
+[12:40:42] STATE,READY
+[12:40:42] SENSORS,angle=ok,pos=ok
+[12:40:42] MEAS,theta_deg=0.3516,x_cm=-1.0000,x_filt_cm=-0.8160
+[12:40:42] AGE,angle_ms=11,pos_ms=45
+[12:40:42] FAULTS,bits=0
+[12:40:42] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[12:40:42] CAL_STORE,status=loaded
+[12:40:42] TEL,enabled=0
+[12:40:42] FAULT_INFO,bits=0
+[12:40:42] FAULT_INFO,mode=bringup_warning
+[12:40:42] FAULT_INFO,none
+[12:40:46] sent: r
+[12:40:46] OK,running
+[12:41:12] sent: t
+[12:41:12] OK,telemetry=0
+[12:41:14] sent: t
+[12:41:14] OK,telemetry=1
+[12:41:23] sent: t
+[12:41:23] OK,telemetry=0
+[12:41:25] sent: k
+[12:41:25] OK,stopped
+[12:41:27] sent: k
+[12:41:27] sent: e 0

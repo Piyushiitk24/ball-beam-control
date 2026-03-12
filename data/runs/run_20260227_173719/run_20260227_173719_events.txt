@@ -1,0 +1,20 @@
+[17:37:19] sent: s
+[17:37:21] BALL_BEAM_BOOT
+[17:37:21] HELP,keys
+[17:37:21] MENU,bringup
+[17:37:21] MENU,state=SAFE_DISABLED,zero=yes,limits=yes,sign=yes,angle_ok=no,sonar_ok=no
+[17:37:21] MENU,sonar=flat_target_then_sonar_diag
+[17:37:21] STATE,SAFE_DISABLED
+[17:37:21] SENSORS,angle=bad,pos=bad
+[17:37:21] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[17:37:21] AGE,angle_ms=9,pos_ms=9
+[17:37:21] FAULTS,bits=0
+[17:37:21] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[17:37:21] CAL_STORE,status=loaded
+[17:37:21] TEL,enabled=1
+[17:37:21] FAULT_INFO,bits=0
+[17:37:21] FAULT_INFO,mode=bringup_warning
+[17:37:21] FAULT_INFO,none
+[17:37:21] GUIDE,step=angle_sensor,do=check_AS5600_then_s
+[17:37:27] sent: k
+[17:37:27] sent: e 0

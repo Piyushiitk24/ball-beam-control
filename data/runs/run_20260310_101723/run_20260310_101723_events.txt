@@ -1,0 +1,114 @@
+[10:17:23] sent: s
+[10:17:25] BALL_BEAM_BOOT
+[10:17:25] HELP,keys
+[10:17:25] STATE,SAFE_DISABLED
+[10:17:25] SENSORS,angle=bad,pos=bad
+[10:17:25] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[10:17:25] AGE,angle_ms=0,pos_ms=0
+[10:17:25] FAULTS,bits=0
+[10:17:25] CAL,zero_calibrated=no,limits_calibrated=yes,sign_calibrated=yes
+[10:17:25] CAL_STORE,status=loaded
+[10:17:25] SONAR_CFG,s=-1,m=o,u=1
+[10:17:25] ACT_CFG,t=23.8248,s=m,c=m
+[10:17:25] TEL,enabled=1
+[10:17:25] FAULT_INFO,bits=0
+[10:17:25] FAULT_INFO,mode=bringup_warning
+[10:17:25] FAULT_INFO,none
+[10:17:30] sent: t
+[10:17:31] OK,telemetry=0
+[10:17:41] sent: s
+[10:17:41] STATE,SAFE_DISABLED
+[10:17:41] SENSORS,angle=ok,pos=bad
+[10:17:41] MEAS,theta_deg=-5.2670,x_cm=1.2156,x_filt_cm=1.1819
+[10:17:41] AGE,angle_ms=8,pos_ms=797
+[10:17:41] FAULTS,bits=0
+[10:17:41] CAL,zero_calibrated=no,limits_calibrated=yes,sign_calibrated=yes
+[10:17:41] CAL_STORE,status=loaded
+[10:17:41] SONAR_CFG,s=-1,m=o,u=1
+[10:17:41] ACT_CFG,t=23.8248,s=m,c=m
+[10:17:41] TEL,enabled=0
+[10:17:41] FAULT_INFO,bits=0
+[10:17:41] FAULT_INFO,mode=bringup_warning
+[10:17:41] FAULT_INFO,none
+[10:18:35] sent: d
+[10:18:35] OK,cal_reset_saved
+[10:18:59] sent: l
+[10:18:59] OK,cal_limit_down_set=0.000000
+[10:18:59] CAL_LIMITS,lower_deg=-7.514648,upper_deg=7.514648,limits_calibrated=no
+[10:19:17] sent: u
+[10:19:18] ERR,sonar_not_ready
+[10:19:18] SONAR_DIAG,fresh=0,age_ms=7648,raw_cm=4.5962,filt_cm=4.7614,jump_reject_cnt=50
+[10:19:29] sent: e 1
+[10:19:29] OK,driver_enabled
+[10:19:33] sent: b
+[10:19:33] ERR,capture_l_u_first
+[10:19:41] sent: e 0
+[10:19:41] OK,driver_disabled
+[10:19:43] sent: s
+[10:19:43] STATE,SAFE_DISABLED
+[10:19:43] SENSORS,angle=ok,pos=ok
+[10:19:43] MEAS,theta_deg=-24.1260,x_cm=6.7602,x_filt_cm=6.7602
+[10:19:43] AGE,angle_ms=15,pos_ms=21
+[10:19:43] FAULTS,bits=0
+[10:19:43] CAL,zero_calibrated=no,limits_calibrated=no,sign_calibrated=no
+[10:19:43] CAL_STORE,status=loaded
+[10:19:43] SONAR_CFG,s=-1,m=o,u=1
+[10:19:43] ACT_CFG,t=7.5146,s=m,c=a
+[10:19:43] TEL,enabled=0
+[10:19:43] FAULT_INFO,bits=0
+[10:19:43] FAULT_INFO,mode=bringup_warning
+[10:19:43] FAULT_INFO,none
+[10:19:48] sent: d
+[10:19:48] OK,cal_reset_saved
+[10:20:13] sent: l
+[10:20:14] OK,cal_limit_down_set=0.000000
+[10:20:14] CAL_LIMITS,lower_deg=-7.470703,upper_deg=7.470703,limits_calibrated=no
+[10:20:25] sent: u
+[10:20:27] ERR,sonar_not_ready
+[10:20:27] SONAR_DIAG,fresh=0,age_ms=4953,raw_cm=4.4247,filt_cm=4.6478,jump_reject_cnt=146
+[10:20:33] sent: u
+[10:20:35] ERR,sonar_not_ready
+[10:20:35] SONAR_DIAG,fresh=0,age_ms=12815,raw_cm=4.4247,filt_cm=4.6478,jump_reject_cnt=146
+[10:20:44] sent: u
+[10:20:45] OK,cal_limit_up_set=50.625000
+[10:20:45] OK,as5600_sign=-1,sonar_sign=-1
+[10:20:45] INFO,limits_sonar_ok
+[10:20:45] CAL_LIMITS,lower_deg=-25.312500,upper_deg=25.312500,limits_calibrated=yes
+[10:21:01] sent: e 1
+[10:21:01] OK,driver_enabled
+[10:21:03] sent: b
+[10:21:06] OK,stepper_sign=-1,delta=-22.3242
+[10:21:17] sent: v
+[10:21:17] OK,cal_saved
+[10:21:21] sent: s
+[10:21:21] STATE,READY
+[10:21:21] SENSORS,angle=ok,pos=ok
+[10:21:21] MEAS,theta_deg=-8.5163,x_cm=4.6323,x_filt_cm=4.6323
+[10:21:21] AGE,angle_ms=13,pos_ms=26
+[10:21:21] FAULTS,bits=0
+[10:21:21] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[10:21:21] CAL_STORE,status=loaded
+[10:21:21] SONAR_CFG,s=-1,m=o,u=1
+[10:21:21] ACT_CFG,t=25.3125,s=m,c=a
+[10:21:21] TEL,enabled=0
+[10:21:21] FAULT_INFO,bits=0
+[10:21:21] FAULT_INFO,mode=bringup_warning
+[10:21:21] FAULT_INFO,none
+[10:21:47] sent: q c
+[10:21:47] SET,263313,0.0000,4.1682,-4.1682
+[10:22:05] sent: r
+[10:22:05] OK,running
+[10:22:27] sent: q
+[10:22:28] SET,303639,0.0000,4.1682,-4.1682
+[10:22:31] sent: q c
+[10:22:31] SET,307095,0.0000,4.1682,-4.1682
+[10:22:44] sent: q n
+[10:22:44] SET,320275,4.1682,4.1682,-4.1682
+[10:22:50] sent: q f
+[10:22:50] SET,325955,-4.1682,4.1682,-4.1682
+[10:22:53] sent: e 0
+[10:22:53] OK,driver_disabled
+[10:22:55] sent: k
+[10:22:55] OK,stopped
+[10:23:01] sent: k
+[10:23:01] sent: e 0

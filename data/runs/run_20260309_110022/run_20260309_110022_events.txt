@@ -1,0 +1,64 @@
+[11:00:22] sent: s
+[11:00:24] BALL_BEAM_BOOT
+[11:00:24] HELP,keys
+[11:00:24] STATE,SAFE_DISABLED
+[11:00:24] SENSORS,angle=bad,pos=bad
+[11:00:24] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[11:00:24] AGE,angle_ms=1,pos_ms=1
+[11:00:24] FAULTS,bits=0
+[11:00:24] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[11:00:24] CAL_STORE,status=loaded
+[11:00:24] TEL,enabled=1
+[11:00:24] FAULT_INFO,bits=0
+[11:00:24] FAULT_INFO,mode=bringup_warning
+[11:00:24] FAULT_INFO,none
+[11:00:30] sent: t
+[11:00:30] OK,telemetry=0
+[11:00:37] sent: a
+[11:00:37] OK,cal_zero_angle_set=334.160156
+[11:00:37] CAL_ZERO,as5600_zero_deg=334.160156,sonar_center_cm=13.925801,zero_calibrated=yes
+[11:00:41] sent: p
+[11:00:42] OK,cal_zero_position_set=13.994402
+[11:00:42] CAL_ZERO,as5600_zero_deg=334.160156,sonar_center_cm=13.994402,zero_calibrated=yes
+[11:00:49] sent: l
+[11:00:49] OK,cal_limit_down_set=-10.810547
+[11:00:49] OK,as5600_sign=1
+[11:00:49] CAL_LIMITS,lower_deg=10.810547,upper_deg=25.839843,limits_calibrated=yes
+[11:00:52] sent: u
+[11:00:52] OK,cal_limit_up_set=10.810547
+[11:00:52] ERR,limit_span_too_small
+[11:00:57] sent: l
+[11:00:57] OK,cal_limit_down_set=10.810547
+[11:00:57] CAL_LIMITS,lower_deg=10.810547,upper_deg=10.810547,limits_calibrated=no
+[11:01:03] sent: u
+[11:01:03] OK,cal_limit_up_set=-43.681640
+[11:01:03] OK,as5600_sign=-1
+[11:01:03] CAL_LIMITS,lower_deg=-10.810547,upper_deg=43.681640,limits_calibrated=yes
+[11:01:10] sent: e 1
+[11:01:10] OK,driver_enabled
+[11:01:16] sent: b
+[11:01:18] OK,stepper_sign=-1,delta=22.7637
+[11:01:18] INFO,sonar_near=1
+[11:01:25] sent: g
+[11:01:25] SIGN_CAL_RESULT,61265,22.76367,-1,-1,25.2448,25.3945,1
+[11:01:25] INFO,signs_applied_runtime
+[11:01:28] sent: v
+[11:01:28] OK,cal_saved
+[11:01:34] sent: s
+[11:01:34] STATE,READY
+[11:01:34] SENSORS,angle=ok,pos=ok
+[11:01:34] MEAS,theta_deg=0.2637,x_cm=11.6620,x_filt_cm=11.6620
+[11:01:34] AGE,angle_ms=16,pos_ms=27
+[11:01:34] FAULTS,bits=0
+[11:01:34] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[11:01:34] CAL_STORE,status=loaded
+[11:01:34] TEL,enabled=0
+[11:01:34] FAULT_INFO,bits=0
+[11:01:34] FAULT_INFO,mode=bringup_warning
+[11:01:34] FAULT_INFO,none
+[11:01:38] sent: e 1
+[11:01:38] OK,driver_enabled
+[11:01:41] sent: r
+[11:01:41] OK,running
+[11:01:59] sent: k
+[11:01:59] sent: e 0

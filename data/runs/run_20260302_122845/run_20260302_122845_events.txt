@@ -1,0 +1,59 @@
+[12:28:45] sent: s
+[12:28:47] BALL_BEAM_BOOT
+[12:28:47] HELP,keys
+[12:28:47] STATE,SAFE_DISABLED
+[12:28:47] SENSORS,angle=bad,pos=bad
+[12:28:47] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[12:28:47] AGE,angle_ms=1,pos_ms=1
+[12:28:47] FAULTS,bits=0
+[12:28:47] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[12:28:47] CAL_STORE,status=loaded
+[12:28:47] TEL,enabled=1
+[12:28:47] FAULT_INFO,bits=0
+[12:28:47] FAULT_INFO,mode=bringup_warning
+[12:28:47] FAULT_INFO,none
+[12:28:52] sent: t
+[12:28:52] OK,telemetry=0
+[12:29:04] sent: d
+[12:29:05] OK,cal_reset_saved
+[12:29:31] sent: a
+[12:29:32] OK,cal_zero_angle_set=333.984375
+[12:29:32] CAL_ZERO,as5600_zero_deg=333.984375,sonar_center_cm=20.000000,zero_calibrated=no
+[12:29:35] sent: p
+[12:29:35] OK,cal_zero_position_set=30.231349
+[12:29:35] CAL_ZERO,as5600_zero_deg=333.984375,sonar_center_cm=30.231349,zero_calibrated=yes
+[12:29:49] sent: l
+[12:29:49] OK,cal_limit_down_set=11.513672
+[12:29:49] CAL_LIMITS,lower_deg=11.513672,upper_deg=3.000000,limits_calibrated=no
+[12:29:56] sent: u
+[12:29:56] OK,cal_limit_up_set=-34.541015
+[12:29:56] OK,as5600_sign=-1
+[12:29:56] CAL_LIMITS,lower_deg=-11.513672,upper_deg=34.541015,limits_calibrated=yes
+[12:30:10] sent: t
+[12:30:10] OK,telemetry=1
+[12:30:11] sent: b
+[12:30:14] OK,stepper_sign=-1,delta=-17.2395
+[12:30:15] sent: t
+[12:30:15] OK,telemetry=0
+[12:30:20] sent: v
+[12:30:20] OK,cal_saved
+[12:30:26] sent: s
+[12:30:26] STATE,READY
+[12:30:26] SENSORS,angle=ok,pos=ok
+[12:30:26] MEAS,theta_deg=6.5918,x_cm=-0.7687,x_filt_cm=-0.5618
+[12:30:26] AGE,angle_ms=16,pos_ms=28
+[12:30:26] FAULTS,bits=0
+[12:30:26] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[12:30:26] CAL_STORE,status=loaded
+[12:30:26] TEL,enabled=0
+[12:30:26] FAULT_INFO,bits=0
+[12:30:26] FAULT_INFO,mode=bringup_warning
+[12:30:26] FAULT_INFO,none
+[12:30:33] sent: t
+[12:30:33] OK,telemetry=1
+[12:30:35] sent: r
+[12:30:35] OK,running
+[12:30:39] sent: k
+[12:30:39] OK,stopped
+[12:30:45] sent: k
+[12:30:45] sent: e 0

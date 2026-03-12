@@ -1,0 +1,58 @@
+[11:05:11] sent: s
+[11:05:13] BALL_BEAM_BOOT
+[11:05:13] HELP,keys
+[11:05:13] STATE,SAFE_DISABLED
+[11:05:13] SENSORS,angle=bad,pos=bad
+[11:05:13] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[11:05:13] AGE,angle_ms=1,pos_ms=1
+[11:05:13] FAULTS,bits=0
+[11:05:13] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[11:05:13] CAL_STORE,status=loaded
+[11:05:13] TEL,enabled=1
+[11:05:13] FAULT_INFO,bits=0
+[11:05:13] FAULT_INFO,mode=bringup_warning
+[11:05:13] FAULT_INFO,none
+[11:05:19] sent: t
+[11:05:19] OK,telemetry=0
+[11:05:38] sent: a
+[11:05:38] OK,cal_zero_angle_set=326.777343
+[11:05:38] CAL_ZERO,as5600_zero_deg=326.777343,sonar_center_cm=13.994402,zero_calibrated=yes
+[11:05:40] sent: p
+[11:05:40] OK,cal_zero_position_set=15.372861
+[11:05:40] CAL_ZERO,as5600_zero_deg=326.777343,sonar_center_cm=15.372861,zero_calibrated=yes
+[11:05:46] sent: l
+[11:05:46] OK,cal_limit_down_set=-14.941407
+[11:05:46] OK,as5600_sign=1
+[11:05:46] CAL_LIMITS,lower_deg=14.941407,upper_deg=33.222656,limits_calibrated=yes
+[11:05:54] sent: u
+[11:05:54] OK,cal_limit_up_set=-25.400390
+[11:05:54] OK,as5600_sign=-1
+[11:05:54] CAL_LIMITS,lower_deg=-14.941407,upper_deg=25.400390,limits_calibrated=yes
+[11:06:04] sent: e 1
+[11:06:04] OK,driver_enabled
+[11:06:07] sent: b
+[11:06:10] OK,stepper_sign=-1,delta=22.6758
+[11:06:10] INFO,sonar_near=1
+[11:06:22] sent: g
+[11:06:23] SIGN_CAL_RESULT,70341,22.67578,-1,-1,12.6224,14.3263,1
+[11:06:23] INFO,signs_applied_runtime
+[11:06:26] sent: v
+[11:06:26] OK,cal_saved
+[11:06:29] sent: s
+[11:06:29] STATE,READY
+[11:06:29] SENSORS,angle=ok,pos=ok
+[11:06:29] MEAS,theta_deg=0.2637,x_cm=-2.4075,x_filt_cm=-2.4076
+[11:06:29] AGE,angle_ms=5,pos_ms=37
+[11:06:29] FAULTS,bits=0
+[11:06:29] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[11:06:29] CAL_STORE,status=loaded
+[11:06:29] TEL,enabled=0
+[11:06:29] FAULT_INFO,bits=0
+[11:06:29] FAULT_INFO,mode=bringup_warning
+[11:06:29] FAULT_INFO,none
+[11:06:33] sent: e 1
+[11:06:33] OK,driver_enabled
+[11:06:36] sent: r
+[11:06:36] OK,running
+[11:06:56] sent: k
+[11:06:56] sent: e 0

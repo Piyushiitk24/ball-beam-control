@@ -1,0 +1,95 @@
+[10:16:15] sent: s
+[10:16:17] BALL_BEAM_BOOT
+[10:16:17] HELP,keys
+[10:16:17] STATE,SAFE_DISABLED
+[10:16:17] SENSORS,angle=bad,pos=bad,m=n
+[10:16:17] MEAS,theta_deg=0.0000,x_filt_cm=0.0000
+[10:16:17] AGE,angle_ms=0,pos_ms=0,miss=0
+[10:16:17] FAULTS,bits=0
+[10:16:17] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[10:16:17] SONAR_CFG,s=-1,u=1
+[10:16:17] ACT_CFG,t=29.7465,v=0
+[10:16:17] SEARCH,p=idle
+[10:16:17] TEL,enabled=1
+[10:16:17] FAULT_INFO,bits=0
+[10:16:17] FAULT_INFO,none
+[10:16:20] sent: t
+[10:16:20] OK,telemetry=0
+[10:16:21] sent: s
+[10:16:22] STATE,SAFE_DISABLED
+[10:16:22] SENSORS,angle=ok,pos=ok,m=f
+[10:16:22] MEAS,theta_deg=-11.2106,x_filt_cm=1.3890
+[10:16:22] AGE,angle_ms=16,pos_ms=11,miss=0
+[10:16:22] FAULTS,bits=0
+[10:16:22] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[10:16:22] SONAR_CFG,s=-1,u=1
+[10:16:22] ACT_CFG,t=29.7465,v=0
+[10:16:22] SEARCH,p=idle
+[10:16:22] TEL,enabled=0
+[10:16:22] FAULT_INFO,bits=0
+[10:16:22] FAULT_INFO,none
+[10:16:23] sent: d
+[10:16:23] OK,cal_reset_saved
+[10:16:30] sent: l
+[10:16:31] OK,cal_limit_down_set=0.000000
+[10:16:31] CAL_LIMITS,lower_deg=-7.514648,upper_deg=7.514648,limits_calibrated=no
+[10:16:39] sent: u
+[10:16:41] ERR,sonar_not_ready
+[10:16:50] sent: u
+[10:16:52] ERR,sonar_not_ready
+[10:16:59] sent: u
+[10:17:01] ERR,sonar_not_ready
+[10:17:05] sent: u
+[10:17:06] ERR,sonar_not_ready
+[10:17:18] sent: u
+[10:17:20] ERR,sonar_not_ready
+[10:17:25] sent: u
+[10:17:27] ERR,sonar_not_ready
+[10:17:35] sent: u
+[10:17:36] OK,cal_limit_up_set=55.810546
+[10:17:36] OK,as5600_sign=-1,sonar_sign=-1
+[10:17:36] INFO,limits_ok
+[10:17:36] CAL_LIMITS,lower_deg=-27.905273,upper_deg=27.905273,limits_calibrated=yes
+[10:18:10] sent: p
+[10:18:10] OK,cal_zero_position_set=14.062973
+[10:18:10] CAL_ZERO,sonar_center_cm=14.062973,zero_calibrated=yes
+[10:18:13] sent: e 1
+[10:18:13] OK,driver_enabled
+[10:18:15] sent: b
+[10:18:18] OK,stepper_sign=-1,delta=-22.8516
+[10:18:25] sent: v
+[10:18:25] OK,cal_saved
+[10:18:28] sent: s
+[10:18:28] STATE,READY
+[10:18:28] SENSORS,angle=ok,pos=ok,m=f
+[10:18:28] MEAS,theta_deg=-10.7666,x_filt_cm=-0.9466
+[10:18:28] AGE,angle_ms=7,pos_ms=12,miss=0
+[10:18:28] FAULTS,bits=0
+[10:18:28] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[10:18:28] SONAR_CFG,s=-1,u=1
+[10:18:28] ACT_CFG,t=27.9053,v=0
+[10:18:28] SEARCH,p=idle
+[10:18:28] TEL,enabled=0
+[10:18:28] FAULT_INFO,bits=0
+[10:18:28] FAULT_INFO,none
+[10:18:31] sent: q c
+[10:18:31] SET,134940,0.0000,4.1503,-5.7776
+[10:18:33] sent: e 1
+[10:18:34] OK,driver_enabled
+[10:18:35] sent: r
+[10:18:35] OK,searching
+[10:18:39] sent: t
+[10:18:40] OK,telemetry=0
+[10:18:41] sent: t
+[10:18:41] OK,telemetry=1
+[10:18:43] ERR,center_search_timeout
+[10:18:49] sent: q f
+[10:18:49] SET,152782,-5.7776,4.1503,-5.7776
+[10:18:54] sent: q n
+[10:18:54] SET,157615,4.1503,4.1503,-5.7776
+[10:18:57] sent: e 0
+[10:18:57] OK,driver_disabled
+[10:19:00] sent: k
+[10:19:00] OK,stopped
+[10:19:03] sent: k
+[10:19:03] sent: e 0

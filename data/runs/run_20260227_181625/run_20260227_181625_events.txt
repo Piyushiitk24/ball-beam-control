@@ -1,0 +1,121 @@
+[18:16:25] sent: s
+[18:16:27] BALL_BEAM_BOOT
+[18:16:27] HELP,keys
+[18:16:27] MENU,bringup
+[18:16:27] MENU,state=SAFE_DISABLED,zero=yes,limits=yes,sign=yes,angle_ok=no,sonar_ok=no
+[18:16:27] MENU,sonar=flat_target_then_sonar_diag
+[18:16:27] STATE,SAFE_DISABLED
+[18:16:27] SENSORS,angle=bad,pos=bad
+[18:16:27] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[18:16:27] AGE,angle_ms=9,pos_ms=9
+[18:16:27] FAULTS,bits=0
+[18:16:27] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[18:16:27] CAL_STORE,status=loaded
+[18:16:27] TEL,enabled=1
+[18:16:27] FAULT_INFO,bits=0
+[18:16:27] FAULT_INFO,mode=bringup_warning
+[18:16:27] FAULT_INFO,none
+[18:16:27] GUIDE,step=angle_sensor,do=check_AS5600_then_s
+[18:16:32] sent: k
+[18:16:32] OK,stopped
+[18:16:32] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:16:36] sent: e 0
+[18:16:37] OK,driver_disabled
+[18:16:42] sent: z
+[18:16:42] CAL_ZERO,as5600_zero_deg=304.848632,sonar_center_cm=12.465011,zero_calibrated=yes
+[18:16:42] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:16:44] sent: m
+[18:16:44] CAL_LIMITS,lower_deg=-19.467773,upper_deg=71.586914,limits_calibrated=yes
+[18:16:44] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:16:45] sent: a
+[18:16:46] OK,cal_zero_angle_set=343.617187
+[18:16:46] CAL_ZERO,as5600_zero_deg=343.617187,sonar_center_cm=12.465011,zero_calibrated=yes
+[18:16:46] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:16:51] sent: {
+[18:16:51] ERR,unknown_command,try=h
+[18:16:53] sent: [
+[18:16:53] OK,cal_limit_down_set=-33.785156
+[18:16:53] INFO,limits_normalized_from_down_up
+[18:16:53] CAL_LIMITS,lower_deg=-33.785156,upper_deg=71.586914,limits_calibrated=yes
+[18:16:53] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:17:00] sent: [
+[18:17:00] OK,cal_limit_down_set=60.345703
+[18:17:00] INFO,limits_normalized_from_down_up
+[18:17:00] CAL_LIMITS,lower_deg=60.345703,upper_deg=71.586914,limits_calibrated=yes
+[18:17:00] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:17:07] sent: ]
+[18:17:07] OK,cal_limit_up_set=-4.277313
+[18:17:07] INFO,limits_normalized_from_down_up
+[18:17:07] CAL_LIMITS,lower_deg=-4.277313,upper_deg=60.345703,limits_calibrated=yes
+[18:17:07] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:17:14] sent: [
+[18:17:15] OK,cal_limit_down_set=-90.738281
+[18:17:15] INFO,limits_normalized_from_down_up
+[18:17:15] CAL_LIMITS,lower_deg=-90.738281,upper_deg=60.345703,limits_calibrated=yes
+[18:17:15] GUIDE,step=save,do=run_v
+[18:17:17] sent: ]
+[18:17:17] OK,cal_limit_up_set=-32.818359
+[18:17:17] INFO,limits_normalized_from_down_up
+[18:17:17] CAL_LIMITS,lower_deg=-90.738281,upper_deg=-32.818359,limits_calibrated=yes
+[18:17:17] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:17:21] sent: [
+[18:17:21] OK,cal_limit_down_set=-91.001953
+[18:17:21] INFO,limits_normalized_from_down_up
+[18:17:21] CAL_LIMITS,lower_deg=-91.001953,upper_deg=-32.818359,limits_calibrated=yes
+[18:17:21] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:17:23] sent: ]
+[18:17:23] OK,cal_limit_up_set=-0.869659
+[18:17:23] INFO,limits_normalized_from_down_up
+[18:17:23] CAL_LIMITS,lower_deg=-91.001953,upper_deg=-0.869659,limits_calibrated=yes
+[18:17:23] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:17:30] sent: m
+[18:17:30] CAL_LIMITS,lower_deg=-91.001953,upper_deg=-0.869659,limits_calibrated=yes
+[18:17:30] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:17:31] sent: s
+[18:17:31] STATE,SAFE_DISABLED
+[18:17:31] SENSORS,angle=ok,pos=bad
+[18:17:31] MEAS,theta_deg=29.0642,x_cm=-1.1803,x_filt_cm=-0.7433
+[18:17:31] AGE,angle_ms=5,pos_ms=5019
+[18:17:31] FAULTS,bits=5
+[18:17:31] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[18:17:31] CAL_STORE,status=loaded
+[18:17:31] TEL,enabled=1
+[18:17:31] FAULT_INFO,bits=5
+[18:17:31] FAULT_INFO,mode=bringup_warning
+[18:17:31] FAULT_INFO,sonar_timeout=1
+[18:17:31] FAULT_INFO,angle_oob=1
+[18:17:31] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:17:32] sent: v
+[18:17:32] OK,cal_saved
+[18:17:32] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:17:33] sent: s
+[18:17:33] STATE,SAFE_DISABLED
+[18:17:33] SENSORS,angle=ok,pos=bad
+[18:17:33] MEAS,theta_deg=37.1426,x_cm=-1.1803,x_filt_cm=-0.7433
+[18:17:33] AGE,angle_ms=6,pos_ms=6932
+[18:17:33] FAULTS,bits=5
+[18:17:33] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[18:17:33] CAL_STORE,status=loaded
+[18:17:33] TEL,enabled=1
+[18:17:33] FAULT_INFO,bits=5
+[18:17:33] FAULT_INFO,mode=bringup_warning
+[18:17:33] FAULT_INFO,sonar_timeout=1
+[18:17:33] FAULT_INFO,angle_oob=1
+[18:17:33] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:17:59] sent: as5600 diag
+[18:17:59] AS5600_DIAG,1,306.4746,-62.4082,0,111.11
+[18:17:59] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:18:02] sent: as5600 diag
+[18:18:02] AS5600_DIAG,1,53.5254,-33.8530,0,58.82
+[18:18:02] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:18:05] sent: as5600 diag
+[18:18:05] AS5600_DIAG,1,53.5254,2.7295,0,200.00
+[18:18:05] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:18:06] sent: as5600 diag
+[18:18:06] AS5600_DIAG,1,326.5137,-59.0991,0,58.82
+[18:18:06] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:18:08] sent: as5600 diag
+[18:18:08] AS5600_DIAG,1,53.5254,9.7856,0,66.67
+[18:18:08] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:18:55] sent: k
+[18:18:55] sent: e 0

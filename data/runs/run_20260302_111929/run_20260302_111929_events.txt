@@ -1,0 +1,153 @@
+[11:19:29] sent: s
+[11:19:31] BALL_BEAM_BOOT
+[11:19:31] HELP,keys
+[11:19:31] STATE,SAFE_DISABLED
+[11:19:31] SENSORS,angle=bad,pos=bad
+[11:19:31] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[11:19:31] AGE,angle_ms=1,pos_ms=1
+[11:19:31] FAULTS,bits=0
+[11:19:31] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[11:19:31] CAL_STORE,status=loaded
+[11:19:31] TEL,enabled=1
+[11:19:31] FAULT_INFO,bits=0
+[11:19:31] FAULT_INFO,mode=bringup_warning
+[11:19:31] FAULT_INFO,none
+[11:19:35] sent: d
+[11:19:36] OK,cal_reset_saved
+[11:19:39] sent: s
+[11:19:39] STATE,SAFE_DISABLED
+[11:19:39] SENSORS,angle=ok,pos=ok
+[11:19:39] MEAS,theta_deg=-69.3457,x_cm=-11.0000,x_filt_cm=-10.9808
+[11:19:39] AGE,angle_ms=6,pos_ms=10
+[11:19:39] FAULTS,bits=0
+[11:19:39] CAL,zero_calibrated=no,limits_calibrated=no,sign_calibrated=no
+[11:19:39] CAL_STORE,status=loaded
+[11:19:39] TEL,enabled=1
+[11:19:39] FAULT_INFO,bits=0
+[11:19:39] FAULT_INFO,mode=bringup_warning
+[11:19:39] FAULT_INFO,none
+[11:19:41] sent: e 1
+[11:19:41] OK,driver_enabled
+[11:19:47] sent: b
+[11:19:48] INFO,sonar_near=1
+[11:19:56] sent: b
+[11:19:57] INFO,sonar_near=1
+[11:20:06] sent: g
+[11:20:06] SIGN_CAL_RESULT,35652,13.53516,1,1,30.8616,30.1895,-1
+[11:20:06] INFO,signs_applied_runtime
+[11:20:08] sent: a
+[11:20:08] OK,cal_zero_angle_set=321.152343
+[11:20:08] CAL_ZERO,as5600_zero_deg=321.152343,sonar_center_cm=20.000000,zero_calibrated=no
+[11:20:26] sent: e 0
+[11:20:27] OK,driver_disabled
+[11:20:32] sent: a
+[11:20:32] OK,cal_zero_angle_set=328.798828
+[11:20:32] CAL_ZERO,as5600_zero_deg=328.798828,sonar_center_cm=20.000000,zero_calibrated=no
+[11:20:34] sent: a
+[11:20:34] OK,cal_zero_angle_set=328.798828
+[11:20:34] CAL_ZERO,as5600_zero_deg=328.798828,sonar_center_cm=20.000000,zero_calibrated=no
+[11:20:48] sent: p
+[11:20:49] OK,cal_zero_position_set=30.003025
+[11:20:49] CAL_ZERO,as5600_zero_deg=328.798828,sonar_center_cm=30.003025,zero_calibrated=yes
+[11:21:01] sent: t
+[11:21:01] OK,telemetry=0
+[11:21:03] sent: j 300
+[11:21:03] OK,jog_started
+[11:21:09] sent: l
+[11:21:09] OK,cal_limit_down_set=33.662109
+[11:21:09] CAL_LIMITS,lower_deg=33.662109,upper_deg=8.000000,limits_calibrated=no
+[11:21:16] sent: j -600
+[11:21:16] OK,jog_started
+[11:21:23] sent: u
+[11:21:24] OK,cal_limit_up_set=-33.398437
+[11:21:24] CAL_LIMITS,lower_deg=-33.398437,upper_deg=33.662109,limits_calibrated=yes
+[11:21:27] sent: j 300
+[11:21:27] OK,jog_started
+[11:21:34] sent: v
+[11:21:34] OK,cal_saved
+[11:21:39] sent: r
+[11:21:39] OK,running
+[11:21:41] sent: k
+[11:21:41] OK,stopped
+[11:40:43] 
+[11:40:44] AL_BEAM_BOOT
+[11:40:44] HELP,keys
+[11:40:44] STATE,SAFE_DISABLED
+[11:40:44] SENSORS,angle=a,o=bd
+[11:40:44] ,ht_eg0000xcm0000xfltcm000
+[11:40:44] ,ngem=1ps_s1FUTSbis0
+[11:40:44] Lzr_albatd=esliiscairte=e,ig_albae=ys
+[11:40:44] _SOR,tasodd
+[11:40:44] bed1
+[11:40:44] TINObt=0
+[11:40:44] UTIFOmd=binu_arigFUTINO,oe
+[11:40:44] ERR,unknown_command,try=h
+[11:40:44] ER,uknw_cman,tyh
+[11:40:44] EL34,SF_DSALD,0000301.50,.00,.0,
+[11:40:44] Runnw_cmadrh
+[11:40:44] E49,AE_IAD0.000.03,4.540.00,E,4,SAF_DISALD00,0.04,4.00,.00,
+[11:40:44] EL649,SFDBLED,0.030215,.0000,0.00,0
+[11:40:44] E,749,SAFE_SABLE,0.0,-.40.0000
+[11:40:44] Knge_rc1
+[11:40:44] nknoncomm,try=h
+[11:40:44] EL89,AE_IALE.000250000000000,0
+[11:40:44] E,AE_DSABLED,0.003,0.03,.000.000,.0,0
+[11:40:45] EL,14ADIABLED,.03.30,.,00000,000,0
+[11:40:45] E,9,SAEIALED0.03,0030,0.0000,0.0000,0.00,0
+[11:40:45] E,14,SAFE_ISALED.300030,.0000000RR,nknwncandtry=EL,3ADIBE,.0,0.0,0000,.0EL1SF_DAL0.00303000000,0.00,
+[11:40:45] E4,SAFEDISABLD,0.000.003000000000,0EL14,SAFE_DISABLED,0.0030,0.0030,0.0000,0.0000,0.00,0
+[11:40:45] EL,70,AE_IAL00300.00,.00,.00,.0K,calmit_downe=14.50
+[11:40:45] I,loer_de=14.1539,pe_d=33.6209it_abrte=Kc_ret_saved
+[11:40:45] ,FDL,.00,0.03,.0,0.000,0.00,0
+[11:40:46] EL,1984F_DSBLED,-10.000,1.,.0000,.00,.,0EL,SAFE_DISABLED,-10.0000,-10.0000,0.0000,0.0000,0.0,0
+[11:40:46] EL,184,SAF_DISE,-10.500,000,0.0000,0.0,0Ekn_commandtry=RR,unknown_cmmd,try=
+[11:40:46] E,28,SAFE_DIABLE0000,-10.856.000000EL,2384,SAFE_DISABLED,-10.0-10.00.000,0.00000.00L24,AF_DISB,10.0000,00010.000,
+[11:40:46] E284SF_DISABLED,-10.0000,-10.0001,0.0000,0.0000,0.00,0E,64,SAEDISBLE,000-0000,0.00
+[11:40:46] RRknoa,ry=K,lemtry0
+[11:41:46] 
+[11:41:47] 
+[11:41:48] ALL_BEAM_BOOT
+[11:41:48] HELP,keys
+[11:41:48] STATE,SAFE_DISABLED
+[11:41:48] SENSORS,angle=dpos=ad
+[11:41:48] ,thta_deg0.0000,_c=0xfm=0.000
+[11:41:48] em=1psm=
+[11:41:48] LSbis0
+[11:41:48] Lzroclbrtdno,imt_clbatdno,sign_calibrated=o
+[11:41:48] _TREsats=oeEald1
+[11:41:48] F,it=FAL_IF,md=riupwanig
+[11:41:48] ,nneER,nkown_command,try=h
+[11:41:48] EL39,AE_IABE,-0.00,1.12,-705800000000
+[11:41:48] oncmadtr=EL,4,FDSBED-001.19-7.580.0000,EL549,SAFE_ISABLED,0000,-158,00,.0
+[11:41:48] E,6ESALED,1000-0000,-7.080.0000,0.00,0
+[11:41:49] L-11.0000-1,-7.05080.00
+[11:41:49] nle_sc1
+[11:41:49] knomty=h
+[11:41:49] EL89,AEDIALD-1.00,1.56,00,.000.00
+[11:41:49] EL99SF_IABE,1.00,0060.0000,.0,
+[11:41:49] EL109SFEDIALD,1.000-00060.0000,00,
+[11:41:49] RRknowncoaKal_li_e=-08
+[11:41:49] eg=17581up=0000,i_alibraedo
+[11:41:49] 149,AFE_DIBLED,-10.000,00.000,0.000,0.00,
+[11:41:49] EL14,AFE_DISABLED,-10.0000,-10.0480,0.0000,0.0000,0.00,0EL139SFEDSALE,100000,.00,.00,00,OKdriver_dsabledE14,AE_ISBE,-000,.00,.00000,.00EL,1549SAF_DSBLD-10-0.000,0.0000,00000000
+[11:41:49] E,1649SAF_DSABLED-1.0010.880,0.0000,0.0,.00,E,170FE_DISABLE,1.00,0048,0.000.0000,.00,
+[11:41:50] EL,85,AFE_DIABLED,-11.0000,-10.7267,0.0000,0.0000,0.00,0E,SF_DIB,-0.,-085,000,.00,.0R,non_ommand,ty=Ekn_comad,yh
+[11:41:50] EL20,SFDIBLE,-1.50010.05,00,.0,E,5AFE_DSABLED-10.000,19,.000.0000,.0,
+[11:41:50] E,20,AE_AD-0.0000,-10.0043,0.0000,0.0000,0.00,0EL,230,SF_IBD-1.0-10.207.00,00.0,0
+[11:41:50] RRnknown_command,tr=hO,ry=0
+[11:41:56] 
+[11:41:57] ALL_BEAM_BOOT
+[11:41:57] HELP,keys
+[11:41:57] STATE,SAFE_DISABLED
+[11:41:57] SENSORS,angle=bad,pos=bad
+[11:41:57] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[11:41:57] AGE,angle_ms=1,pos_ms=1
+[11:41:57] FAULTS,bits=0
+[11:41:57] CAL,zero_calibrated=no,limits_calibrated=no,sign_calibrated=no
+[11:41:57] CAL_STORE,status=loaded
+[11:41:57] TEL,enabled=1
+[11:41:57] FAULT_INFO,bits=0
+[11:41:57] FAULT_INFO,mode=bringup_warning
+[11:41:57] FAULT_INFO,none
+[11:44:47] sent: k
+[11:44:47] sent: e 0

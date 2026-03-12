@@ -199,26 +199,27 @@ If any of these are missing, redo calibration before running.
 
 ### 7. Plot the Results After the Run
 
-If you want to plot a specific run, use its telemetry file directly:
+If you want to plot a specific run, pass its run folder:
 
 ```bash
 cd /Users/piyush/code/ball-beam-control
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python analysis/plot_run.py --input data/runs/run_20260312_101232_telemetry.csv
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python analysis/plot_run.py --input data/runs/run_20260312_101232
 ```
 
 Then open the PNG:
 
 ```bash
-open data/runs/run_20260312_101232_telemetry.png
+open data/runs/run_20260312_101232/plots/run_20260312_101232_summary.png
 ```
 
 If you want to plot the most recent run automatically:
 
 ```bash
 cd /Users/piyush/code/ball-beam-control
-LATEST="$(ls -t data/runs/run_*_telemetry.csv | head -n 1)"
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python analysis/plot_run.py --input "$LATEST"
-open "${LATEST%.csv}.png"
+LATEST_RUN="$(find data/runs -maxdepth 1 -type d -name 'run_*' | sort | tail -n 1)"
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python analysis/plot_run.py --input "$LATEST_RUN"
+RUN_STEM="$(basename "$LATEST_RUN")"
+open "$LATEST_RUN/plots/${RUN_STEM}_summary.png"
 ```
 
 If you want the curated recent-runs report used for debugging history and thesis/report work:
@@ -232,6 +233,7 @@ That writes:
 - `docs/experiments/2026-03-control-debugging/generated/recent_runs_summary.csv`
 - `docs/experiments/2026-03-control-debugging/generated/recent_runs_summary.md`
 - `docs/experiments/2026-03-control-debugging/generated/plots/`
+- `docs/experiments/2026-03-control-debugging/generated/metrics/`
 
 ### 8. Daily Use After Calibration Is Already Saved
 
@@ -466,24 +468,35 @@ Quit the logger:
 
 ## 5 — Telemetry & Analysis
 
+Each logger session now writes to its own run folder:
+
+```text
+data/runs/run_<timestamp>/
+  run_<timestamp>_raw.log
+  run_<timestamp>_events.txt
+  run_<timestamp>_telemetry.csv
+  run_<timestamp>_metrics.csv
+  plots/run_<timestamp>_summary.png
+```
+
 Telemetry line format (10 Hz whenever telemetry is enabled):
 ```
-TEL,<t_ms>,<state>,<x_cm>,<x_filt_cm>,<theta_deg>,<theta_cmd_deg>,<u_step_rate>,<fault_flags>,<x_ref_cm>,<sonar_age_ms>,<sonar_valid>,<sonar_miss_count>,<theta_cmd_unclamped_deg>,<theta_cmd_clamped_deg>,<theta_cmd_saturated>,<act_deg_abs>,<trim_deg>,<search_phase>
+TEL,<t_ms>,<state>,<x_cm>,<x_filt_cm>,<theta_deg>,<theta_cmd_deg>,<u_step_rate>,<fault_flags>,<x_ref_cm>,<sonar_age_ms>,<sonar_valid>,<sonar_miss_count>,<theta_cmd_unclamped_deg>,<theta_cmd_clamped_deg>,<theta_cmd_saturated>,<act_deg_abs>,<trim_deg>,<search_phase>,<x_linear_cm>,<x_linear_filt_cm>,<x_ctrl_cm>,<x_ctrl_filt_cm>,<x_feedback_cm>,<feedback_blend>
 ```
 
 ```bash
 cd /Users/piyush/code/ball-beam-control
 
 # Plot latest run
-LATEST="$(ls -t data/runs/run_*_telemetry.csv | head -n 1)"
-./.venv/bin/python analysis/plot_run.py --input "$LATEST"
+LATEST_RUN="$(find data/runs -maxdepth 1 -type d -name 'run_*' | sort | tail -n 1)"
+./.venv/bin/python analysis/plot_run.py --input "$LATEST_RUN"
 
 # Compare two runs
 ./.venv/bin/python analysis/compare_runs.py \
-    --inputs data/runs/<run_a>_telemetry.csv data/runs/<run_b>_telemetry.csv
+    --inputs data/runs/<run_a> data/runs/<run_b>
 ```
 
-`analysis/plot_run.py` auto-loads the sibling `*_events.txt` file when present, overlays setpoint/disturbance markers, and writes a sibling `*_metrics.csv`.
+`analysis/plot_run.py` accepts either a run folder or a telemetry CSV, auto-loads the run `*_events.txt` file when present, and writes the summary PNG into the run `plots/` folder plus metrics into the run folder.
 
 ### Standard Logged Runs
 
@@ -654,7 +667,7 @@ Median-of-3 raw reads → slew-limit → EMA.
 | `firmware/src/control/cascade_controller.cpp` | Single position PID + motion generator |
 | `analysis/serial_logger.py` | Primary host logger |
 | `analysis/switch_firmware_main.py` | Firmware variant switcher |
-| `analysis/plot_run.py` | 4-panel telemetry plot + metrics export |
+| `analysis/plot_run.py` | Standard 3-panel response plot + diagnostic mode + metrics export |
 | `analysis/compare_runs.py` | Side-by-side run comparison |
 | `docs/calibration_signs.md` | Sign convention reference |
 
@@ -715,8 +728,8 @@ Capture and analyze a run:
 
 ```bash
 cd /Users/piyush/code/ball-beam-control
-LATEST="$(ls -t data/runs/run_*_telemetry.csv | head -n 1)"
-./.venv/bin/python analysis/plot_run.py --input "$LATEST"
+LATEST_RUN="$(find data/runs -maxdepth 1 -type d -name 'run_*' | sort | tail -n 1)"
+./.venv/bin/python analysis/plot_run.py --input "$LATEST_RUN"
 ```
 
 ## Modeling and Analysis

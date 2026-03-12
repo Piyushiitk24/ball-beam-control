@@ -49,7 +49,7 @@ pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
 ./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1
 
 # Single-run plot
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python analysis/plot_run.py --input data/runs/<run>_telemetry.csv
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python analysis/plot_run.py --input data/runs/<run>
 
 # Curated recent-runs report
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python analysis/report_recent_runs.py
@@ -69,7 +69,7 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python analysis/report_recent_r
 | --- | --- |
 | Canonical math / controller description | `docs/modeling.md` |
 | Debugging chronology and representative runs | `docs/experiments/2026-03-control-debugging/README.md` |
-| Generated run index / plots | `docs/experiments/2026-03-control-debugging/generated/` |
+| Generated run index / plots / metrics | `docs/experiments/2026-03-control-debugging/generated/` |
 | Current firmware tuning knobs | `firmware/include/config.h` |
 | Calibration workflow / commands | `README.md`, `commands.md` |
 | Current telemetry plotting | `analysis/plot_run.py` |

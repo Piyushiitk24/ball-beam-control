@@ -1,0 +1,134 @@
+[18:32:13] sent: s
+[18:32:15] BALL_BEAM_BOOT
+[18:32:15] HELP,keys
+[18:32:15] MENU,bringup
+[18:32:15] MENU,state=SAFE_DISABLED,zero=yes,limits=yes,sign=yes,angle_ok=no,sonar_ok=no
+[18:32:15] MENU,sonar=flat_target_then_sonar_diag
+[18:32:15] STATE,SAFE_DISABLED
+[18:32:15] SENSORS,angle=bad,pos=bad
+[18:32:15] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[18:32:15] AGE,angle_ms=9,pos_ms=9
+[18:32:15] FAULTS,bits=0
+[18:32:15] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[18:32:15] CAL_STORE,status=loaded
+[18:32:15] TEL,enabled=1
+[18:32:15] FAULT_INFO,bits=0
+[18:32:15] FAULT_INFO,mode=bringup_warning
+[18:32:15] FAULT_INFO,none
+[18:32:15] GUIDE,step=angle_sensor,do=check_AS5600_then_s
+[18:32:19] sent: k
+[18:32:19] OK,stopped
+[18:32:19] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:32:22] sent: e 0
+[18:32:22] OK,driver_disabled
+[18:32:42] sent: sonar diag
+[18:32:42] SONAR_DIAG,has_sample=1,fresh=1,timeout=0,age_ms=9,raw_cm=12.0736,filt_cm=12.0626,valid_streak=308,timeout_cnt=369,jump_reject_cnt=0
+[18:32:42] GUIDE,step=run,do=run_r
+[18:32:57] sent: sonar diagsonar diagsonar diag
+[18:32:57] ERR,usage:sonar
+[18:33:38] sent: p
+[18:33:38] OK,cal_zero_position_set=13.356331
+[18:33:38] CAL_ZERO,as5600_zero_deg=343.617187,sonar_center_cm=13.356331,zero_calibrated=yes
+[18:33:38] GUIDE,step=save,do=run_v
+[18:33:49] sent: a
+[18:33:50] OK,cal_zero_angle_set=290.566406
+[18:33:50] CAL_ZERO,as5600_zero_deg=290.566406,sonar_center_cm=13.356331,zero_calibrated=yes
+[18:33:50] GUIDE,step=save,do=run_v
+[18:33:57] sent: l
+[18:33:57] OK,cal_limit_down_set=-140.888671
+[18:33:57] INFO,limits_normalized_from_down_up
+[18:33:57] CAL_LIMITS,lower_deg=-140.888671,upper_deg=-0.869659,limits_calibrated=yes
+[18:33:57] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:34:02] sent: l
+[18:34:02] OK,cal_limit_down_set=1.020203
+[18:34:02] ERR,limit_span_too_small
+[18:34:02] sent: l
+[18:34:03] sent: l
+[18:34:03] OK,cal_limit_down_set=-41.880157
+[18:34:03] CAL_LIMITS,lower_deg=-41.880157,upper_deg=-0.869659,limits_calibrated=no
+[18:34:03] GUIDE,step=up_limit,do=move_UP_then_]
+[18:34:03] OK,cal_limit_down_set=-140.800781
+[18:34:03] CAL_LIMITS,lower_deg=-140.800781,upper_deg=-0.869659,limits_calibrated=no
+[18:34:03] GUIDE,step=up_limit,do=move_UP_then_]
+[18:34:04] sent: l
+[18:34:04] OK,cal_limit_down_set=-140.800781
+[18:34:04] CAL_LIMITS,lower_deg=-140.800781,upper_deg=-0.869659,limits_calibrated=no
+[18:34:04] GUIDE,step=up_limit,do=move_UP_then_]
+[18:34:04] sent: l
+[18:34:04] OK,cal_limit_down_set=-138.918167
+[18:34:04] CAL_LIMITS,lower_deg=-138.918167,upper_deg=-0.869659,limits_calibrated=no
+[18:34:04] GUIDE,step=up_limit,do=move_UP_then_]
+[18:34:04] sent: l
+[18:34:05] OK,cal_limit_down_set=-140.800781
+[18:34:05] CAL_LIMITS,lower_deg=-140.800781,upper_deg=-0.869659,limits_calibrated=no
+[18:34:05] GUIDE,step=up_limit,do=move_UP_then_]
+[18:34:05] sent: l
+[18:34:05] OK,cal_limit_down_set=-1.235474
+[18:34:05] CAL_LIMITS,lower_deg=-1.235474,upper_deg=-0.869659,limits_calibrated=no
+[18:34:05] GUIDE,step=up_limit,do=move_UP_then_]
+[18:34:05] sent: l
+[18:34:05] OK,cal_limit_down_set=-140.800781
+[18:34:05] CAL_LIMITS,lower_deg=-140.800781,upper_deg=-0.869659,limits_calibrated=no
+[18:34:05] GUIDE,step=up_limit,do=move_UP_then_]
+[18:34:05] sent: l
+[18:34:06] OK,cal_limit_down_set=-140.800781
+[18:34:06] CAL_LIMITS,lower_deg=-140.800781,upper_deg=-0.869659,limits_calibrated=no
+[18:34:06] GUIDE,step=up_limit,do=move_UP_then_]
+[18:34:06] sent: l
+[18:34:06] OK,cal_limit_down_set=-138.111328
+[18:34:06] CAL_LIMITS,lower_deg=-138.111328,upper_deg=-0.869659,limits_calibrated=no
+[18:34:06] GUIDE,step=up_limit,do=move_UP_then_]
+[18:34:06] sent: l
+[18:34:06] OK,cal_limit_down_set=1.933594
+[18:34:06] CAL_LIMITS,lower_deg=1.933594,upper_deg=-0.869659,limits_calibrated=no
+[18:34:06] GUIDE,step=up_limit,do=move_UP_then_]
+[18:34:08] sent: u
+[18:34:09] OK,cal_limit_up_set=-82.020141
+[18:34:09] INFO,limits_normalized_from_down_up
+[18:34:09] CAL_LIMITS,lower_deg=-82.020141,upper_deg=1.933594,limits_calibrated=yes
+[18:34:09] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:34:09] sent: u
+[18:34:09] OK,cal_limit_up_set=-57.261779
+[18:34:09] INFO,limits_normalized_from_down_up
+[18:34:09] CAL_LIMITS,lower_deg=-82.020141,upper_deg=-57.261779,limits_calibrated=yes
+[18:34:09] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:34:09] sent: u
+[18:34:10] OK,cal_limit_up_set=-56.601562
+[18:34:10] INFO,limits_normalized_from_down_up
+[18:34:10] CAL_LIMITS,lower_deg=-82.020141,upper_deg=-56.601562,limits_calibrated=yes
+[18:34:10] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:34:10] sent: u
+[18:34:10] OK,cal_limit_up_set=-58.526367
+[18:34:10] INFO,limits_normalized_from_down_up
+[18:34:10] CAL_LIMITS,lower_deg=-82.020141,upper_deg=-58.526367,limits_calibrated=yes
+[18:34:10] GUIDE,step=sonar_sensor,do=flat_target_then_sonar_diag
+[18:34:10] sent: u
+[18:34:10] OK,cal_limit_up_set=-80.110137
+[18:34:10] ERR,limit_span_too_small
+[18:34:15] sent: m
+[18:34:15] CAL_LIMITS,lower_deg=-82.020141,upper_deg=-80.110137,limits_calibrated=no
+[18:34:15] GUIDE,step=down_limit,do=move_DOWN_then_[
+[18:34:28] sent: s
+[18:34:28] STATE,SAFE_DISABLED
+[18:34:28] SENSORS,angle=ok,pos=bad
+[18:34:28] MEAS,theta_deg=-119.4433,x_cm=-0.1508,x_filt_cm=-0.5132
+[18:34:28] AGE,angle_ms=14,pos_ms=1655
+[18:34:28] FAULTS,bits=1
+[18:34:28] CAL,zero_calibrated=yes,limits_calibrated=no,sign_calibrated=yes
+[18:34:28] CAL_STORE,status=loaded
+[18:34:28] TEL,enabled=1
+[18:34:28] FAULT_INFO,bits=1
+[18:34:28] FAULT_INFO,mode=bringup_warning
+[18:34:28] FAULT_INFO,sonar_timeout=1
+[18:34:28] GUIDE,step=down_limit,do=move_DOWN_then_[
+[18:34:35] sent: v
+[18:34:35] OK,cal_saved
+[18:34:35] GUIDE,step=down_limit,do=move_DOWN_then_[
+[18:34:37] sent: f
+[18:34:37] ERR,no_fault_state
+[18:34:37] FAULT_INFO,bits=0
+[18:34:37] FAULT_INFO,mode=bringup_warning
+[18:34:37] FAULT_INFO,none
+[18:34:37] GUIDE,step=down_limit,do=move_DOWN_then_[
+[18:34:40] sent: e 1
+[18:34:40] OK,driver_disabled

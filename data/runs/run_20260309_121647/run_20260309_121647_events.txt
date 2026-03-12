@@ -1,0 +1,34 @@
+[12:16:47] sent: s
+[12:16:49] BALL_BEAM_BOOT
+[12:16:49] HELP,keys
+[12:16:49] STATE,SAFE_DISABLED
+[12:16:49] SENSORS,angle=bad,pos=bad
+[12:16:49] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[12:16:49] AGE,angle_ms=1,pos_ms=1
+[12:16:49] FAULTS,bits=0
+[12:16:49] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[12:16:49] CAL_STORE,status=loaded
+[12:16:49] SONAR_CFG,s=-1,m=o,u=1
+[12:16:49] TEL,enabled=1
+[12:16:49] FAULT_INFO,bits=0
+[12:16:49] FAULT_INFO,mode=bringup_warning
+[12:16:49] FAULT_INFO,none
+[12:16:51] sent: s
+[12:16:51] STATE,SAFE_DISABLED
+[12:16:51] SENSORS,angle=ok,pos=ok
+[12:16:51] MEAS,theta_deg=0.0879,x_cm=-0.1564,x_filt_cm=-0.1680
+[12:16:51] AGE,angle_ms=9,pos_ms=42
+[12:16:51] FAULTS,bits=0
+[12:16:51] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[12:16:51] CAL_STORE,status=loaded
+[12:16:51] SONAR_CFG,s=-1,m=o,u=1
+[12:16:51] TEL,enabled=1
+[12:16:51] FAULT_INFO,bits=0
+[12:16:51] FAULT_INFO,mode=bringup_warning
+[12:16:51] FAULT_INFO,none
+[12:16:54] sent: e 1
+[12:16:54] OK,driver_enabled
+[12:16:59] sent: r
+[12:16:59] OK,running
+[12:17:26] sent: k
+[12:17:26] sent: e 0

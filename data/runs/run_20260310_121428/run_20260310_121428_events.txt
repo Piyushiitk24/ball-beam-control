@@ -1,0 +1,79 @@
+[12:14:28] sent: s
+[12:14:29] BALL_BEAM_BOOT
+[12:14:29] HELP,keys
+[12:14:29] STATE,SAFE_DISABLED
+[12:14:29] SENSORS,angle=bad,pos=bad,m=n
+[12:14:29] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[12:14:29] AGE,angle_ms=0,pos_ms=0,miss=0
+[12:14:29] FAULTS,bits=0
+[12:14:29] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[12:14:29] CAL_STORE,status=loaded
+[12:14:29] SONAR_CFG,s=-1,m=o,u=1
+[12:14:29] ACT_CFG,t=28.7402,s=m,c=a
+[12:14:29] TEL,enabled=1
+[12:14:29] FAULT_INFO,bits=0
+[12:14:29] FAULT_INFO,mode=bringup_warning
+[12:14:29] FAULT_INFO,none
+[12:14:34] sent: s
+[12:14:34] STATE,SAFE_DISABLED
+[12:14:34] SENSORS,angle=ok,pos=bad,m=n
+[12:14:34] MEAS,theta_deg=-8.7012,x_cm=0.0000,x_filt_cm=0.0000
+[12:14:34] AGE,angle_ms=6,pos_ms=0,miss=110
+[12:14:34] FAULTS,bits=1
+[12:14:34] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[12:14:34] CAL_STORE,status=loaded
+[12:14:34] SONAR_CFG,s=-1,m=o,u=1
+[12:14:34] ACT_CFG,t=28.7402,s=m,c=a
+[12:14:34] TEL,enabled=1
+[12:14:34] FAULT_INFO,bits=1
+[12:14:34] FAULT_INFO,mode=bringup_warning
+[12:14:34] FAULT_INFO,sonar_timeout=1
+[12:14:35] sent: d
+[12:14:36] OK,cal_reset_saved
+[12:14:45] sent: l
+[12:14:45] OK,cal_limit_down_set=0.000000
+[12:14:45] CAL_LIMITS,lower_deg=-7.514648,upper_deg=7.514648,limits_calibrated=no
+[12:14:51] sent: u
+[12:14:53] ERR,sonar_not_ready
+[12:14:53] SONAR_DIAG,fresh=0,age_ms=3136,raw_cm=8.3424,filt_cm=10.3215,m=76,jump_reject_cnt=86
+[12:14:55] sent: u
+[12:14:57] ERR,sonar_not_ready
+[12:14:57] SONAR_DIAG,fresh=0,age_ms=6877,raw_cm=8.3424,filt_cm=10.3215,m=168,jump_reject_cnt=86
+[12:15:02] sent: u
+[12:15:04] ERR,sonar_not_ready
+[12:15:04] SONAR_DIAG,fresh=0,age_ms=14008,raw_cm=8.3424,filt_cm=10.3215,m=345,jump_reject_cnt=86
+[12:15:05] sent: u
+[12:15:07] ERR,sonar_not_ready
+[12:15:07] SONAR_DIAG,fresh=0,age_ms=16790,raw_cm=8.3424,filt_cm=10.3215,m=413,jump_reject_cnt=86
+[12:15:11] sent: u
+[12:15:13] ERR,sonar_not_ready
+[12:15:13] SONAR_DIAG,fresh=0,age_ms=23270,raw_cm=8.3424,filt_cm=10.3215,m=573,jump_reject_cnt=86
+[12:15:17] sent: u
+[12:15:17] OK,cal_limit_up_set=57.744140
+[12:15:17] OK,as5600_sign=-1,sonar_sign=-1
+[12:15:17] INFO,limits_sonar_ok
+[12:15:17] CAL_LIMITS,lower_deg=-28.872070,upper_deg=28.872070,limits_calibrated=yes
+[12:15:30] sent: e 1
+[12:15:30] OK,driver_enabled
+[12:15:32] sent: b
+[12:15:35] OK,stepper_sign=-1,delta=-22.4736
+[12:15:44] sent: q c
+[12:15:44] SET,74707,0.0000,5.4209,-5.4209
+[12:15:47] sent: r
+[12:15:47] OK,running
+[12:16:02] sent: q f
+[12:16:02] SET,93119,-5.4209,5.4209,-5.4209
+[12:16:13] sent: r
+[12:16:13] OK,running
+[12:16:16] sent: q n
+[12:16:16] SET,106580,5.4209,5.4209,-5.4209
+[12:16:20] sent: r
+[12:16:20] OK,running
+[12:16:23] sent: q n
+[12:16:24] SET,114439,5.4209,5.4209,-5.4209
+[12:16:27] sent: k
+[12:16:27] OK,stopped
+[12:16:29] sent: e 0
+[12:16:29] OK,driver_disabled
+[12:16:33] sent: k
+[12:16:33] sent: e 0

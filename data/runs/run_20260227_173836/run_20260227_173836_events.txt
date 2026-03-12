@@ -1,0 +1,42 @@
+[17:38:36] sent: s
+[17:38:38] AS5600_CHECK_BOOT
+[17:38:38] AS5600_PROBE,ok=1,raw=3486,deg=306.3867,i2c_err=0
+[17:38:38] AS5600_CHECK_HELP
+[17:38:38] Workflow:
+[17:38:38]   1) Move beam to LOWER stop, then press L
+[17:38:38]   2) Move beam to CENTER (balanced), then press C
+[17:38:38]   3) Move beam to UPPER stop, then press U
+[17:38:38]   4) Press P to print comparisons
+[17:38:38] Commands:
+[17:38:38]   h  help
+[17:38:38]   t  toggle stream (20 Hz)
+[17:38:38]   s  single sample
+[17:38:38]   L  capture LOWER
+[17:38:38]   C  capture CENTER
+[17:38:38]   U  capture UPPER
+[17:38:38]   P  print summary
+[17:38:38]   R  reset captures
+[17:38:48] sent: L
+[17:38:50] AS5600_CAP,tag=LOWER,n=80,med_deg=74.4434,mean_deg=73.7457,std_deg=3.2128,min_deg=55.8105,max_deg=74.4434,wrap_suspect=1,i2c_err=0
+[17:38:52] sent: L
+[17:38:54] AS5600_CAP,tag=LOWER,n=80,med_deg=74.4434,mean_deg=73.9775,std_deg=2.5085,min_deg=55.8105,max_deg=74.4434,wrap_suspect=1,i2c_err=0
+[17:39:00] sent: C
+[17:39:01] sent: C
+[17:39:02] AS5600_CAP,tag=CENTER,n=80,med_deg=316.8457,mean_deg=317.5873,std_deg=2.7965,min_deg=316.8457,max_deg=333.0176,wrap_suspect=1,i2c_err=0
+[17:39:03] AS5600_CAP,tag=CENTER,n=80,med_deg=316.8457,mean_deg=318.9990,std_deg=5.6246,min_deg=316.8457,max_deg=338.4668,wrap_suspect=1,i2c_err=0
+[17:39:07] sent: C
+[17:39:09] AS5600_CAP,tag=CENTER,n=80,med_deg=316.8457,mean_deg=318.1915,std_deg=3.9483,min_deg=316.8457,max_deg=338.3789,wrap_suspect=1,i2c_err=0
+[17:39:14] sent: U
+[17:39:15] AS5600_CAP,tag=UPPER,n=80,med_deg=6.3281,mean_deg=1.5831,std_deg=11.4976,min_deg=347.2559,max_deg=372.7442,wrap_suspect=1,i2c_err=0
+[17:39:15] sent: U
+[17:39:17] AS5600_CAP,tag=UPPER,n=80,med_deg=11.9092,mean_deg=2.6367,std_deg=11.2861,min_deg=347.2559,max_deg=372.7442,wrap_suspect=1,i2c_err=0
+[17:39:18] sent: U
+[17:39:20] AS5600_CAP,tag=UPPER,n=80,med_deg=0.0000,mean_deg=359.5551,std_deg=11.4228,min_deg=-12.7441,max_deg=12.7441,wrap_suspect=1,i2c_err=0
+[17:39:24] sent: P
+[17:39:24] AS5600_SUMMARY
+[17:39:24] AS5600_POS,tag=LOWER,med_deg=74.4434,std_deg=2.5085,wrap_suspect=1,i2c_err=0
+[17:39:24] AS5600_POS,tag=CENTER,med_deg=316.8457,std_deg=3.9483,wrap_suspect=1,i2c_err=0
+[17:39:24] AS5600_POS,tag=UPPER,med_deg=0.0000,std_deg=11.4228,wrap_suspect=1,i2c_err=0
+[17:39:24] AS5600_DELTA,dLC_deg=-117.5977,absLC_deg=117.5977,dCU_deg=43.1543,absCU_deg=43.1543,dLU_deg=-74.4434,absLU_deg=74.4434
+[17:39:31] sent: k
+[17:39:31] sent: e 0

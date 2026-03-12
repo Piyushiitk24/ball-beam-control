@@ -1,0 +1,59 @@
+[17:49:01] sent: s
+[17:49:02] AS5600_CHECK_BOOT
+[17:49:02] AS5600_PROBE,ok=1,raw=3263,deg=286.7871,i2c_err=0
+[17:49:02] AS5600_CHECK_HELP
+[17:49:02] Workflow:
+[17:49:02]   1) Move beam to LOWER stop, then press L
+[17:49:02]   2) Move beam to CENTER (balanced), then press C
+[17:49:02]   3) Move beam to UPPER stop, then press U
+[17:49:02]   4) Press P to print comparisons
+[17:49:02] Commands:
+[17:49:02]   h  help
+[17:49:02]   t  toggle stream (20 Hz)
+[17:49:02]   s  single sample
+[17:49:02]   L  capture LOWER
+[17:49:02]   C  capture CENTER
+[17:49:02]   U  capture UPPER
+[17:49:02]   P  print summary
+[17:49:02]   R  reset captures
+[17:49:19] sent: L
+[17:49:22] sent: L
+[17:49:22] AS5600_CAP,tag=LOWER,n=80,med_deg=73.0371,mean_deg=72.4823,std_deg=2.6352,min_deg=54.8437,max_deg=73.1250,wrap_suspect=1,i2c_err=0
+[17:49:23] sent: L
+[17:49:24] AS5600_CAP,tag=LOWER,n=80,med_deg=73.0371,mean_deg=72.5878,std_deg=2.4587,min_deg=54.7559,max_deg=73.1250,wrap_suspect=1,i2c_err=0
+[17:49:24] sent: L
+[17:49:25] sent: L
+[17:49:26] AS5600_CAP,tag=LOWER,n=80,med_deg=73.0371,mean_deg=72.1351,std_deg=4.2221,min_deg=45.7031,max_deg=73.1250,wrap_suspect=1,i2c_err=0
+[17:49:28] AS5600_CAP,tag=LOWER,n=80,med_deg=286.8750,mean_deg=288.7152,std_deg=5.4806,min_deg=286.8750,max_deg=314.2969,wrap_suspect=1,i2c_err=0
+[17:49:30] AS5600_CAP,tag=LOWER,n=80,med_deg=317.1094,mean_deg=311.0350,std_deg=11.7104,min_deg=287.2266,max_deg=339.6973,wrap_suspect=1,i2c_err=0
+[17:49:43] sent: C
+[17:49:45] AS5600_CAP,tag=CENTER,n=80,med_deg=310.0781,mean_deg=311.4822,std_deg=4.7293,min_deg=310.0781,max_deg=335.0391,wrap_suspect=1,i2c_err=0
+[17:49:45] sent: C
+[17:49:46] sent: C
+[17:49:47] AS5600_CAP,tag=CENTER,n=80,med_deg=49.8340,mean_deg=47.2621,std_deg=7.1554,min_deg=18.6328,max_deg=49.8340,wrap_suspect=1,i2c_err=0
+[17:49:47] sent: C
+[17:49:49] sent: C
+[17:49:49] AS5600_CAP,tag=CENTER,n=80,med_deg=49.8340,mean_deg=48.4299,std_deg=4.8311,min_deg=24.8730,max_deg=49.8340,wrap_suspect=1,i2c_err=0
+[17:49:51] AS5600_CAP,tag=CENTER,n=80,med_deg=310.0781,mean_deg=312.2699,std_deg=6.1462,min_deg=310.0781,max_deg=347.5195,wrap_suspect=1,i2c_err=0
+[17:49:53] AS5600_CAP,tag=CENTER,n=80,med_deg=16.1719,mean_deg=11.1929,std_deg=19.4330,min_deg=-23.5547,max_deg=44.1211,wrap_suspect=1,i2c_err=0
+[17:49:56] sent: U
+[17:49:57] sent: U
+[17:49:57] AS5600_CAP,tag=UPPER,n=80,med_deg=16.4355,mean_deg=5.3525,std_deg=13.9673,min_deg=-16.5234,max_deg=16.4355,wrap_suspect=1,i2c_err=0
+[17:49:58] sent: U
+[17:49:59] AS5600_CAP,tag=UPPER,n=80,med_deg=14.3262,mean_deg=3.6299,std_deg=14.5222,min_deg=-16.5234,max_deg=16.4355,wrap_suspect=1,i2c_err=0
+[17:49:59] sent: U
+[17:50:00] sent: U
+[17:50:00] AS5600_CAP,tag=UPPER,n=80,med_deg=355.8692,mean_deg=359.0991,std_deg=14.8728,min_deg=343.4766,max_deg=376.4356,wrap_suspect=1,i2c_err=0
+[17:50:02] AS5600_CAP,tag=UPPER,n=80,med_deg=9.2285,mean_deg=3.3201,std_deg=14.3438,min_deg=-16.5234,max_deg=16.4355,wrap_suspect=1,i2c_err=0
+[17:50:04] AS5600_CAP,tag=UPPER,n=80,med_deg=1.0107,mean_deg=359.8528,std_deg=14.9904,min_deg=343.4766,max_deg=376.4356,wrap_suspect=1,i2c_err=0
+[17:50:06] sent: P
+[17:50:06] AS5600_SUMMARY
+[17:50:06] AS5600_POS,tag=LOWER,med_deg=317.1094,std_deg=11.7104,wrap_suspect=1,i2c_err=0
+[17:50:06] AS5600_POS,tag=CENTER,med_deg=16.1719,std_deg=19.4330,wrap_suspect=1,i2c_err=0
+[17:50:06] AS5600_POS,tag=UPPER,med_deg=1.0107,std_deg=14.9904,wrap_suspect=1,i2c_err=0
+[17:50:06] AS5600_DELTA,dLC_deg=59.0625,absLC_deg=59.0625,dCU_deg=-15.1611,absCU_deg=15.1611,dLU_deg=43.9014,absLU_deg=43.9014
+[17:50:20] sent: Q/quit
+[17:50:20] ERR,unknown_command,cmd=Q
+[17:50:20] INFO,try=h
+[17:50:23] sent: k
+[17:50:23] sent: e 0

@@ -13,6 +13,13 @@ from typing import Iterable
 
 import pandas as pd
 
+if __package__ in (None, ""):
+    workspace_root = Path(__file__).resolve().parents[1]
+    if str(workspace_root) not in sys.path:
+        sys.path.insert(0, str(workspace_root))
+
+from analysis.run_layout import find_run_csv_by_stem, iter_run_csvs, relative_path
+
 FAULT_BITS = {
     0x01: "sonar_timeout",
     0x02: "i2c_error",
@@ -34,6 +41,7 @@ DEFAULT_MILESTONES = [
 @dataclass
 class RunSummary:
     run_stem: str
+    telemetry_path: Path
     timestamp: datetime
     target_sequence: str
     duration_s: float
@@ -71,7 +79,7 @@ def _parse_run_timestamp(run_stem: str) -> datetime:
 
 
 def _iter_runs(run_dir: Path, since_yyyymmdd: str) -> list[Path]:
-    candidates = sorted(run_dir.glob("run_*_telemetry.csv"))
+    candidates = iter_run_csvs(run_dir)
     out: list[Path] = []
     for path in candidates:
         stem = path.stem.replace("_telemetry", "")
@@ -100,6 +108,55 @@ def _load_events(events_path: Path) -> tuple[dict[str, float], list[str]]:
                 except ValueError:
                     pass
     return ctx, lines
+
+
+def _parse_keyvals(prefix: str, line: str) -> dict[str, str]:
+    if not line.startswith(prefix):
+        return {}
+    out: dict[str, str] = {}
+    for part in line[len(prefix) :].split(","):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        out[key.strip()] = value.strip()
+    return out
+
+
+def _experiment_window_df(df: pd.DataFrame, event_lines: list[str]) -> pd.DataFrame:
+    start_ms: float | None = None
+    stop_ms: float | None = None
+    for line in event_lines:
+        if line.startswith("HOST_STD,start,") and start_ms is None:
+            kv = _parse_keyvals("HOST_STD,start,", line)
+            try:
+                start_ms = float(kv["t_ms"])
+            except (KeyError, ValueError):
+                pass
+        elif line.startswith("HOST_STD,stop,") and start_ms is not None and stop_ms is None:
+            kv = _parse_keyvals("HOST_STD,stop,", line)
+            try:
+                stop_ms = float(kv["t_ms"])
+            except (KeyError, ValueError):
+                pass
+
+    if start_ms is not None:
+        t_ms = df["t_ms"].astype(float)
+        work = df.loc[t_ms >= start_ms].copy()
+        if stop_ms is not None:
+            work = work.loc[work["t_ms"].astype(float) <= stop_ms].copy()
+        if not work.empty:
+            return work
+
+    states = df["state"].fillna("").astype(str)
+    active_mask = states.isin(["RUNNING", "FAULT"])
+    if active_mask.any():
+        start_idx = active_mask[active_mask].index[0]
+        work = df.loc[start_idx:].copy()
+        if not work.empty:
+            return work
+
+    return df.copy()
 
 
 def _phase_rows(df: pd.DataFrame) -> list[pd.DataFrame]:
@@ -183,13 +240,18 @@ def _decode_faults(df: pd.DataFrame) -> list[str]:
     return sorted(labels)
 
 
-def _diagnosis_label(refs: list[float], phases: list[PhaseSummary], fault_labels: list[str]) -> str:
+def _diagnosis_label(refs: list[float],
+                     phases: list[PhaseSummary],
+                     fault_labels: list[str],
+                     final_state: str) -> str:
     if "sonar_timeout" in fault_labels:
         return "sonar validity dropout"
     if "angle_oob" in fault_labels:
         return "travel-limit angle_oob"
     if "actuator_drift" in fault_labels:
         return "actuator verification fault"
+    if final_state == "FAULT":
+        return "fault without logged flag"
 
     if len(refs) == 1 and abs(refs[0]) <= 1.0e-4 and phases[0].crossings >= 10:
         return "center oscillation"
@@ -209,15 +271,19 @@ def _summarize_run(csv_path: Path) -> RunSummary:
     run_stem = csv_path.stem.replace("_telemetry", "")
     df = pd.read_csv(csv_path)
     events_path = csv_path.with_name(run_stem + "_events.txt")
-    ctx, _ = _load_events(events_path)
+    ctx, event_lines = _load_events(events_path)
+    work_df = _experiment_window_df(df, event_lines)
+    if work_df.empty:
+        work_df = df.copy()
 
     refs: list[float] = []
-    for ref in df["x_ref_cm"].astype(float).tolist():
+    for ref in work_df["x_ref_cm"].astype(float).tolist():
         if not refs or abs(ref - refs[-1]) > 1.0e-6:
             refs.append(ref)
 
-    phases = [_phase_summary(seg) for seg in _phase_rows(df)]
-    fault_labels = _decode_faults(df)
+    phases = [_phase_summary(seg) for seg in _phase_rows(work_df)]
+    fault_labels = _decode_faults(work_df)
+    final_state = str(work_df["state"].iloc[-1])
 
     def _find_end_error(target_sign: int) -> float | None:
         for phase in reversed(phases):
@@ -231,18 +297,21 @@ def _summarize_run(csv_path: Path) -> RunSummary:
 
     return RunSummary(
         run_stem=run_stem,
+        telemetry_path=csv_path,
         timestamp=_parse_run_timestamp(run_stem),
         target_sequence=_format_target_sequence(refs, ctx),
-        duration_s=float(df["t_ms"].iloc[-1]) / 1000.0 if not df.empty else 0.0,
-        fault_rows=int(((df["fault_flags"].astype(float) != 0.0) | (df["state"] == "FAULT")).sum()),
+        duration_s=((float(work_df["t_ms"].iloc[-1]) - float(work_df["t_ms"].iloc[0])) / 1000.0)
+        if not work_df.empty else 0.0,
+        fault_rows=int(((work_df["fault_flags"].astype(float) != 0.0) |
+                        (work_df["state"] == "FAULT")).sum()),
         fault_labels=", ".join(fault_labels) if fault_labels else "none",
-        diagnosis=_diagnosis_label(refs, phases, fault_labels),
-        final_state=str(df["state"].iloc[-1]),
-        final_x_filt_cm=float(df["x_filt_cm"].astype(float).iloc[-1]),
-        final_theta_deg=float(df["theta_deg"].astype(float).iloc[-1]),
+        diagnosis=_diagnosis_label(refs, phases, fault_labels, final_state),
+        final_state=final_state,
+        final_x_filt_cm=float(work_df["x_filt_cm"].astype(float).iloc[-1]),
+        final_theta_deg=float(work_df["theta_deg"].astype(float).iloc[-1]),
         center_crossings=sum(phase.crossings for phase in phases if abs(phase.x_ref_cm) <= 1.0e-4),
-        invalid_rows=int((df.get("sonar_valid", pd.Series([1] * len(df))).astype(float) <= 0.0).sum()),
-        max_sonar_age_ms=int(df.get("sonar_age_ms", pd.Series([0] * len(df))).astype(float).max()),
+        invalid_rows=int((work_df.get("sonar_valid", pd.Series([1] * len(work_df))).astype(float) <= 0.0).sum()),
+        max_sonar_age_ms=int(work_df.get("sonar_age_ms", pd.Series([0] * len(work_df))).astype(float).max()),
         near_end_error_cm=_find_end_error(1),
         far_end_error_cm=_find_end_error(-1),
         center_end_error_cm=_find_end_error(0),
@@ -319,6 +388,8 @@ def _generate_plots(script_path: Path, output_root: Path, milestone_paths: list[
             str(out_png),
             "--metrics-output",
             str(out_metrics),
+            "--style",
+            "standard",
         ]
         subprocess.run(cmd, check=True, env=env)
         if out_metrics.exists() and out_metrics.stat().st_size == 0:
@@ -336,7 +407,7 @@ def _write_summary_markdown(rows: list[RunSummary], out_path: Path, output_root:
         "| --- | --- | --- | --- | --- | ---: | ---: | ---: |",
     ]
     for row in rows:
-        run_rel = Path("../../../../data/runs") / f"{row.run_stem}_telemetry.csv"
+        run_rel = relative_path(out_path.parent, row.telemetry_path)
         lines.append(
             "| [{run}]({link}) | {targets} | {diag} | {faults} | {state} | {x:.3f} | {cross} | {age} |".format(
                 run=row.run_stem,
@@ -367,7 +438,12 @@ def _write_summary_markdown(rows: list[RunSummary], out_path: Path, output_root:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate a recent-runs report for thesis/debug documentation")
-    parser.add_argument("--run-dir", type=Path, default=Path("data/runs"), help="Directory containing run_* telemetry files")
+    parser.add_argument(
+        "--run-dir",
+        type=Path,
+        default=Path("data/runs"),
+        help="Directory containing run folders / telemetry files",
+    )
     parser.add_argument("--since", default="20260310", help="Include runs on/after this YYYYMMDD date")
     parser.add_argument(
         "--output-root",
@@ -392,8 +468,8 @@ def main() -> None:
     _write_summary_csv(summaries, csv_out)
     _write_summary_markdown(summaries, md_out, args.output_root)
 
-    milestone_paths = [args.run_dir / f"{stem}_telemetry.csv" for stem in args.milestones]
-    milestone_paths = [path for path in milestone_paths if path.exists()]
+    milestone_paths = [find_run_csv_by_stem(args.run_dir, stem) for stem in args.milestones]
+    milestone_paths = [path for path in milestone_paths if path is not None]
     script_path = Path(__file__).with_name("plot_run.py")
     _generate_plots(script_path, args.output_root, milestone_paths)
 

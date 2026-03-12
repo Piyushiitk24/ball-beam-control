@@ -6,19 +6,78 @@ import csv
 import math
 import queue
 import select
+import subprocess
 import sys
 import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TypedDict
 
 import serial
 from serial.tools import list_ports
 
+if __package__ in (None, ""):
+    workspace_root = Path(__file__).resolve().parents[1]
+    if str(workspace_root) not in sys.path:
+        sys.path.insert(0, str(workspace_root))
+
+from analysis.run_layout import (
+    events_path as run_events_path,
+    metrics_path as run_metrics_path,
+    raw_log_path,
+    run_dir_for_stem,
+    summary_plot_path,
+    telemetry_path as run_telemetry_path,
+)
+
 
 LIKELY_PORT_SUBSTRS = ("usbserial", "usbmodem", "wchusbserial")
+
+
+class TelemetryRecord(TypedDict):
+    t_ms: int
+    state: str
+    x_cm: float
+    x_filt_cm: float
+    theta_deg: float
+    theta_cmd_deg: float
+    u_step_rate: float
+    fault_flags: int
+    x_ref_cm: float
+    sonar_age_ms: int
+    sonar_valid: int
+    sonar_miss_count: int
+    theta_cmd_unclamped_deg: float
+    theta_cmd_clamped_deg: float
+    theta_cmd_saturated: int
+    act_deg_abs: float
+    trim_deg: float
+    search_phase: str
+    x_linear_cm: float
+    x_linear_filt_cm: float
+    x_ctrl_cm: float
+    x_ctrl_filt_cm: float
+    x_feedback_cm: float
+    feedback_blend: float
+
+
+class SetpointRecord(TypedDict):
+    t_ms: int
+    x_ref_cm: float
+    near_target_cm: float
+    far_target_cm: float
+    near_mid_cm: float
+    far_mid_cm: float
+
+
+class As5600DiagRecord(TypedDict):
+    ok: bool
+    raw_deg: float
+    theta_deg: float
+    err_cnt: int
+    read_hz: float
 
 
 def _now_stamp() -> str:
@@ -84,7 +143,7 @@ def _parse_keyvals(prefix: str, line: str) -> dict[str, str]:
     return out
 
 
-def _parse_tel(line: str) -> Optional[dict[str, object]]:
+def _parse_tel(line: str) -> Optional[TelemetryRecord]:
     # TEL,<t_ms>,<state>,<x_cm>,<x_filt_cm>,<theta_deg>,<theta_cmd_deg>,<u_step_rate>,<fault_flags>
     #   [,<x_ref_cm>,<sonar_age_ms>,<sonar_valid>,<sonar_miss_count>,
     #    <theta_cmd_unclamped_deg>,<theta_cmd_clamped_deg>,<theta_cmd_saturated>,
@@ -142,7 +201,7 @@ def _parse_tel(line: str) -> Optional[dict[str, object]]:
         return None
 
 
-def _parse_setpoint(line: str) -> Optional[dict[str, object]]:
+def _parse_setpoint(line: str) -> Optional[SetpointRecord]:
     # SET,<t_ms>,<x_ref_cm>,<near_target_cm>,<far_target_cm>
     if not line.startswith("SET,"):
         return None
@@ -163,7 +222,7 @@ def _parse_setpoint(line: str) -> Optional[dict[str, object]]:
         return None
 
 
-def _parse_as5600_diag(line: str) -> Optional[dict[str, object]]:
+def _parse_as5600_diag(line: str) -> Optional[As5600DiagRecord]:
     # AS5600_DIAG,<ok>,<raw_deg>,<theta_deg>,<err_cnt>,<read_hz>
     if not line.startswith("AS5600_DIAG,"):
         return None
@@ -370,14 +429,14 @@ class SerialLogger:
             )
             self._tel_f.flush()
 
-            self.snap.state = str(tel["state"])
-            self.snap.x_filt_cm = float(tel["x_filt_cm"])  # type: ignore[arg-type]
-            self.snap.theta_deg = float(tel["theta_deg"])  # type: ignore[arg-type]
-            self.snap.x_ref_cm = float(tel["x_ref_cm"])  # type: ignore[arg-type]
-            self.snap.fault_bits = int(tel["fault_flags"])  # type: ignore[arg-type]
+            self.snap.state = tel["state"]
+            self.snap.x_filt_cm = tel["x_filt_cm"]
+            self.snap.theta_deg = tel["theta_deg"]
+            self.snap.x_ref_cm = tel["x_ref_cm"]
+            self.snap.fault_bits = tel["fault_flags"]
             self.snap.angle_src = 1
             self.snap.last_tel_rx_time = time.time()
-            self._last_tel_t_ms = int(tel["t_ms"])  # type: ignore[arg-type]
+            self._last_tel_t_ms = tel["t_ms"]
 
             if self.print_tel:
                 print(line)
@@ -431,16 +490,8 @@ class SerialLogger:
 
         sp = _parse_setpoint(line)
         if sp:
-            try:
-                if "x_ref_cm" in sp:
-                    self.snap.x_ref_cm = float(sp["x_ref_cm"])
-            except ValueError:
-                pass
-            try:
-                if "t_ms" in sp:
-                    self._last_tel_t_ms = int(sp["t_ms"])
-            except ValueError:
-                pass
+            self.snap.x_ref_cm = sp["x_ref_cm"]
+            self._last_tel_t_ms = sp["t_ms"]
 
     def _print_snapshot(self) -> None:
         proto = self.protocol
@@ -526,14 +577,14 @@ class SerialLogger:
         self._active_phase = phase
         self._log_host_marker("phase", name=phase)
 
-    def _query_setpoint(self) -> Optional[dict[str, object]]:
+    def _query_setpoint(self) -> Optional[SetpointRecord]:
         self._send("q", echo=False)
         line = self._wait_for_line(1.0, prefixes=("SET,", "ERR,"))
         if line is None or line.startswith("ERR,"):
             return None
         return _parse_setpoint(line)
 
-    def _setpoint_command(self, arg: str) -> Optional[dict[str, object]]:
+    def _setpoint_command(self, arg: str) -> Optional[SetpointRecord]:
         self._send(f"q {arg}", echo=False)
         line = self._wait_for_line(1.0, prefixes=("SET,", "ERR,"))
         if line is None or line.startswith("ERR,"):
@@ -571,11 +622,11 @@ class SerialLogger:
 
     def _cmd_std_center_reg(self) -> None:
         sp = self._query_setpoint()
-        if not sp or "near_mid_cm" not in sp or "far_mid_cm" not in sp:
+        if not sp:
             print("FAIL: could not read setpoint presets. Capture limits first.")
             return
-        near_mid = float(sp["near_mid_cm"])
-        far_mid = float(sp["far_mid_cm"])
+        near_mid = sp["near_mid_cm"]
+        far_mid = sp["far_mid_cm"]
         if not math.isfinite(near_mid) or not math.isfinite(far_mid):
             print("FAIL: setpoint presets are unavailable. Capture limits first.")
             return
@@ -600,11 +651,11 @@ class SerialLogger:
 
     def _cmd_std_step3(self) -> None:
         sp = self._query_setpoint()
-        if not sp or "near_mid_cm" not in sp or "far_mid_cm" not in sp:
+        if not sp:
             print("FAIL: could not read setpoint presets. Capture limits first.")
             return
-        near_mid = float(sp["near_mid_cm"])
-        far_mid = float(sp["far_mid_cm"])
+        near_mid = sp["near_mid_cm"]
+        far_mid = sp["far_mid_cm"]
         if not math.isfinite(near_mid) or not math.isfinite(far_mid):
             print("FAIL: setpoint presets are unavailable. Capture limits first.")
             return
@@ -637,11 +688,11 @@ class SerialLogger:
 
     def _cmd_std_disturb(self) -> None:
         sp = self._query_setpoint()
-        if not sp or "near_mid_cm" not in sp or "far_mid_cm" not in sp:
+        if not sp:
             print("FAIL: could not read setpoint presets. Capture limits first.")
             return
-        near_mid = float(sp["near_mid_cm"])
-        far_mid = float(sp["far_mid_cm"])
+        near_mid = sp["near_mid_cm"]
+        far_mid = sp["far_mid_cm"]
         if not math.isfinite(near_mid) or not math.isfinite(far_mid):
             print("FAIL: setpoint presets are unavailable. Capture limits first.")
             return
@@ -944,19 +995,48 @@ class SerialLogger:
             self.close()
 
 
+def _auto_plot_run(run_dir: Path, run_stem: str) -> None:
+    plot_script = Path(__file__).with_name("plot_run.py")
+    plot_path = summary_plot_path(run_dir, run_stem)
+    metrics_output = run_metrics_path(run_dir, run_stem)
+    cmd = [
+        sys.executable,
+        str(plot_script),
+        "--input",
+        str(run_dir),
+        "--style",
+        "standard",
+        "--output",
+        str(plot_path),
+        "--metrics-output",
+        str(metrics_output),
+    ]
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as exc:
+        print(f"HOST_WARN auto-plot failed for {run_stem}: {exc}", file=sys.stderr)
+        return
+    print(f"Auto-plot saved: {plot_path}")
+    if metrics_output.exists():
+        print(f"Auto-metrics saved: {metrics_output}")
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Simple serial logger (raw.log + telemetry.csv + events.txt)")
+    parser = argparse.ArgumentParser(
+        description="Simple serial logger (per-run folder with raw log + telemetry CSV + events)"
+    )
     parser.add_argument("--port", default=None, help="Serial port (auto-detect if omitted)")
     parser.add_argument("--baud", type=int, default=115200, help="Baud rate")
     parser.add_argument(
         "--outdir",
         type=Path,
         default=Path(__file__).resolve().parents[1] / "data" / "runs",
-        help="Output directory (default: data/runs)",
+        help="Root directory for per-run folders (default: data/runs)",
     )
     parser.add_argument("--snapshot-hz", type=float, default=1.0, help="Snapshot print rate (Hz). Use 0 to disable.")
     parser.add_argument("--print-tel", type=int, default=0, help="Print TEL rows to terminal (0/1)")
     parser.add_argument("--no-input", type=int, default=0, help="Read-only mode (0/1)")
+    parser.add_argument("--auto-plot", type=int, default=1, help="Generate the standard summary plot on exit (0/1)")
     args = parser.parse_args()
 
     port = args.port
@@ -965,9 +1045,12 @@ def main() -> None:
 
     args.outdir.mkdir(parents=True, exist_ok=True)
     stamp = _now_stamp()
-    raw_path = args.outdir / f"run_{stamp}_raw.log"
-    events_path = args.outdir / f"run_{stamp}_events.txt"
-    telemetry_path = args.outdir / f"run_{stamp}_telemetry.csv"
+    run_stem = f"run_{stamp}"
+    run_dir = run_dir_for_stem(args.outdir, run_stem)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = raw_log_path(run_dir, run_stem)
+    events_path = run_events_path(run_dir, run_stem)
+    telemetry_path = run_telemetry_path(run_dir, run_stem)
 
     try:
         ser = serial.Serial(port, args.baud, timeout=0.2)
@@ -985,6 +1068,8 @@ def main() -> None:
             no_input=(args.no_input != 0),
         )
         app.run()
+    if args.auto_plot != 0 and telemetry_path.exists():
+        _auto_plot_run(run_dir, run_stem)
 
 
 if __name__ == "__main__":

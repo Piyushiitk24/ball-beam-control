@@ -115,8 +115,8 @@ If the controller is correct but too abrupt or too soft:
 Single-run plot:
 
 ```bash
-LATEST="$(ls -t data/runs/run_*_telemetry.csv | head -n 1)"
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python analysis/plot_run.py --input "$LATEST"
+LATEST_RUN="$(find data/runs -maxdepth 1 -type d -name 'run_*' | sort | tail -n 1)"
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python analysis/plot_run.py --input "$LATEST_RUN"
 ```
 
 Curated recent-runs report:
@@ -129,6 +129,7 @@ Generated report artifacts:
 - `docs/experiments/2026-03-control-debugging/generated/recent_runs_summary.csv`
 - `docs/experiments/2026-03-control-debugging/generated/recent_runs_summary.md`
 - `docs/experiments/2026-03-control-debugging/generated/plots/`
+- `docs/experiments/2026-03-control-debugging/generated/metrics/`
 
 ## 6. Current Known Themes From Recent Runs
 

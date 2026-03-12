@@ -3,14 +3,28 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
 
 import matplotlib.pyplot as plt
 import pandas as pd
 
+if __package__ in (None, ""):
+    workspace_root = Path(__file__).resolve().parents[1]
+    if str(workspace_root) not in sys.path:
+        sys.path.insert(0, str(workspace_root))
+
+from analysis.run_layout import resolve_run_input
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compare one metric across multiple run CSV files")
-    parser.add_argument("--inputs", nargs="+", type=Path, required=True, help="Paths to *_telemetry.csv or *_clean.csv files")
+    parser.add_argument(
+        "--inputs",
+        nargs="+",
+        type=Path,
+        required=True,
+        help="Paths to run directories or *_telemetry.csv / *_clean.csv files",
+    )
     parser.add_argument(
         "--metric",
         type=str,
@@ -41,13 +55,14 @@ def main() -> None:
     args = parser.parse_args()
 
     plt.figure(figsize=(10, 5.5))
-    for csv_path in args.inputs:
+    for input_path in args.inputs:
+        csv_path, _, run_stem = resolve_run_input(input_path)
         df = pd.read_csv(csv_path)
         if args.metric not in df.columns:
             print(f"Skipping {csv_path}: missing column {args.metric}")
             continue
         t_s = df["t_ms"] / 1000.0
-        plt.plot(t_s, df[args.metric], label=csv_path.stem)
+        plt.plot(t_s, df[args.metric], label=run_stem)
 
     plt.title(f"Run Comparison: {args.metric}")
     plt.xlabel("Time (s)")

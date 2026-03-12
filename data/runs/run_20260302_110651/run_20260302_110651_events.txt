@@ -1,0 +1,57 @@
+[11:06:51] sent: s
+[11:06:53] BALL_BEAM_BOOT
+[11:06:53] HELP,keys
+[11:06:53] STATE,SAFE_DISABLED
+[11:06:53] SENSORS,angle=bad,pos=bad
+[11:06:53] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[11:06:53] AGE,angle_ms=1,pos_ms=1
+[11:06:53] FAULTS,bits=0
+[11:06:53] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[11:06:53] CAL_STORE,status=loaded
+[11:06:53] TEL,enabled=1
+[11:06:53] FAULT_INFO,bits=0
+[11:06:53] FAULT_INFO,mode=bringup_warning
+[11:06:53] FAULT_INFO,none
+[11:07:02] sent: s
+[11:07:02] STATE,SAFE_DISABLED
+[11:07:02] SENSORS,angle=ok,pos=ok
+[11:07:02] MEAS,theta_deg=3.6914,x_cm=0.9980,x_filt_cm=0.6579
+[11:07:02] AGE,angle_ms=6,pos_ms=80
+[11:07:02] FAULTS,bits=0
+[11:07:02] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[11:07:02] CAL_STORE,status=loaded
+[11:07:02] TEL,enabled=1
+[11:07:02] FAULT_INFO,bits=0
+[11:07:02] FAULT_INFO,mode=bringup_warning
+[11:07:02] FAULT_INFO,none
+[11:07:15] sent: b
+[11:07:16] WARN,jog_upper
+[11:07:16] INFO,sonar_near=1
+[11:07:39] sent: g
+[11:07:39] SIGN_CAL_RESULT,47125,8.26172,1,1,30.0000,30.0154,1
+[11:07:40] INFO,signs_applied_runtime
+[11:07:44] sent: t
+[11:07:44] OK,telemetry=0
+[11:07:47] sent: a
+[11:07:47] OK,cal_zero_angle_set=330.371826
+[11:07:47] CAL_ZERO,as5600_zero_deg=330.371826,sonar_center_cm=30.001972,zero_calibrated=yes
+[11:07:54] sent: p
+[11:07:55] OK,cal_zero_position_set=30.000000
+[11:07:55] CAL_ZERO,as5600_zero_deg=330.371826,sonar_center_cm=30.000000,zero_calibrated=yes
+[11:07:57] sent: e 1
+[11:07:58] OK,driver_enabled
+[11:08:14] sent: e 0
+[11:08:14] OK,driver_disabled
+[11:08:37] sent: e 1
+[11:08:37] OK,driver_enabled
+[11:08:41] sent: j 200
+[11:08:41] OK,jog_started
+[11:08:41] WARN,jog_upper
+[11:08:49] sent: l
+[11:08:49] OK,cal_limit_down_set=14.247315
+[11:08:49] CAL_LIMITS,lower_deg=10.810547,upper_deg=14.247315,limits_calibrated=yes
+[11:08:55] sent: j -400
+[11:08:55] OK,jog_started
+[11:08:55] WARN,jog_lower
+[11:17:03] sent: k
+[11:17:03] sent: e 0

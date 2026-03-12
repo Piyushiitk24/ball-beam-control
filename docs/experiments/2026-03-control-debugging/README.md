@@ -12,6 +12,7 @@ The generated appendix artifacts live in:
 - `generated/recent_runs_summary.csv`
 - `generated/recent_runs_summary.md`
 - `generated/plots/`
+- `generated/metrics/`
 
 ## 1. Experimental Setup and Current Controller Version
 
@@ -82,7 +83,7 @@ These runs therefore cover three standard control-system experiment classes:
 
 ### Milestone 1 — Early closed-loop failure from the wrong control frame
 Representative run:
-- [run_20260310_112753_telemetry.csv](../../../data/runs/run_20260310_112753_telemetry.csv)
+- [run_20260310_112753_telemetry.csv](../../../data/runs/run_20260310_112753/run_20260310_112753_telemetry.csv)
 - plot: [run_20260310_112753.png](generated/plots/run_20260310_112753.png)
 
 Observed behavior:
@@ -99,7 +100,7 @@ Change introduced afterward:
 
 ### Milestone 2 — Endpoint tracking became visible, but near-end asymmetry remained
 Representative run:
-- [run_20260311_121358_telemetry.csv](../../../data/runs/run_20260311_121358_telemetry.csv)
+- [run_20260311_121358_telemetry.csv](../../../data/runs/run_20260311_121358/run_20260311_121358_telemetry.csv)
 - plot: [run_20260311_121358.png](generated/plots/run_20260311_121358.png)
 
 Observed behavior:
@@ -117,9 +118,9 @@ Change introduced afterward:
 
 ### Milestone 3 — Center-only oscillation after endpoint improvements
 Representative runs:
-- [run_20260312_103903_telemetry.csv](../../../data/runs/run_20260312_103903_telemetry.csv)
+- [run_20260312_103903_telemetry.csv](../../../data/runs/run_20260312_103903/run_20260312_103903_telemetry.csv)
 - plot: [run_20260312_103903.png](generated/plots/run_20260312_103903.png)
-- [run_20260312_110245_telemetry.csv](../../../data/runs/run_20260312_110245_telemetry.csv)
+- [run_20260312_110245_telemetry.csv](../../../data/runs/run_20260312_110245/run_20260312_110245_telemetry.csv)
 - plot: [run_20260312_110245.png](generated/plots/run_20260312_110245.png)
 
 Observed behavior:
@@ -137,7 +138,7 @@ Change introduced afterward:
 
 ### Milestone 4 — Positive-side undercommand after the architecture stabilized
 Representative run:
-- [run_20260312_112718_telemetry.csv](../../../data/runs/run_20260312_112718_telemetry.csv)
+- [run_20260312_112718_telemetry.csv](../../../data/runs/run_20260312_112718/run_20260312_112718_telemetry.csv)
 - plot: [run_20260312_112718.png](generated/plots/run_20260312_112718.png)
 
 Observed behavior:
@@ -153,7 +154,7 @@ Change introduced afterward:
 
 ### Milestone 5 — False sonar-validity gating that shut control off early
 Representative run:
-- [run_20260312_113933_telemetry.csv](../../../data/runs/run_20260312_113933_telemetry.csv)
+- [run_20260312_113933_telemetry.csv](../../../data/runs/run_20260312_113933/run_20260312_113933_telemetry.csv)
 - plot: [run_20260312_113933.png](generated/plots/run_20260312_113933.png)
 
 Observed behavior:
