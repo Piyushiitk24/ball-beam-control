@@ -1,0 +1,67 @@
+[10:06:34] sent: s
+[10:06:36] BALL_BEAM_BOOT
+[10:06:36] HELP,keys
+[10:06:36] STATE,SAFE_DISABLED
+[10:06:36] SENSORS,angle=bad,pos=bad,m=n
+[10:06:36] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[10:06:36] AGE,angle_ms=0,pos_ms=0,miss=0
+[10:06:36] FAULTS,bits=0
+[10:06:36] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[10:06:36] SONAR_CFG,s=-1,u=1
+[10:06:36] ACT_CFG,t=18.7482,v=1,e=0.000
+[10:06:36] TEL,enabled=1
+[10:06:36] FAULT_INFO,bits=0
+[10:06:36] FAULT_INFO,none
+[10:06:45] sent: k
+[10:06:45] sent: e 0
+[10:06:45] sent: d
+[10:06:45] OK,stopped
+[10:06:45] OK,driver_disabled
+[10:06:45] OK,cal_reset_saved
+[10:07:16] sent: l
+[10:07:16] OK,cal_limit_down_set=0.000000
+[10:07:16] CAL_LIMITS,lower_deg=-7.426758,upper_deg=7.426758,limits_calibrated=no
+[10:07:29] sent: u
+[10:07:29] OK,cal_limit_up_set=61.523437
+[10:07:29] OK,as5600_sign=-1,sonar_sign=-1
+[10:07:29] INFO,limits_ok
+[10:07:29] CAL_LIMITS,lower_deg=-30.761718,upper_deg=30.761718,limits_calibrated=yes
+[10:07:46] sent: p
+[10:07:47] ERR,sonar_not_ready
+[10:07:54] sent: p
+[10:07:56] ERR,sonar_not_ready
+[10:07:58] sent: t
+[10:07:58] OK,telemetry=0
+[10:08:09] sent: p
+[10:08:11] ERR,sonar_not_ready
+[10:08:18] sent: p
+[10:08:20] ERR,sonar_not_ready
+[10:08:33] sent: p
+[10:08:34] OK,cal_zero_position_set=10.878879
+[10:08:34] CAL_ZERO,sonar_center_cm=10.878879,zero_calibrated=yes
+[10:08:48] sent: e 1
+[10:08:48] OK,driver_enabled
+[10:08:49] sent: b
+[10:08:51] OK,stepper_sign=-1,delta=-22.5000
+[10:08:55] sent: v
+[10:08:55] OK,cal_saved
+[10:08:57] sent: s
+[10:08:57] STATE,READY
+[10:08:57] SENSORS,angle=ok,pos=ok,m=f
+[10:08:57] MEAS,theta_deg=0.0000,x_cm=5.4595,x_filt_cm=5.4109
+[10:08:57] AGE,angle_ms=17,pos_ms=13,miss=0
+[10:08:57] FAULTS,bits=0
+[10:08:57] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[10:08:57] SONAR_CFG,s=-1,u=1
+[10:08:57] ACT_CFG,t=29.1797,v=1,e=2.637
+[10:08:57] TEL,enabled=0
+[10:08:57] FAULT_INFO,bits=0
+[10:08:57] FAULT_INFO,none
+[10:09:02] sent: q c
+[10:09:02] SET,146531,0.0000,5.9158,-15.1055
+[10:09:05] sent: e 1
+[10:09:05] OK,driver_enabled
+[10:09:06] sent: r
+[10:09:06] OK,running
+[10:10:16] sent: k
+[10:10:16] sent: e 0

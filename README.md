@@ -98,12 +98,12 @@ If you use `/bringup`, the logger will prompt you for the required physical acti
 
 - Before `l`
   - Move the beam fully down by hand.
-  - Keep the ball at the far end, away from the ultrasonic sensor.
+  - Keep the ball at the far end, away from the Sharp distance sensor.
   - Hold it steady.
 
 - Before `u`
   - Move the beam fully up by hand.
-  - Keep the ball at the near end, close to the ultrasonic sensor.
+  - Keep the ball at the near end, close to the Sharp distance sensor.
   - Hold it steady.
 
 - Before `p`
@@ -417,8 +417,8 @@ Use this after a fresh flash, a mechanical change, or when `s` shows any calibra
 
 #### Physical setup before each capture
 
-- Before `l`: hold the beam fully DOWN, with the ball at the far end away from the ultrasonic sensor.
-- Before `u`: hold the beam fully UP, with the ball at the near end close to the ultrasonic sensor.
+- Before `l`: hold the beam fully DOWN, with the ball at the far end away from the Sharp distance sensor.
+- Before `u`: hold the beam fully UP, with the ball at the near end close to the Sharp distance sensor.
 - Before `p`: place the ball at the physical center of the runner and hold it steady there. The firmware records runner center and actuator control origin here.
 - Before `b`: remove your hands and keep clear of the mechanism.
 
@@ -650,7 +650,7 @@ Recommended operator usage:
 ### ISR Design
 
 - **Timer1 CTC** (40 kHz): step-pulse generation, integer-only, no `digitalWrite()`
-- **PCINT** (HC-SR04): echo timestamp capture, flag + time only
+- No live ball-position sensor ISR; the Sharp sensor is sampled in the main loop
 
 ### State Machine
 
@@ -660,35 +660,44 @@ SAFE_DISABLED → CALIB_SIGN → READY ⇄ RUNNING → FAULT
 
 ### Control Frame
 
-- HC-SR04 remains the ball-position sensor.
-- Ball position is angle-corrected at runtime: the sonar offset from center is multiplied by `cos(theta_est)`.
+- Sharp GP2Y0A21YK0F on `A0` is the live ball-position sensor.
+- Ball position is angle-corrected at runtime: the stored `sonar_*` offset from center is multiplied by `cos(theta_est)`.
 - `p` captures the physical runner center and also defines the actuator control origin.
 - AS5600 is used for calibration, run-start synchronization, and missed-step / drift verification.
+- Telemetry and calibration keep `sonar_*` names for compatibility with the existing logger and reports.
 - `theta_deg` and `theta_cmd_deg` in telemetry are step-count-relative actuator coordinates around the `p` origin.
 
 ---
 
 ## 8 — Position Sensor
 
-### Current: HC-SR04 (Ultrasonic)
+### Current: Sharp GP2Y0A21YK0F (Analog IR)
 
-Wiring: D8 → TRIG, D9 → ECHO, 5 V → VCC, GND → GND.  
-PCINT edge-capture ISR for non-blocking echo measurement. ~25 Hz trigger rate.
+Wiring: A0 → VO, 5 V → VCC, GND → GND.  
+Main-loop analog sampling at `SHARP_IR_SAMPLE_PERIOD_MS` (default `40 ms`, about `25 Hz`).
 
-Valid range: 2–65 cm. Conversion: `raw_cm = pulse_us × 0.0343 × 0.5`.
+Valid range: `10–80 cm`. Conversion: `distance_cm ≈ 29.988 × voltage^-1.173`.
+
+Compatibility note:
+- runtime state, telemetry, and calibration still use `sonar_*` names
+- the archived pre-Sharp HC-SR04 runtime is kept under `firmware/experiments/backup/hcsr04_runtime/`
 
 ### Isolation Tests
 
 ```bash
+# Sharp IR only
+./.venv/bin/python analysis/switch_firmware_main.py --mode sharp_ir_check
 # HC-SR04 only
 ./.venv/bin/python analysis/switch_firmware_main.py --mode hcsr04_check
+# Archived HC-SR04 runtime
+./.venv/bin/python analysis/switch_firmware_main.py --mode hcsr04_runtime
 # AS5600 only
 ./.venv/bin/python analysis/switch_firmware_main.py --mode as5600_check
 # Restore full controller
 ./.venv/bin/python analysis/switch_firmware_main.py --mode ballbeam
 ```
 
-> Legacy Sharp IR and TFMini code is in `firmware/experiments/backup/`.
+> Archived HC-SR04 and TFMini code is in `firmware/experiments/backup/`.
 
 ---
 
@@ -714,25 +723,23 @@ pio run -e nano_new -t upload
 
 ---
 
-## 10 — Sonar Filtering Tuning (HC-SR04)
+## 10 — Position Sensor Filtering Tuning (Sharp IR)
 
-Non-blocking PCINT echo-capture → rolling median → min-valid gating → EMA → hold-last-good across intermittent misses.
+Main-loop analog sampling → valid-range gating → jump clamp → EMA → hold-last-good across intermittent invalid reads.
 
 | Parameter | Default | Effect |
 |-----------|---------|--------|
-| `SONAR_TRIGGER_PERIOD_US` | 40000 | Ping interval (~25 Hz) |
-| `SONAR_ECHO_TIMEOUT_US` | 25000 | Max echo wait |
-| `SONAR_MEDIAN_WINDOW` | 11 | Samples in rolling median |
-| `SONAR_MIN_VALID_IN_WINDOW` | 3 | Min valid in window |
+| `SHARP_IR_SAMPLE_PERIOD_MS` | 40 | ADC sample interval (~25 Hz) |
+| `SHARP_IR_MIN_VALID_CM` | 10.0f | Minimum accepted distance |
+| `SHARP_IR_MAX_VALID_CM` | 80.0f | Maximum accepted distance |
+| `SHARP_IR_MAX_JUMP_CM` | 25.0f | Per-sample jump clamp |
 | `SONAR_EMA_ALPHA` | 0.3f | EMA smoothing (lower = smoother) |
 | `SONAR_POS_SAMPLE_FRESH_MS` | 500 | Fresh-sample window |
-| `SONAR_MAX_VALID_MM` | 650.0f | Distance clamp |
-| `SONAR_MAX_JUMP_CM` | 3.0f | Per-sample jump clamp |
-| `SONAR_MAX_CONSECUTIVE_MISSES` | 6 | Miss burst tolerance before invalid |
+| `SONAR_MAX_CONSECUTIVE_MISSES` | 6 | Compatibility threshold for recorded miss bursts |
 
 Override via `build_flags` in `firmware/platformio.ini`:
 ```ini
-build_flags = -D SONAR_MEDIAN_WINDOW=7 -D SONAR_EMA_ALPHA=0.3f -D SONAR_MAX_JUMP_CM=2.0f
+build_flags = -D SHARP_IR_SAMPLE_PERIOD_MS=40 -D SHARP_IR_MAX_JUMP_CM=20.0f -D SONAR_EMA_ALPHA=0.3f
 ```
 
 ---
@@ -830,6 +837,36 @@ LATEST_RUN="$(find data/runs -maxdepth 1 -type d -name 'run_*' | sort | tail -n 
 - Canonical modeling reference: `docs/modeling.md`
 - Plotting/tuning workflow: `docs/tuning.md`
 - Debugging/report record: `docs/experiments/2026-03-control-debugging/README.md`
+- Sensor/target selection record: `docs/experiments/2026-03-sensor-selection/README.md`
+- Sensor characterization workflow:
+  - Sharp point capture: `./.venv/bin/python analysis/capture_sharp_points.py --port /dev/cu.usbserial-A10N20X1 --timer1-stress 1`
+  - HC-SR04 point capture: `./.venv/bin/python analysis/capture_hcsr04_points.py --port /dev/cu.usbserial-A10N20X1 --mode pcint --timer1-stress 1`
+  - Block report: `./.venv/bin/python analysis/report_sensor_characterization.py --input data/runs/run_<timestamp_a> --input data/runs/run_<timestamp_b> --output-dir docs/experiments/2026-03-sensor-selection/generated/<phase_name>`
+
+## Sensor Selection Workflow
+
+Use this when you need to choose between `Sharp GP2Y0A21YK0F` and `HC-SR04`, or between the `40 mm` table tennis ball and a golf ball.
+
+1. Mark the candidate runner span at fixed points `p00 ... pNN`, about `2 cm` apart.
+2. Mount one sensor only. Do not switch sensors within the same block.
+3. Capture one full out-and-back characterization run with explicit labels:
+   - outbound auto labels start at `out_p00`
+   - type `/reverse` at the turnaround
+   - return auto labels become `ret_pNN ... ret_p00`
+4. Repeat the same block once more with the same sensor and target.
+5. Mount the other sensor and repeat the same two blocks.
+6. Generate a report from those run folders and choose the sensor with the longest contiguous reliable window, then the lower mismatch/stddev/invalid rate.
+7. Keep the winning sensor mounted and repeat the same process for `table_tennis_40mm` vs `golf_ball`.
+
+Recommended scored sensor settings:
+- `Sharp`: `sharp_ir_check` with `--timer1-stress 1`
+- `HC-SR04`: `hcsr04_check` in `--mode pcint` with `--timer1-stress 1`
+
+Per-run characterization artifacts:
+- `run_<timestamp>_raw.log`
+- `run_<timestamp>_*_points.csv`
+- `run_<timestamp>_*_point_samples.csv`
+- `run_<timestamp>_characterization_meta.json`
 
 ## VS Code One-Click Tasks
 
@@ -837,9 +874,15 @@ Use the Tasks panel (`Terminal -> Run Task...`) with:
 - `Firmware: Build (nano_new)`
 - `Firmware: Upload (nano_new)`
 - `Firmware: Upload (nano_old)`
+- `Firmware: Upload (sharp_ir_check)`
+- `Firmware: Upload (hcsr04_check)`
 - `Firmware: Monitor (115200)`
 - `Firmware: Serial Logger (CSV+Events)`
+- `Firmware: Capture Sharp Points`
+- `Firmware: Capture HC-SR04 Points`
+- `Analysis: Report Sensor Characterization`
 - `Firmware: Switch Main -> HC-SR04 Check`
+- `Firmware: Switch Main -> Sharp IR Check`
 - `Firmware: Switch Main -> AS5600 Check`
 - `Firmware: Switch Main -> BallBeam`
 - `Model: Design Gains`

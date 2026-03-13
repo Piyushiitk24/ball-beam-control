@@ -1,0 +1,28 @@
+[11:41:47] sent: s
+[11:41:49] BALL_BEAM_BOOT
+[11:41:49] HELP,keys
+[11:41:49] STATE,SAFE_DISABLED
+[11:41:49] SENSORS,angle=bad,pos=bad,m=n
+[11:41:49] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[11:41:49] AGE,angle_ms=0,pos_ms=0,miss=0
+[11:41:49] FAULTS,bits=0
+[11:41:49] CAL,zero_calibrated=no,limits_calibrated=no,sign_calibrated=no
+[11:41:49] SONAR_CFG,s=-1,u=1
+[11:41:49] ACT_CFG,t=0.0000,v=0,e=0.000
+[11:41:49] TEL,enabled=1
+[11:41:49] FAULT_INFO,bits=0
+[11:41:49] FAULT_INFO,none
+[11:41:55] sent: k
+[11:41:55] sent: e 0
+[11:41:55] sent: d
+[11:41:55] OK,stopped
+[11:41:55] OK,driver_disabled
+[11:41:55] OK,cal_reset_saved
+[11:42:00] sent: l
+[11:42:00] ERR,sonar_not_ready
+[11:42:00] sent: l
+[11:42:00] ERR,sonar_not_ready
+[11:42:00] sent: l
+[11:42:01] ERR,sonar_not_ready
+[11:42:29] sent: k
+[11:42:29] sent: e 0

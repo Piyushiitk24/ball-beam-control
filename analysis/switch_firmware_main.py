@@ -19,6 +19,14 @@ def _ensure_main_backup(src_main: Path, bak_main: Path) -> None:
     src_main.rename(bak_main)
 
 
+def _keep_current_main(src_main: Path, tag: str, repo: Path) -> None:
+    if not src_main.exists():
+        return
+    keep = repo / "firmware" / "src" / f"main.cpp.{tag}_{_stamp()}.bak"
+    print(f"Keeping current main as: {keep}")
+    src_main.rename(keep)
+
+
 def switch_to_hcsr04_check(repo: Path) -> None:
     src_main = repo / "firmware" / "src" / "main.cpp"
     bak_main = repo / "firmware" / "src" / "main.cpp.bak"
@@ -62,7 +70,7 @@ def switch_to_as5600_check(repo: Path) -> None:
 def switch_to_sharp_ir_check(repo: Path) -> None:
     src_main = repo / "firmware" / "src" / "main.cpp"
     bak_main = repo / "firmware" / "src" / "main.cpp.bak"
-    exp_main = repo / "firmware" / "experiments" / "backup" / "main_sharp_ir_check.cpp"
+    exp_main = repo / "firmware" / "experiments" / "main_sharp_ir_check.cpp"
 
     if not exp_main.exists():
         raise SystemExit(f"Missing experiment source: {exp_main}")
@@ -77,6 +85,33 @@ def switch_to_sharp_ir_check(repo: Path) -> None:
     print("OK: main.cpp is now Sharp IR check.")
     print("Next:")
     print("  cd firmware && pio run -e sharp_ir_check -t upload --upload-port /dev/cu.usbserial-A10N20X1")
+
+
+def switch_to_hcsr04_runtime(repo: Path) -> None:
+    src_main = repo / "firmware" / "src" / "main.cpp"
+    backup_root = repo / "firmware" / "experiments" / "backup" / "hcsr04_runtime"
+    archived_main = backup_root / "src" / "main.cpp"
+    archived_header = backup_root / "include" / "sensors" / "hcsr04_sensor.h"
+    archived_source = backup_root / "src" / "sensors" / "hcsr04_sensor.cpp"
+    live_header = repo / "firmware" / "include" / "sensors" / "hcsr04_sensor.h"
+    live_source = repo / "firmware" / "src" / "sensors" / "hcsr04_sensor.cpp"
+
+    for path in (archived_main, archived_header, archived_source):
+        if not path.exists():
+            raise SystemExit(f"Missing archived HC-SR04 runtime file: {path}")
+
+    _keep_current_main(src_main, "sharp_runtime", repo)
+
+    print(f"Restoring archived HC-SR04 runtime main: {archived_main} -> {src_main}")
+    shutil.copyfile(archived_main, src_main)
+    print(f"Restoring archived HC-SR04 runtime header: {archived_header} -> {live_header}")
+    shutil.copyfile(archived_header, live_header)
+    print(f"Restoring archived HC-SR04 runtime source: {archived_source} -> {live_source}")
+    shutil.copyfile(archived_source, live_source)
+
+    print("OK: main.cpp and HC-SR04 runtime files restored from archive.")
+    print("Next:")
+    print("  cd firmware && pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1")
 
 
 def switch_to_tfmini(repo: Path) -> None:
@@ -120,9 +155,7 @@ def restore_ballbeam(repo: Path) -> None:
                 mode_tag = "tfmini"
         except Exception:
             mode_tag = "custom"
-        keep = repo / "firmware" / "src" / f"main.cpp.{mode_tag}_{_stamp()}.bak"
-        print(f"Keeping current main as: {keep}")
-        src_main.rename(keep)
+        _keep_current_main(src_main, mode_tag, repo)
 
     print(f"Restoring {bak_main} -> {src_main}")
     bak_main.rename(src_main)
@@ -132,16 +165,17 @@ def restore_ballbeam(repo: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Swap firmware/src/main.cpp between BallBeam, HC-SR04 check, and legacy variants."
+        description="Swap firmware/src/main.cpp between the live BallBeam firmware, diagnostics, and the archived HC-SR04 runtime."
     )
     parser.add_argument(
         "--mode",
         required=True,
-        choices=["hcsr04_check", "as5600_check", "tfmini", "sharp_ir_check", "ballbeam"],
+        choices=["hcsr04_check", "hcsr04_runtime", "as5600_check", "tfmini", "sharp_ir_check", "ballbeam"],
         help="hcsr04_check installs the HC-SR04 sonar diagnostic firmware. "
+        "hcsr04_runtime restores the archived pre-Sharp HC-SR04 runtime bundle. "
         "as5600_check installs the AS5600 checker. "
         "tfmini installs the TFMini backup main (legacy). "
-        "sharp_ir_check installs the Sharp IR diagnostic firmware (legacy). "
+        "sharp_ir_check installs the Sharp IR diagnostic firmware. "
         "ballbeam restores main.cpp.bak -> main.cpp.",
     )
     args = parser.parse_args()
@@ -149,6 +183,8 @@ def main() -> None:
     repo = Path(__file__).resolve().parents[1]
     if args.mode == "hcsr04_check":
         switch_to_hcsr04_check(repo)
+    elif args.mode == "hcsr04_runtime":
+        switch_to_hcsr04_runtime(repo)
     elif args.mode == "as5600_check":
         switch_to_as5600_check(repo)
     elif args.mode == "sharp_ir_check":

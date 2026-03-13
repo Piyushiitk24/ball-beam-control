@@ -1,0 +1,61 @@
+[11:51:40] sent: s
+[11:51:41] BALL_BEAM_BOOT
+[11:51:41] HELP,keys
+[11:51:41] STATE,SAFE_DISABLED
+[11:51:41] SENSORS,angle=bad,pos=bad,m=n
+[11:51:41] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[11:51:41] AGE,angle_ms=0,pos_ms=0,miss=0
+[11:51:41] FAULTS,bits=0
+[11:51:41] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[11:51:41] SONAR_CFG,s=-1,u=1
+[11:51:41] ACT_CFG,t=20.0391,v=1,e=0.000
+[11:51:41] TEL,enabled=1
+[11:51:41] FAULT_INFO,bits=0
+[11:51:41] FAULT_INFO,none
+[11:51:47] sent: k
+[11:51:47] sent: e 0
+[11:51:47] sent: d
+[11:51:47] OK,stopped
+[11:51:47] OK,driver_disabled
+[11:51:47] OK,cal_reset_saved
+[11:51:55] sent: l
+[11:51:56] OK,cal_limit_down_set=0.000000
+[11:51:56] CAL_LIMITS,lower_deg=-5.756836,upper_deg=5.756836,limits_calibrated=no
+[11:52:09] sent: u
+[11:52:09] OK,cal_limit_up_set=61.435546
+[11:52:09] OK,as5600_sign=-1,sonar_sign=-1
+[11:52:09] INFO,limits_ok
+[11:52:09] CAL_LIMITS,lower_deg=-30.717773,upper_deg=30.717773,limits_calibrated=yes
+[11:52:38] sent: p
+[11:52:38] OK,cal_zero_position_set=12.999552
+[11:52:38] CAL_ZERO,sonar_center_cm=12.999552,zero_calibrated=yes
+[11:52:38] sent: e 1
+[11:52:38] OK,driver_enabled
+[11:52:38] sent: b
+[11:52:41] OK,stepper_sign=-1,delta=-22.5879
+[11:52:41] sent: v
+[11:52:41] OK,cal_saved
+[11:52:44] sent: s
+[11:52:44] STATE,READY
+[11:52:44] SENSORS,angle=ok,pos=ok,m=f
+[11:52:44] MEAS,theta_deg=0.0000,x_cm=0.3334,x_filt_cm=-0.0968
+[11:52:44] AGE,angle_ms=20,pos_ms=20,miss=0
+[11:52:44] FAULTS,bits=0
+[11:52:44] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[11:52:44] SONAR_CFG,s=-1,u=1
+[11:52:44] ACT_CFG,t=21.4453,v=1,e=0.439
+[11:52:44] TEL,enabled=1
+[11:52:44] FAULT_INFO,bits=0
+[11:52:44] FAULT_INFO,none
+[11:52:47] sent: q c
+[11:52:48] SET,66378,0.0000,2.1135,-10.2841
+[11:52:49] sent: e 1
+[11:52:49] OK,driver_enabled
+[11:52:50] sent: r
+[11:52:51] OK,running
+[11:53:23] sent: q n
+[11:53:23] SET,101667,2.1135,2.1135,-10.2841
+[11:53:41] sent: q f
+[11:53:41] SET,119575,-10.2841,2.1135,-10.2841
+[11:54:01] sent: k
+[11:54:02] sent: e 0

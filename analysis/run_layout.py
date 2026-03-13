@@ -79,6 +79,10 @@ def metrics_path(run_dir: Path, run_stem: str) -> Path:
     return run_dir / f"{run_stem}_metrics.csv"
 
 
+def characterization_meta_path(run_dir: Path, run_stem: str) -> Path:
+    return run_dir / f"{run_stem}_characterization_meta.json"
+
+
 def events_path(run_dir: Path, run_stem: str) -> Path:
     return run_dir / f"{run_stem}_events.txt"
 

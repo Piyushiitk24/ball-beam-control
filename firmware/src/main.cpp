@@ -14,7 +14,7 @@
 #include "hal/stepper_tmc2209.h"
 #include "pins.h"
 #include "sensors/as5600_sensor.h"
-#include "sensors/hcsr04_sensor.h"
+#include "sensors/sharp_ir_sensor.h"
 #include "types.h"
 
 #ifndef SERIAL_BAUD
@@ -39,7 +39,7 @@ constexpr float kCenterFeedbackBlend = 0.40f;
 
 StepperTMC2209 g_stepper(PIN_STEP, PIN_DIR, PIN_EN);
 AS5600Sensor g_as5600;
-HCSR04Sensor g_hcsr04(PIN_TRIG, PIN_ECHO);
+SharpIRSensor g_sharp_ir(PIN_SHARP_IR);
 CascadeController g_controller;
 StateMachine g_state_machine;
 
@@ -65,9 +65,6 @@ uint32_t g_last_valid_pos_ms = 0;
 uint32_t g_last_angle_read_ms = 0;
 uint32_t g_last_angle_read_dt_ms = 0;
 uint32_t g_actuator_drift_since_ms = 0;
-
-volatile uint8_t* g_echo_pin_reg = nullptr;
-uint8_t g_echo_pin_mask = 0;
 
 char g_cmd_buffer[96];
 size_t g_cmd_len = 0;
@@ -341,21 +338,6 @@ void applySafeDisable() {
   g_stepper.enable(false);
 }
 
-void setupEchoPcint() {
-  g_echo_pin_reg = portInputRegister(digitalPinToPort(PIN_ECHO));
-  g_echo_pin_mask = digitalPinToBitMask(PIN_ECHO);
-
-  volatile uint8_t* pcicr = digitalPinToPCICR(PIN_ECHO);
-  volatile uint8_t* pcmsk = digitalPinToPCMSK(PIN_ECHO);
-
-  if (pcicr == nullptr || pcmsk == nullptr) {
-    return;
-  }
-
-  *pcicr |= _BV(digitalPinToPCICRbit(PIN_ECHO));
-  *pcmsk |= _BV(digitalPinToPCMSKbit(PIN_ECHO));
-}
-
 // Forward declarations for tryStartRun.
 bool readSensors(uint32_t now_ms);
 void updateFaultState(uint32_t now_ms);
@@ -472,15 +454,15 @@ bool sampleSonarNow(uint32_t now_ms,
                     float* x_cm_out = nullptr,
                     float* x_filt_cm_out = nullptr,
                     float* dist_cm_out = nullptr) {
-  g_sensor.sonar_age_ms = g_hcsr04.sampleAgeMs(now_ms);
-  g_sensor.sonar_miss_count = g_hcsr04.consecutiveMissCount();
+  g_sensor.sonar_age_ms = g_sharp_ir.sampleAgeMs(now_ms);
+  g_sensor.sonar_miss_count = g_sharp_ir.consecutiveMissCount();
   g_sensor.pos_fresh = false;
   g_sensor.pos_held = false;
 
   float x_cm = 0.0f;
   float x_filt_cm = 0.0f;
   float dist_cm = 0.0f;
-  const bool has_pos_sample = g_hcsr04.getPosition(x_cm, x_filt_cm, dist_cm);
+  const bool has_pos_sample = g_sharp_ir.getPosition(x_cm, x_filt_cm, dist_cm);
   if (!has_pos_sample) {
     g_sensor.sonar_age_ms = 0;
     g_sensor.valid_pos = false;
@@ -496,12 +478,11 @@ bool sampleSonarNow(uint32_t now_ms,
   updateBallFeedbackPosition();
 
   const uint32_t stale_threshold_ms = activeStaleThresholdMs();
-  const uint32_t sample_age_ms = g_hcsr04.sampleAgeMs(now_ms);
-  const uint16_t miss_count = g_hcsr04.consecutiveMissCount();
-  const bool fresh = g_hcsr04.hasFreshSample(now_ms);
-  // Intermittent HC-SR04 miss bursts are common near the runner ends. Hold the
-  // last good sample until it is truly stale instead of disabling control after
-  // only a few missed pings.
+  const uint32_t sample_age_ms = g_sharp_ir.sampleAgeMs(now_ms);
+  const uint16_t miss_count = g_sharp_ir.consecutiveMissCount();
+  const bool fresh = g_sharp_ir.hasFreshSample(now_ms);
+  // Hold the last good distance sample until it is truly stale instead of
+  // disabling control on brief invalid-read bursts.
   const bool usable = sample_age_ms <= stale_threshold_ms;
 
   g_sensor.sonar_age_ms = sample_age_ms;
@@ -744,7 +725,7 @@ void runJogBlocking(uint32_t timeout_ms) {
 
     g_stepper.processIsrFlags();
     const uint32_t jog_now_us = micros();
-    g_hcsr04.service(jog_now_us, now_ms);
+    g_sharp_ir.service(jog_now_us, now_ms);
     // Enforce limit stops while blocking (used by sign calibration jog).
     serviceControl(now_ms);
 
@@ -902,10 +883,10 @@ bool captureSonarCalDistanceCm(float& out_cm) {
 
     g_stepper.processIsrFlags();
     const uint32_t cal_now_us = micros();
-    g_hcsr04.service(cal_now_us, now_ms);
+    g_sharp_ir.service(cal_now_us, now_ms);
 
     SonarDiag diag;
-    g_hcsr04.getDiag(now_ms, diag);
+    g_sharp_ir.getDiag(now_ms, diag);
 
     // Only accept true fresh samples (reject "held" values after a timeout).
     if (diag.fresh && diag.has_sample && !diag.timeout) {
@@ -1501,31 +1482,10 @@ void serviceControl(uint32_t now_ms) {
   }
 }
 
-void handleEchoPcintIsr() {
-  if (g_echo_pin_reg == nullptr || g_echo_pin_mask == 0) {
-    return;
-  }
-
-  const bool level_high = ((*g_echo_pin_reg) & g_echo_pin_mask) != 0;
-  g_hcsr04.handleEchoEdgeIsr(micros(), level_high);
-}
-
 }  // namespace
 
 ISR(TIMER1_COMPA_vect) {
   g_stepper.handleTimerCompareIsr();
-}
-
-ISR(PCINT0_vect) {
-  handleEchoPcintIsr();
-}
-
-ISR(PCINT1_vect) {
-  handleEchoPcintIsr();
-}
-
-ISR(PCINT2_vect) {
-  handleEchoPcintIsr();
 }
 
 void setup() {
@@ -1537,9 +1497,8 @@ void setup() {
   runtimeCalInit();
   syncLimitCaptureCacheFromRuntime();
 
-  // Init HC-SR04 distance sensor + PCINT echo capture.
-  g_hcsr04.begin();
-  setupEchoPcint();
+  // Init live ball-position sensor.
+  g_sharp_ir.begin();
 
   g_stepper.begin();
   g_stepper.beginScheduler();
@@ -1572,7 +1531,7 @@ void loop() {
   const uint32_t now_ms = millis();
 
   g_stepper.processIsrFlags();
-  g_hcsr04.service(now_us, now_ms);
+  g_sharp_ir.service(now_us, now_ms);
   pollSerial();
 
   if (static_cast<uint32_t>(now_ms - g_last_control_ms) >= kControlPeriodMs) {

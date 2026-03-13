@@ -1,0 +1,19 @@
+{
+  "block_label": "hcsr04_block",
+  "capture_kind": "point_characterization",
+  "created_at_iso": "2026-03-13T15:21:08",
+  "label_scheme": "out_pNN / ret_pNN",
+  "mount_note": "current HC-SR04 mount",
+  "notes": "sensor shootout repeat 2",
+  "photo_ref": "hcsr04_mount_01",
+  "points_csv_name": "run_20260313_152108_hcsr04_points.csv",
+  "raw_log_name": "run_20260313_152108_raw.log",
+  "repeat_index": 2,
+  "run_stem": "run_20260313_152108",
+  "samples_csv_name": "run_20260313_152108_hcsr04_point_samples.csv",
+  "samples_per_point": 25,
+  "sensor_mode": "pcint",
+  "sensor_name": "hcsr04",
+  "target_name": "table_tennis_40mm",
+  "timer1_stress": true
+}

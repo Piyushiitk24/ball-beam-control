@@ -72,10 +72,7 @@ constexpr float kPosPidIntegralClampSteps = 120.0f;
 constexpr uint32_t kSensorInvalidFaultMsBringup = 1000;
 constexpr uint32_t kSensorInvalidFaultMsRunning = 2500;
 
-// Sonar tuning (NewPing-style: rolling median + hold + EMA).
-//
-// Note: Unlike NewPing's ping_median(N) (a short burst), this firmware uses a
-// rolling window across time, so defaults are kept modest to reduce lag.
+// Shared position-sensor freshness / timeout compatibility.
 #ifndef SONAR_TRIGGER_PERIOD_US
 #define SONAR_TRIGGER_PERIOD_US 40000UL
 #endif
@@ -104,8 +101,19 @@ constexpr uint32_t kSensorInvalidFaultMsRunning = 2500;
 #define SONAR_MAX_CONSECUTIVE_MISSES 6
 #endif
 
-// Legacy: Sharp GP2Y0A21YK0F (analog IR) — not connected.
-// #define SHARP_IR_SAMPLE_PERIOD_MS 40UL
+// Sharp GP2Y0A21YK0F (analog IR) active defaults.
+#ifndef SHARP_IR_SAMPLE_PERIOD_MS
+#define SHARP_IR_SAMPLE_PERIOD_MS 40UL
+#endif
+#ifndef SHARP_IR_MIN_VALID_CM
+#define SHARP_IR_MIN_VALID_CM 10.0f
+#endif
+#ifndef SHARP_IR_MAX_VALID_CM
+#define SHARP_IR_MAX_VALID_CM 80.0f
+#endif
+#ifndef SHARP_IR_MAX_JUMP_CM
+#define SHARP_IR_MAX_JUMP_CM 25.0f
+#endif
 
 // Legacy: Benewake TFMini (UART) — not connected.
 // #define TFMINI_UART_BAUD 115200UL
@@ -137,6 +145,10 @@ constexpr uint32_t kPosSampleFreshMs = SONAR_POS_SAMPLE_FRESH_MS;
 constexpr float kSonarEmaAlpha = SONAR_EMA_ALPHA;
 constexpr float kSonarMaxJumpCm = SONAR_MAX_JUMP_CM;
 constexpr uint8_t kSonarMaxConsecutiveMisses = SONAR_MAX_CONSECUTIVE_MISSES;
+constexpr uint32_t kSharpIrSamplePeriodMs = SHARP_IR_SAMPLE_PERIOD_MS;
+constexpr float kSharpIrMinValidCm = SHARP_IR_MIN_VALID_CM;
+constexpr float kSharpIrMaxValidCm = SHARP_IR_MAX_VALID_CM;
+constexpr float kSharpIrMaxJumpCm = SHARP_IR_MAX_JUMP_CM;
 
 constexpr float kAs5600EmaAlpha = AS5600_EMA_ALPHA;
 constexpr float kAs5600MaxJumpDeg = AS5600_MAX_JUMP_DEG;

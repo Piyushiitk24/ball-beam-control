@@ -13,14 +13,15 @@ Track B is the authoritative description of the firmware that is currently flash
 ## 1. Current Physical Setup
 
 Measured/control-relevant quantities:
-- `d` [cm]: HC-SR04 distance to the ball-side reflector target
+- `d` [cm]: Sharp GP2Y0A21YK0F distance estimate to the ball-side target
 - `theta_est` [deg]: actuator angle estimate from step counts, synchronized to AS5600 at run start
 - `theta_abs` [deg]: AS5600-derived absolute actuator pose in the calibrated actuator frame
 
 Runtime roles:
-- HC-SR04 provides the control-relevant runner position
+- Sharp analog IR provides the control-relevant runner position
 - AS5600 provides actuator travel calibration, run-start synchronization, travel-limit safety, and drift verification
 - the stepper executes signed step-rate commands from the motion generator
+- telemetry and calibration keep `sonar_*` field names for compatibility with existing tooling
 
 State machine:
 - `SAFE_DISABLED`
@@ -36,23 +37,23 @@ The current controller is **ball-centric**, not beam-level-centric.
 ### 2.1 Calibration commands
 - `l`: capture lower actuator limit and one runner endpoint
 - `u`: capture upper actuator limit and the other runner endpoint
-- `p`: place the ball at the physical runner center and capture the sonar center plus the current actuator trim/origin
+- `p`: place the ball at the physical runner center and capture the stored `sonar_*` center plus the current actuator trim/origin
 - `b`: stepper direction/sign jog
 
 ### 2.2 Stored runtime quantities
 From `l/u/p`, the firmware stores:
 - lower/upper raw AS5600 angles
-- lower/upper sonar distances
-- sonar center distance
+- lower/upper distance-sensor measurements in the existing `sonar_*` fields
+- distance-sensor center in the existing `sonar_*` field
 - actuator trim/origin in the normalized actuator frame
-- sign conventions for AS5600, sonar, and stepper direction
+- sign conventions for AS5600, stored `sonar_*` distance mapping, and stepper direction
 
 ### 2.3 Sign conventions
 Current hardware convention is fixed in firmware as:
 - upper actuator limit = ball nearer to the sensor
 - lower actuator limit = ball farther from the sensor
 
-The sonar sign is therefore derived from hardware orientation, not from a user guess.
+The stored `sonar_*` sign is therefore derived from hardware orientation, not from a user guess.
 
 ## 3. Track B — Current Implemented Runtime Controller
 
@@ -84,7 +85,7 @@ This is the direct physical runner coordinate in the `p`-captured center frame.
 #### Angle-corrected coordinate
 `x_ctrl_cm = x_linear_cm * cos(theta_est_rad)`
 
-This compensates for beam tilt changing the apparent sonar geometry.
+This compensates for beam tilt changing the apparent distance geometry.
 
 #### Blended control coordinate
 Let `b = feedback_blend` with `0 <= b <= 1`.
@@ -100,7 +101,7 @@ The same structure is applied to filtered signals:
 - `q f`: target the calibrated **far endpoint** from `l/u`
 - `q <cm>`: target an explicit physical runner offset from center
 
-`q n` and `q f` are literal physical endpoints derived from the stored `l/u` sonar captures.
+`q n` and `q f` are literal physical endpoints derived from the stored `l/u` distance captures.
 
 ### 3.4 Feedback blend law
 The firmware computes a target-dependent blend:
@@ -197,15 +198,14 @@ Then apply a per-tick slew limit based on `kMaxStepRateChangeSpsPerTick`.
 
 This makes the actuator command behave like a bounded position servo using rate-limited stepper motion.
 
-## 4. HC-SR04 Runtime Validity and Fault Policy
+## 4. Sharp Runtime Validity and Fault Policy
 
 The current firmware uses a hold-last-good policy.
 
 ### 4.1 Filtering path
-HC-SR04 processing uses:
+Sharp GP2Y0A21YK0F processing uses:
 - range validity check
 - jump clamp on raw distance
-- rolling median window
 - EMA smoothing
 
 ### 4.2 Validity logic
@@ -221,7 +221,7 @@ A `sonar_timeout` fault is raised only when the time since the last accepted son
 
 Thresholds are wider in `RUNNING` than in bring-up.
 
-This preserves control through short HC-SR04 miss bursts, especially near the runner ends.
+This preserves control through short invalid-read bursts from the Sharp sensor, especially near the runner ends.
 
 ## 5. AS5600 Safety and Verification
 

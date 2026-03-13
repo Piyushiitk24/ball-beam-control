@@ -9,13 +9,18 @@
 - `5V -> VIO`
 - `GND -> GND`
 
-### HC-SR04 (ultrasonic distance)
+### Sharp GP2Y0A21YK0F (active ball-position sensor)
+- `A0 -> VO`
+- `5V -> VCC`
+- `GND -> GND`
+
+### Archived HC-SR04 / diagnostics only
 - `D8 -> TRIG`
 - `D9 -> ECHO`
 - `5V -> VCC`
 - `GND -> GND`
 
-(Legacy: Sharp IR A0 and TFMini D10/D11 — not connected.)
+(Legacy: TFMini D10/D11 — not connected.)
 
 ### AS5600
 - `A4 -> SDA`
@@ -27,7 +32,7 @@
 ## Power and Ground
 
 - Driver motor supply: `12V + -> VMOT/VM`, `12V - -> common GND`.
-- Common ground must include Nano, TMC2209, AS5600, HC-SR04, and 12V negative.
+- Common ground must include Nano, TMC2209, AS5600, Sharp sensor, and 12V negative.
 - Place `100uF` electrolytic capacitor near `VMOT-GND` on driver.
 - Keep `EN/ENN` pulled up to `VIO` through `10k` resistor.
 

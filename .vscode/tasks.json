@@ -48,9 +48,63 @@
       "problemMatcher": []
     },
     {
+      "label": "Firmware: Capture Sharp Points",
+      "type": "shell",
+      "command": "./.venv/bin/python analysis/capture_sharp_points.py --port /dev/cu.usbserial-A10N20X1",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Firmware: Upload (sharp_ir_check)",
+      "type": "shell",
+      "command": "pio run -e sharp_ir_check -t upload",
+      "options": {
+        "cwd": "${workspaceFolder}/firmware"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Firmware: Upload (hcsr04_check)",
+      "type": "shell",
+      "command": "pio run -e hcsr04_check -t upload",
+      "options": {
+        "cwd": "${workspaceFolder}/firmware"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Firmware: Capture HC-SR04 Points",
+      "type": "shell",
+      "command": "./.venv/bin/python analysis/capture_hcsr04_points.py --port /dev/cu.usbserial-A10N20X1",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Analysis: Report Sensor Characterization",
+      "type": "shell",
+      "command": "./.venv/bin/python analysis/report_sensor_characterization.py --help",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "Firmware: Switch Main -> HC-SR04 Check",
       "type": "shell",
       "command": "./.venv/bin/python analysis/switch_firmware_main.py --mode hcsr04_check",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Firmware: Switch Main -> Sharp IR Check",
+      "type": "shell",
+      "command": "./.venv/bin/python analysis/switch_firmware_main.py --mode sharp_ir_check",
       "options": {
         "cwd": "${workspaceFolder}"
       },

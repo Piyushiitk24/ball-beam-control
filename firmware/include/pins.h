@@ -8,14 +8,16 @@ constexpr uint8_t PIN_STEP = 2;
 constexpr uint8_t PIN_DIR = 3;
 constexpr uint8_t PIN_EN = 4;
 
-// HC-SR04 ultrasonic distance sensor.
+// Active ball-position sensor: Sharp GP2Y0A21YK0F analog IR.
+constexpr uint8_t PIN_SHARP_IR = A0;
+
+// Archived HC-SR04 pins kept for diagnostic / backup firmware.
 constexpr uint8_t PIN_TRIG = 8;
 constexpr uint8_t PIN_ECHO = 9;
 
 // Legacy distance-sensor pins — not connected.
 // constexpr uint8_t PIN_TFMINI_RX = 10;
 // constexpr uint8_t PIN_TFMINI_TX = 11;
-// constexpr uint8_t PIN_SHARP_IR = A0;
 
 constexpr uint8_t PIN_I2C_SDA = A4;
 constexpr uint8_t PIN_I2C_SCL = A5;
