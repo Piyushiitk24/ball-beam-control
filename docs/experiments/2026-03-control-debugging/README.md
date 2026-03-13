@@ -2,6 +2,11 @@
 
 This document is the curated record of the recent debugging campaign that moved the project from non-working closed-loop control to the current single-PID runtime controller.
 
+Current active validation scope is narrower than the historical record here:
+- active runtime path is again the archived HC-SR04-based controller
+- current validation targets only `q c` and `q f`
+- `q n` remains part of the historical debugging record below, but near-side work is paused
+
 Use it for:
 - preserving context across chats
 - reconstructing the engineering progression without relying on memory

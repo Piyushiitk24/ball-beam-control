@@ -19,6 +19,7 @@ from analysis.characterization_common import (
     CharacterizationMetadata,
     default_point_label,
     iso_now,
+    median,
     mean,
     save_metadata,
     stamp,
@@ -98,7 +99,7 @@ def _capture_point_samples(
 
 def _capture_summary_row(
     parsed_samples: list[dict[str, float | bool]],
-) -> tuple[int, float, str, str, str, str, float, float, float, float, float, float, float, float]:
+) -> tuple[int, float, str, str, str, str, str, float, float, float, float, float, float, float, float]:
     valid_distances = [float(sample["distance_cm"]) for sample in parsed_samples if bool(sample["valid_sample"])]
     raw_adcs = [float(sample["raw_adc"]) for sample in parsed_samples]
     voltages = [float(sample["voltage"]) for sample in parsed_samples]
@@ -114,6 +115,7 @@ def _capture_summary_row(
         valid_samples,
         valid_fraction,
         _fmt_or_blank(valid_distances, mean),
+        _fmt_or_blank(valid_distances, median),
         _fmt_or_blank(valid_distances, stddev),
         _fmt_or_blank(valid_distances, min),
         _fmt_or_blank(valid_distances, max),
@@ -268,6 +270,7 @@ def main() -> None:
                 "valid_samples",
                 "valid_fraction",
                 "mean_distance_cm",
+                "median_distance_cm",
                 "std_distance_cm",
                 "min_distance_cm",
                 "max_distance_cm",
@@ -349,7 +352,7 @@ def main() -> None:
             captured_at = iso_now()
             current_direction = direction
             current_point_number = point_number
-            valid_samples, valid_fraction, mean_dist, std_dist, min_dist, max_dist, mean_adc, std_adc, min_adc, max_adc, mean_volt, std_volt, min_volt, max_volt = _capture_summary_row(
+            valid_samples, valid_fraction, mean_dist, median_dist, std_dist, min_dist, max_dist, mean_adc, std_adc, min_adc, max_adc, mean_volt, std_volt, min_volt, max_volt = _capture_summary_row(
                 parsed_samples
             )
 
@@ -381,6 +384,7 @@ def main() -> None:
                     valid_samples,
                     f"{valid_fraction:.4f}",
                     mean_dist,
+                    median_dist,
                     std_dist,
                     min_dist,
                     max_dist,

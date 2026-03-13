@@ -1,0 +1,3 @@
+run_stem,sensor_name,sensor_mode,target_name,block_label,repeat_index,timer1_stress,total_paired_points,reliable_points,longest_reliable_window_points,reliable_window_start,reliable_window_end,median_roundtrip_mismatch_cm,median_stddev_cm,mean_valid_fraction,invalid_rate,mount_note,photo_ref,notes
+run_20260313_155332,sharp,analog,table_tennis_40mm,sharp_retry,1,1,9,0,0,,,7.6000,1.6904,0.6733,0.3267,"Sharp retry, capacitor installed",sharp_mount_retry_01,Sharp retry repeat 1
+run_20260313_155519,sharp,analog,table_tennis_40mm,sharp_retry,2,1,9,0,0,,,4.9500,1.4383,0.7244,0.2756,"Sharp retry, capacitor installed",sharp_mount_retry_01,Sharp retry repeat 2

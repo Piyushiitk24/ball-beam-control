@@ -13,15 +13,15 @@ Track B is the authoritative description of the firmware that is currently flash
 ## 1. Current Physical Setup
 
 Measured/control-relevant quantities:
-- `d` [cm]: Sharp GP2Y0A21YK0F distance estimate to the ball-side target
+- `d` [cm]: HC-SR04 distance estimate to the ball
 - `theta_est` [deg]: actuator angle estimate from step counts, synchronized to AS5600 at run start
 - `theta_abs` [deg]: AS5600-derived absolute actuator pose in the calibrated actuator frame
 
 Runtime roles:
-- Sharp analog IR provides the control-relevant runner position
+- HC-SR04 provides the control-relevant runner position
 - AS5600 provides actuator travel calibration, run-start synchronization, travel-limit safety, and drift verification
 - the stepper executes signed step-rate commands from the motion generator
-- telemetry and calibration keep `sonar_*` field names for compatibility with existing tooling
+- telemetry and calibration keep `sonar_*` field names because HC-SR04 is the active runtime path
 
 State machine:
 - `SAFE_DISABLED`
@@ -103,6 +103,10 @@ The same structure is applied to filtered signals:
 
 `q n` and `q f` are literal physical endpoints derived from the stored `l/u` distance captures.
 
+Current validation scope is narrower than the full command set:
+- active testing uses `q c` and `q f`
+- `q n` remains implemented for compatibility/history, but near-side validation is paused
+
 ### 3.4 Feedback blend law
 The firmware computes a target-dependent blend:
 
@@ -179,6 +183,8 @@ When the target is positive (`q n` side), the controller can scale gains upward:
 
 This is an empirical correction for the observed plant asymmetry where the near side required more actuator command than the far side.
 
+This logic remains in the restored runtime, but it is not part of the current active validation scope.
+
 ### 3.9 Motion generator
 The PID does not directly output a step rate.
 
@@ -198,12 +204,12 @@ Then apply a per-tick slew limit based on `kMaxStepRateChangeSpsPerTick`.
 
 This makes the actuator command behave like a bounded position servo using rate-limited stepper motion.
 
-## 4. Sharp Runtime Validity and Fault Policy
+## 4. HC-SR04 Runtime Validity and Fault Policy
 
 The current firmware uses a hold-last-good policy.
 
 ### 4.1 Filtering path
-Sharp GP2Y0A21YK0F processing uses:
+HC-SR04 processing uses:
 - range validity check
 - jump clamp on raw distance
 - EMA smoothing
@@ -221,7 +227,7 @@ A `sonar_timeout` fault is raised only when the time since the last accepted son
 
 Thresholds are wider in `RUNNING` than in bring-up.
 
-This preserves control through short invalid-read bursts from the Sharp sensor, especially near the runner ends.
+This preserves control through short invalid-read bursts from the HC-SR04, especially near the runner ends.
 
 ## 5. AS5600 Safety and Verification
 

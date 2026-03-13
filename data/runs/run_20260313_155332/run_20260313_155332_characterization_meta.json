@@ -1,0 +1,19 @@
+{
+  "block_label": "sharp_retry",
+  "capture_kind": "point_characterization",
+  "created_at_iso": "2026-03-13T15:53:32",
+  "label_scheme": "out_pNN / ret_pNN",
+  "mount_note": "Sharp retry, capacitor installed",
+  "notes": "Sharp retry repeat 1",
+  "photo_ref": "sharp_mount_retry_01",
+  "points_csv_name": "run_20260313_155332_sharp_points.csv",
+  "raw_log_name": "run_20260313_155332_raw.log",
+  "repeat_index": 1,
+  "run_stem": "run_20260313_155332",
+  "samples_csv_name": "run_20260313_155332_sharp_point_samples.csv",
+  "samples_per_point": 25,
+  "sensor_mode": "analog",
+  "sensor_name": "sharp",
+  "target_name": "table_tennis_40mm",
+  "timer1_stress": true
+}

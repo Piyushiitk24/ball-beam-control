@@ -9,14 +9,14 @@
 - `5V -> VIO`
 - `GND -> GND`
 
-### Sharp GP2Y0A21YK0F (active ball-position sensor)
-- `A0 -> VO`
+### HC-SR04 (active ball-position sensor)
+- `D8 -> TRIG`
+- `D9 -> ECHO`
 - `5V -> VCC`
 - `GND -> GND`
 
-### Archived HC-SR04 / diagnostics only
-- `D8 -> TRIG`
-- `D9 -> ECHO`
+### Archived / experimental Sharp GP2Y0A21YK0F
+- `A0 -> VO`
 - `5V -> VCC`
 - `GND -> GND`
 
@@ -32,7 +32,7 @@
 ## Power and Ground
 
 - Driver motor supply: `12V + -> VMOT/VM`, `12V - -> common GND`.
-- Common ground must include Nano, TMC2209, AS5600, Sharp sensor, and 12V negative.
+- Common ground must include Nano, TMC2209, AS5600, HC-SR04, and 12V negative.
 - Place `100uF` electrolytic capacitor near `VMOT-GND` on driver.
 - Keep `EN/ENN` pulled up to `VIO` through `10k` resistor.
 

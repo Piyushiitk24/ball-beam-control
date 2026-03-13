@@ -1,0 +1,19 @@
+{
+  "block_label": "pulsein_nostress",
+  "capture_kind": "point_characterization",
+  "created_at_iso": "2026-03-13T15:43:52",
+  "label_scheme": "out_pNN / ret_pNN",
+  "mount_note": "current HC-SR04 mount",
+  "notes": "HC-SR04 debug pulseIn no stress",
+  "photo_ref": "hcsr04_mount_01",
+  "points_csv_name": "run_20260313_154352_hcsr04_points.csv",
+  "raw_log_name": "run_20260313_154352_raw.log",
+  "repeat_index": 1,
+  "run_stem": "run_20260313_154352",
+  "samples_csv_name": "run_20260313_154352_hcsr04_point_samples.csv",
+  "samples_per_point": 25,
+  "sensor_mode": "pulsein",
+  "sensor_name": "hcsr04_debug",
+  "target_name": "table_tennis_40mm",
+  "timer1_stress": false
+}

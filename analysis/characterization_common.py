@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import statistics
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -50,6 +51,10 @@ def stddev(values: list[float]) -> float:
     mu = mean(values)
     var = sum((value - mu) ** 2 for value in values) / float(len(values) - 1)
     return math.sqrt(var)
+
+
+def median(values: list[float]) -> float:
+    return float(statistics.median(values))
 
 
 def parse_point_label(label: str) -> tuple[str, int] | None:

@@ -1,0 +1,4 @@
+sensor_name,sensor_mode,target_name,timer1_stress,block_label,runs,min_longest_reliable_window_points,median_longest_reliable_window_points,median_roundtrip_mismatch_cm,median_stddev_cm,median_invalid_rate
+hcsr04_debug,pcint,table_tennis_40mm,0,pcint_nostress,1,0,0.0,12.7250,1.8337,0.2178
+hcsr04_debug,pulsein,table_tennis_40mm,0,pulsein_nostress,1,0,0.0,8.1875,2.4384,0.1978
+hcsr04_debug,pcint,table_tennis_40mm,1,pcint_stress,1,0,0.0,11.8600,3.0034,0.1600

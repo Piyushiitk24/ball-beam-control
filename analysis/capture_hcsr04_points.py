@@ -19,6 +19,7 @@ from analysis.characterization_common import (
     CharacterizationMetadata,
     default_point_label,
     iso_now,
+    median,
     mean,
     save_metadata,
     stamp,
@@ -31,17 +32,20 @@ SONAR_LINE_RE = re.compile(
 )
 
 
-def _parse_sonar_line(line: str) -> dict[str, float | bool | str] | None:
+def _parse_sonar_line(line: str, min_valid_cm: float, max_valid_cm: float) -> dict[str, float | bool | str] | None:
     match = SONAR_LINE_RE.fullmatch(line.strip())
     if match is None:
         return None
     ok = match.group("ok") == "1"
+    distance_cm = float(match.group("cm"))
+    runtime_valid = ok and (min_valid_cm <= distance_cm <= max_valid_cm)
     return {
         "ts_ms": float(match.group("ts_ms")),
         "mode": match.group("mode"),
-        "distance_cm": float(match.group("cm")),
+        "distance_cm": distance_cm,
         "pulse_us": float(match.group("pulse_us")),
-        "valid_sample": ok,
+        "valid_sample": runtime_valid,
+        "echo_ok": ok,
         "timer1": match.group("timer1") == "1",
         "pings": float(match.group("pings")),
         "valid_count": float(match.group("valid")),
@@ -86,6 +90,8 @@ def _capture_point_samples(
     raw_file,
     samples_per_point: int,
     timeout_s: float,
+    min_valid_cm: float,
+    max_valid_cm: float,
 ) -> tuple[list[dict[str, float | bool | str]], list[str]]:
     ser.reset_input_buffer()
     parsed_samples: list[dict[str, float | bool | str]] = []
@@ -101,7 +107,7 @@ def _capture_point_samples(
         raw_file.flush()
         raw_lines.append(line.rstrip())
 
-        parsed = _parse_sonar_line(line)
+        parsed = _parse_sonar_line(line, min_valid_cm=min_valid_cm, max_valid_cm=max_valid_cm)
         if parsed is not None:
             parsed_samples.append(parsed)
 
@@ -110,7 +116,7 @@ def _capture_point_samples(
 
 def _capture_summary_row(
     parsed_samples: list[dict[str, float | bool | str]],
-) -> tuple[int, float, str, str, str, str, float, float, float, float]:
+) -> tuple[int, float, str, str, str, str, str, float, float, float, float]:
     valid_distances = [float(sample["distance_cm"]) for sample in parsed_samples if bool(sample["valid_sample"])]
     pulse_us = [float(sample["pulse_us"]) for sample in parsed_samples]
     valid_samples = len(valid_distances)
@@ -125,6 +131,7 @@ def _capture_summary_row(
         valid_samples,
         valid_fraction,
         _fmt_or_blank(valid_distances, mean),
+        _fmt_or_blank(valid_distances, median),
         _fmt_or_blank(valid_distances, stddev),
         _fmt_or_blank(valid_distances, min),
         _fmt_or_blank(valid_distances, max),
@@ -179,6 +186,8 @@ def main() -> None:
         default=1,
         help="Enable the 40 kHz Timer1 stress ISR before capture",
     )
+    parser.add_argument("--min-valid-cm", type=float, default=2.0, help="Minimum accepted runtime-valid distance")
+    parser.add_argument("--max-valid-cm", type=float, default=65.0, help="Maximum accepted runtime-valid distance")
     parser.add_argument("--sensor-name", default="hcsr04", help="Metadata sensor name")
     parser.add_argument("--target-name", default="table_tennis_40mm", help="Metadata target name")
     parser.add_argument("--block-label", default="sensor_block_1", help="Metadata block label")
@@ -278,6 +287,7 @@ def main() -> None:
                 "valid_samples",
                 "valid_fraction",
                 "mean_distance_cm",
+                "median_distance_cm",
                 "std_distance_cm",
                 "min_distance_cm",
                 "max_distance_cm",
@@ -299,6 +309,7 @@ def main() -> None:
                 "distance_cm",
                 "pulse_us",
                 "valid_sample",
+                "echo_ok",
                 "timer1_stress",
                 "pings",
                 "valid_count",
@@ -346,6 +357,8 @@ def main() -> None:
                 raw_file=raw_file,
                 samples_per_point=args.samples_per_point,
                 timeout_s=args.timeout,
+                min_valid_cm=args.min_valid_cm,
+                max_valid_cm=args.max_valid_cm,
             )
 
             if len(parsed_samples) < args.samples_per_point:
@@ -357,7 +370,7 @@ def main() -> None:
             captured_at = iso_now()
             current_direction = direction
             current_point_number = point_number
-            valid_samples, valid_fraction, mean_dist, std_dist, min_dist, max_dist, mean_pulse, std_pulse, min_pulse, max_pulse = _capture_summary_row(
+            valid_samples, valid_fraction, mean_dist, median_dist, std_dist, min_dist, max_dist, mean_pulse, std_pulse, min_pulse, max_pulse = _capture_summary_row(
                 parsed_samples
             )
 
@@ -374,6 +387,7 @@ def main() -> None:
                         f"{float(sample['distance_cm']):.4f}",
                         f"{float(sample['pulse_us']):.4f}",
                         int(bool(sample["valid_sample"])),
+                        int(bool(sample["echo_ok"])),
                         int(bool(sample["timer1"])),
                         int(round(float(sample["pings"]))),
                         int(round(float(sample["valid_count"]))),
@@ -394,6 +408,7 @@ def main() -> None:
                     valid_samples,
                     f"{valid_fraction:.4f}",
                     mean_dist,
+                    median_dist,
                     std_dist,
                     min_dist,
                     max_dist,

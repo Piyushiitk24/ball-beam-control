@@ -72,7 +72,9 @@ constexpr float kPosPidIntegralClampSteps = 120.0f;
 constexpr uint32_t kSensorInvalidFaultMsBringup = 1000;
 constexpr uint32_t kSensorInvalidFaultMsRunning = 2500;
 
-// Shared position-sensor freshness / timeout compatibility.
+// Active HC-SR04 freshness / timeout settings. Telemetry and host tooling keep
+// the long-standing `sonar_*` naming, even when other experimental sensors are
+// present in the repo.
 #ifndef SONAR_TRIGGER_PERIOD_US
 #define SONAR_TRIGGER_PERIOD_US 40000UL
 #endif
@@ -101,7 +103,8 @@ constexpr uint32_t kSensorInvalidFaultMsRunning = 2500;
 #define SONAR_MAX_CONSECUTIVE_MISSES 6
 #endif
 
-// Sharp GP2Y0A21YK0F (analog IR) active defaults.
+// Archived / experimental Sharp GP2Y0A21YK0F analog IR defaults retained for
+// standalone characterization and future fallback work.
 #ifndef SHARP_IR_SAMPLE_PERIOD_MS
 #define SHARP_IR_SAMPLE_PERIOD_MS 40UL
 #endif

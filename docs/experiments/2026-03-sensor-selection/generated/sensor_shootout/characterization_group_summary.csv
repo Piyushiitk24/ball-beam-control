@@ -1,0 +1,3 @@
+sensor_name,target_name,runs,min_longest_reliable_window_points,median_longest_reliable_window_points,median_roundtrip_mismatch_cm,median_stddev_cm,median_invalid_rate
+sharp,table_tennis_40mm,2,0,0.0,10.7120,1.4292,0.2141
+hcsr04,table_tennis_40mm,2,0,0.0,14.2441,1.9086,0.1633

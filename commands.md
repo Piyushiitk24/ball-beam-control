@@ -1,8 +1,9 @@
 Ball-and-beam device workflow
 
 Active ball-position sensor
-- live hardware is `Sharp GP2Y0A21YK0F` on `A0`
-- status, calibration, and telemetry still use `sonar_*` names for compatibility
+- live hardware is `HC-SR04` on `D8/D9`
+- status, calibration, and telemetry use `sonar_*` names because HC-SR04 is the active runtime path again
+- `q n` remains available in the firmware for compatibility, but near-side testing is paused and is not part of the active workflow
 
 Core rule
 - `q ...` sets the desired ball position.
@@ -18,6 +19,7 @@ Terminal A:
 ```bash
 cd /Users/piyush/code/ball-beam-control
 ls /dev/cu.usb*
+./.venv/bin/python analysis/switch_firmware_main.py --mode hcsr04_runtime
 pio run -e nano_new
 pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
 ```
@@ -38,7 +40,6 @@ q c
 e 1
 r
 q f
-q n
 q c
 s
 /quit
@@ -47,7 +48,6 @@ s
 Hold times for the retest:
 - first `q c`: about `8 s`
 - `q f`: about `8 s`
-- `q n`: about `8 s`
 - final `q c`: about `15 s`
 
 Important calibration note
@@ -60,7 +60,6 @@ Target commands
 ```text
 q          # print current target and stored presets
 q c        # center of the runner
-q n        # near-sensor endpoint of the runner
 q f        # far endpoint of the runner
 q <cm>     # explicit offset from center, example: q -2.0
 ```
@@ -68,7 +67,8 @@ q <cm>     # explicit offset from center, example: q -2.0
 Important
 - `q` commands do not move the motor by themselves.
 - If the firmware is idle, motion starts only after `r`.
-- If the firmware is already `RUNNING`, `q c`, `q n`, `q f`, and `q <cm>` change target live.
+- If the firmware is already `RUNNING`, `q c`, `q f`, and `q <cm>` change target live.
+- `q n` is legacy / paused and should not be used for current validation runs.
 
 Fresh calibration from scratch
 
@@ -78,8 +78,8 @@ Use this when:
 - `s` shows any calibration flag as `no`
 
 Physical action before each command
-- before `l`: hold the beam fully DOWN, ball at the far end from the Sharp distance sensor
-- before `u`: hold the beam fully UP, ball at the near end close to the Sharp distance sensor
+- before `l`: hold the beam fully DOWN, ball at the far end from the HC-SR04
+- before `u`: hold the beam fully UP, ball at the near end close to the HC-SR04
 - before `p`: place the ball at the physical center of the runner and hold it steady
 - before `b`: remove hands and keep clear of the mechanism
 
@@ -143,17 +143,6 @@ k
 e 0
 ```
 
-Near-side target
-
-```text
-s
-q n
-e 1
-r
-k
-e 0
-```
-
 Far-side target
 
 ```text
@@ -181,7 +170,6 @@ Change target during a run
 If the system is already running, send these directly:
 
 ```text
-q n
 q f
 q c
 q <cm>
@@ -240,7 +228,7 @@ Local serial-logger commands
 ```text
 /bringup
 /std center_reg
-/std step3
+/std center_far
 /std disturb
 /diag
 /quit
@@ -248,12 +236,13 @@ Local serial-logger commands
 
 What they do
 - `/bringup`: guided calibration flow including save with `v`
+- `/std center_far`: active center/far/center tracking run with `8 s -> 8 s -> 15 s` holds
 - `/diag`: prints a status snapshot
 - `/quit`: stop safely, disable driver, close logger, auto-generate plot
 
-Sensor block characterization
+Archived sensor block characterization
 
-Use this workflow to compare sensors and targets before any more controller tuning.
+Use this workflow only when revisiting the archived sensor-selection study.
 
 Runner setup:
 - mark the runner at fixed points `p00 ... pNN`, about `2 cm` apart
@@ -350,6 +339,6 @@ Recommended manual workflow
 2. Start the serial logger.
 3. Calibrate once with `/bringup`, or manually with `d`, `l`, `u`, `p`, `e 1`, `b`, `v`, `s`.
 4. Start the retest run: `q c`, `e 1`, `r`.
-5. Change target live in this order: `q f`, `q n`, `q c`.
+5. Change target live in this order: `q f`, `q c`.
 6. Capture a final `s`.
 7. End with `/quit`.

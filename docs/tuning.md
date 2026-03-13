@@ -38,10 +38,9 @@ Primary tuning knobs:
 Use these target classes for runtime tuning:
 - `q c`: center regulation / neutral-bias stability
 - `q f`: far-end endpoint hold
-- `q n`: near-end endpoint hold
-- `q c -> q f -> q n -> q c`: transition and asymmetry test
+- `q c -> q f -> q c`: active transition and return-to-center test
 
-This project's recent debugging work showed that center behavior and endpoint behavior are not tuned by the same parameters.
+Current active tuning scope is center/far only. `q n` remains in the restored HC-SR04 runtime for compatibility/history, but near-side validation is paused.
 
 ## 3. What to Look For in the Plots
 
@@ -62,8 +61,8 @@ Most important signals:
 
 Key metrics to judge each run:
 - center crossings during `q c`
-- steady-state error at `q c`, `q f`, and `q n`
-- endpoint shortfall, especially on the positive/near side
+- steady-state error at `q c` and `q f`
+- far-end shortfall
 - invalid sonar rows and peak sonar age
 - fault rows and fault labels
 - whether `theta_deg` is reaching `theta_cmd_deg` while the ball is still short of target
@@ -82,14 +81,10 @@ Fix first if any of these occur:
 Reason:
 - false validity/fault transitions corrupt every later tuning decision
 
-### Step 2 — Endpoint asymmetry
-Use `q f` and `q n`.
+### Step 2 — Far endpoint authority
+Use `q f`.
 
-If `q f` works but `q n` is short:
-- increase `kPositiveSideKpScale`
-- then increase `kPositiveSideKiScale` if needed
-
-If both ends are weak:
+If the far endpoint is weak:
 - revisit base `Kp`
 - then base `Ki`
 
@@ -135,7 +130,7 @@ Generated report artifacts:
 
 Recent tuning/debugging work established these recurring themes:
 - center regulation and endpoint tracking require different handling
-- the near side is harder than the far side and often needs extra positive-side authority
+- the far endpoint is currently the only endpoint in active validation; near-side work is paused
 - HC-SR04 intermittent miss bursts can mimic a control problem if validity gating is too strict
 - the controller must be interpreted using both `x_linear` and `x_ctrl`, not only one coordinate
-- `q c`, `q f`, and `q n` should be evaluated separately before making global tuning changes
+- `q c` and `q f` should be evaluated separately before making global tuning changes

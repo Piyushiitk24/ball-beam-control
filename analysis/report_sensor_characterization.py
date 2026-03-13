@@ -34,6 +34,12 @@ class RunArtifacts:
     metadata: dict[str, object]
 
 
+def _score_column_name(df: pd.DataFrame) -> str:
+    if "median_distance_cm" in df.columns:
+        return "median_distance_cm"
+    return "mean_distance_cm"
+
+
 def _resolve_run_artifacts(path: Path) -> RunArtifacts:
     if path.is_file():
         run_dir = path.parent
@@ -91,6 +97,7 @@ def _prepare_points_df(points_path: Path) -> pd.DataFrame:
         "valid_samples",
         "valid_fraction",
         "mean_distance_cm",
+        "median_distance_cm",
         "std_distance_cm",
         "min_distance_cm",
         "max_distance_cm",
@@ -104,6 +111,7 @@ def _prepare_points_df(points_path: Path) -> pd.DataFrame:
 
 def _build_pair_df(points_df: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
+    score_column = _score_column_name(points_df)
     for point_number, group in points_df.groupby("point_number", sort=True):
         out_rows = group[group["point_direction"] == "out"]
         ret_rows = group[group["point_direction"] == "ret"]
@@ -114,23 +122,28 @@ def _build_pair_df(points_df: pd.DataFrame) -> pd.DataFrame:
         ret_row = ret_rows.iloc[0]
         out_mean = float(out_row["mean_distance_cm"]) if pd.notna(out_row["mean_distance_cm"]) else math.nan
         ret_mean = float(ret_row["mean_distance_cm"]) if pd.notna(ret_row["mean_distance_cm"]) else math.nan
+        out_score = float(out_row[score_column]) if score_column in out_row and pd.notna(out_row[score_column]) else out_mean
+        ret_score = float(ret_row[score_column]) if score_column in ret_row and pd.notna(ret_row[score_column]) else ret_mean
         out_std = float(out_row["std_distance_cm"]) if pd.notna(out_row["std_distance_cm"]) else math.nan
         ret_std = float(ret_row["std_distance_cm"]) if pd.notna(ret_row["std_distance_cm"]) else math.nan
         out_valid_fraction = float(out_row["valid_fraction"]) if pd.notna(out_row["valid_fraction"]) else 0.0
         ret_valid_fraction = float(ret_row["valid_fraction"]) if pd.notna(ret_row["valid_fraction"]) else 0.0
         mismatch = math.nan
         paired_mean = math.nan
-        if math.isfinite(out_mean) and math.isfinite(ret_mean):
-            mismatch = abs(out_mean - ret_mean)
-            paired_mean = 0.5 * (out_mean + ret_mean)
+        if math.isfinite(out_score) and math.isfinite(ret_score):
+            mismatch = abs(out_score - ret_score)
+            paired_mean = 0.5 * (out_score + ret_score)
 
         rows.append(
             {
                 "point_number": int(point_number),
+                "score_metric": "median" if score_column == "median_distance_cm" else "mean",
                 "out_label": str(out_row["label"]),
                 "ret_label": str(ret_row["label"]),
                 "out_mean_cm": out_mean,
                 "ret_mean_cm": ret_mean,
+                "out_score_cm": out_score,
+                "ret_score_cm": ret_score,
                 "out_std_cm": out_std,
                 "ret_std_cm": ret_std,
                 "out_valid_fraction": out_valid_fraction,
@@ -257,10 +270,11 @@ def _df_to_markdown(df: pd.DataFrame) -> str:
 def _plot_run(run_artifacts: RunArtifacts, pair_df: pd.DataFrame, output_path: Path) -> None:
     fig, axes = plt.subplots(3, 1, figsize=(10.5, 8.5), sharex=True)
     point_numbers = pair_df["point_number"].astype(int)
+    score_metric = str(pair_df["score_metric"].iloc[0]) if "score_metric" in pair_df.columns and not pair_df.empty else "mean"
 
-    axes[0].plot(point_numbers, pair_df["out_mean_cm"], marker="o", linewidth=1.8, label="Outbound")
-    axes[0].plot(point_numbers, pair_df["ret_mean_cm"], marker="s", linewidth=1.8, label="Return")
-    axes[0].set_ylabel("Mean distance (cm)")
+    axes[0].plot(point_numbers, pair_df["out_score_cm"], marker="o", linewidth=1.8, label="Outbound")
+    axes[0].plot(point_numbers, pair_df["ret_score_cm"], marker="s", linewidth=1.8, label="Return")
+    axes[0].set_ylabel(f"{score_metric.title()} distance (cm)")
     axes[0].legend(loc="best")
 
     axes[1].plot(point_numbers, pair_df["out_std_cm"], marker="o", linewidth=1.6, label="Outbound")
@@ -369,11 +383,14 @@ def main() -> None:
                     "target_name": artifacts.metadata.get("target_name", ""),
                     "block_label": artifacts.metadata.get("block_label", ""),
                     "repeat_index": int(artifacts.metadata.get("repeat_index", 0)),
-                    "point_number": int(row.point_number),
+                "point_number": int(row.point_number),
+                    "score_metric": row.score_metric,
                     "out_label": row.out_label,
                     "ret_label": row.ret_label,
                     "out_mean_cm": _float_or_blank(float(row.out_mean_cm)),
                     "ret_mean_cm": _float_or_blank(float(row.ret_mean_cm)),
+                    "out_score_cm": _float_or_blank(float(row.out_score_cm)),
+                    "ret_score_cm": _float_or_blank(float(row.ret_score_cm)),
                     "out_std_cm": _float_or_blank(float(row.out_std_cm)),
                     "ret_std_cm": _float_or_blank(float(row.ret_std_cm)),
                     "out_valid_fraction": _float_or_blank(float(row.out_valid_fraction)),
@@ -393,7 +410,9 @@ def main() -> None:
     pair_report_df = pd.DataFrame(pair_rows)
 
     group_rows: list[dict[str, object]] = []
-    for (sensor_name, target_name), group in run_df.groupby(["sensor_name", "target_name"], sort=False):
+    group_cols = ["sensor_name", "sensor_mode", "target_name", "timer1_stress", "block_label"]
+    for group_key, group in run_df.groupby(group_cols, sort=False):
+        sensor_name, sensor_mode, target_name, timer1_stress, block_label = group_key
         longest_window = pd.to_numeric(group["longest_reliable_window_points"], errors="coerce")
         median_roundtrip = pd.to_numeric(group["median_roundtrip_mismatch_cm"], errors="coerce")
         median_std = pd.to_numeric(group["median_stddev_cm"], errors="coerce")
@@ -401,7 +420,10 @@ def main() -> None:
         group_rows.append(
             {
                 "sensor_name": sensor_name,
+                "sensor_mode": sensor_mode,
                 "target_name": target_name,
+                "timer1_stress": int(timer1_stress),
+                "block_label": block_label,
                 "runs": len(group),
                 "min_longest_reliable_window_points": int(longest_window.min()),
                 "median_longest_reliable_window_points": float(longest_window.median()),
@@ -447,7 +469,10 @@ def main() -> None:
         else:
             handle.write(
                 f"- Sensor: `{winner['sensor_name']}`\n"
+                f"- Mode: `{winner['sensor_mode']}`\n"
                 f"- Target: `{winner['target_name']}`\n"
+                f"- Timer1 stress: `{int(winner['timer1_stress'])}`\n"
+                f"- Block label: `{winner['block_label']}`\n"
                 f"- Minimum reliable window across repeats: `{int(winner['min_longest_reliable_window_points'])}` points\n"
                 f"- Median round-trip mismatch: `{winner['median_roundtrip_mismatch_cm']}` cm\n"
                 f"- Median stddev: `{winner['median_stddev_cm']}` cm\n"

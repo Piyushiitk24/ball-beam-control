@@ -1,0 +1,68 @@
+#pragma once
+
+#include <Arduino.h>
+
+#include "config.h"
+#include "sensors/sensor_types.h"
+
+namespace bb {
+
+class HCSR04Sensor {
+ public:
+  HCSR04Sensor(uint8_t trig_pin, uint8_t echo_pin);
+
+  void begin();
+  void service(uint32_t now_us, uint32_t now_ms);
+
+  bool hasSample() const;
+  bool getPosition(float& x_cm, float& x_filt_cm, float& distance_raw_cm) const;
+  bool hasFreshSample(uint32_t now_ms) const;
+  uint32_t sampleAgeMs(uint32_t now_ms) const;
+  bool hasTimeout() const;
+  uint16_t consecutiveMissCount() const;
+  void getDiag(uint32_t now_ms, SonarDiag& diag) const;
+
+  void handleEchoEdgeIsr(uint32_t now_us, bool level_high);
+
+ private:
+  // Rolling "NewPing-like" window across time (not a burst).
+  static constexpr uint8_t kWindow = SONAR_MEDIAN_WINDOW;
+
+  uint8_t trig_pin_;
+  uint8_t echo_pin_;
+
+  float history_[kWindow];
+  uint8_t valid_flags_[kWindow];
+  uint8_t history_count_;
+  uint8_t history_index_;
+  uint8_t valid_count_;
+
+  bool ema_initialized_;
+  float ema_cm_;
+
+  bool has_sample_;
+  float last_distance_cm_;
+  float last_x_cm_;
+  float last_x_filt_cm_;
+  uint32_t last_sample_ms_;
+  uint16_t valid_streak_;
+  uint16_t consecutive_miss_count_;
+  uint16_t timeout_count_;
+  uint16_t jump_reject_count_;
+
+  bool timeout_flag_;
+  uint32_t last_trigger_us_;
+  bool waiting_echo_;
+
+  // Only accept echo edges after we sent a trigger pulse.
+  volatile bool echo_armed_;
+  volatile uint32_t rise_us_;
+  volatile uint32_t pulse_width_us_;
+  volatile bool awaiting_fall_;
+  volatile bool sample_ready_;
+
+  void pushAttempt(bool valid, float sample_cm);
+  float medianHistory() const;
+};
+
+}  // namespace bb

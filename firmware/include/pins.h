@@ -8,10 +8,10 @@ constexpr uint8_t PIN_STEP = 2;
 constexpr uint8_t PIN_DIR = 3;
 constexpr uint8_t PIN_EN = 4;
 
-// Active ball-position sensor: Sharp GP2Y0A21YK0F analog IR.
+// Experimental / archived Sharp GP2Y0A21YK0F analog IR input.
 constexpr uint8_t PIN_SHARP_IR = A0;
 
-// Archived HC-SR04 pins kept for diagnostic / backup firmware.
+// Active ball-position sensor: HC-SR04 ultrasonic rangefinder.
 constexpr uint8_t PIN_TRIG = 8;
 constexpr uint8_t PIN_ECHO = 9;
 

@@ -2,6 +2,11 @@
 
 This experiment track compares the available ball-position sensors and candidate rolling targets before any further controller tuning.
 
+Status:
+- this remains archived exploratory evidence
+- the active controller path has reverted to the archived HC-SR04 runtime
+- current closed-loop validation is center/far only, not sensor-shootout driven
+
 Decision order:
 - compare `Sharp GP2Y0A21YK0F` vs `HC-SR04` using the `40 mm` table tennis ball
 - keep the winning sensor mounted

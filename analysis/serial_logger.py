@@ -525,11 +525,11 @@ class SerialLogger:
             "  /diag                 Send: s\n"
             "  /bringup              Guided calibration flow (recommended)\n"
             "  /std center_reg       Standard center-regulation run\n"
-            "  /std step3            Standard 3-position step-tracking run\n"
+            "  /std center_far       Standard center/far/center step-tracking run\n"
             "  /std disturb          Standard disturbance-rejection run\n"
             "  /as5600_stats [N]     Not available in compact firmware\n"
             "  /sonar_stats [N]      Not available in compact firmware\n"
-            "\nDevice commands: type anything else and press Enter (e.g. s, d, l, u, p, q c, q n, q -2.0, b, v, r, k)\n"
+            "\nDevice commands: type anything else and press Enter (e.g. s, d, l, u, p, q c, q f, q -2.0, b, v, r, k)\n"
         )
 
     def _drain_rx_nonblock(self, max_lines: int = 500) -> list[str]:
@@ -621,18 +621,7 @@ class SerialLogger:
         self._log_host_marker("stop", run=run_name)
 
     def _cmd_std_center_reg(self) -> None:
-        sp = self._query_setpoint()
-        if not sp:
-            print("FAIL: could not read setpoint presets. Capture limits first.")
-            return
-        near_mid = sp["near_mid_cm"]
-        far_mid = sp["far_mid_cm"]
-        if not math.isfinite(near_mid) or not math.isfinite(far_mid):
-            print("FAIL: setpoint presets are unavailable. Capture limits first.")
-            return
-        self._log_event(
-            f"HOST_STD,manifest,run=center_reg,near_target_cm={near_mid:.4f},far_target_cm={far_mid:.4f},duration_s=12"
-        )
+        self._log_event("HOST_STD,manifest,run=center_reg,duration_s=12")
         resp = self._prompt_user(
             "\nCENTER REGULATION\nPlace the ball near either off-center preset, then press Enter to start and release."
         )
@@ -649,33 +638,30 @@ class SerialLogger:
         self._stop_standard_run("center_reg")
         print("Standard run complete: center_reg")
 
-    def _cmd_std_step3(self) -> None:
+    def _cmd_std_center_far(self) -> None:
         sp = self._query_setpoint()
         if not sp:
             print("FAIL: could not read setpoint presets. Capture limits first.")
             return
-        near_mid = sp["near_mid_cm"]
         far_mid = sp["far_mid_cm"]
-        if not math.isfinite(near_mid) or not math.isfinite(far_mid):
-            print("FAIL: setpoint presets are unavailable. Capture limits first.")
+        if not math.isfinite(far_mid):
+            print("FAIL: far-end preset is unavailable. Capture limits first.")
             return
         self._log_event(
-            "HOST_STD,manifest,run=step3,"
-            f"near_target_cm={near_mid:.4f},far_target_cm={far_mid:.4f},holds_s=4|8|8|8|8"
+            "HOST_STD,manifest,run=center_far,"
+            f"far_target_cm={far_mid:.4f},holds_s=8|8|15"
         )
-        print("\nSTEP TRACKING 3POS\nRunning: center -> near endpoint -> center -> far endpoint -> center")
+        print("\nSTEP TRACKING CENTER/FAR\nRunning: center -> far endpoint -> center")
         if self._setpoint_command("c") is None:
             print("FAIL: could not set center reference.")
             return
-        if not self._start_standard_run("step3"):
+        if not self._start_standard_run("center_far"):
             return
 
         phases = [
-            ("hold_center_1", "c", 4.0),
-            ("hold_near", "n", 8.0),
-            ("hold_center_2", "c", 8.0),
+            ("hold_center_1", "c", 8.0),
             ("hold_far", "f", 8.0),
-            ("hold_center_3", "c", 8.0),
+            ("hold_center_2", "c", 15.0),
         ]
         for phase, cmd_arg, duration_s in phases:
             if self._setpoint_command(cmd_arg) is None:
@@ -683,8 +669,13 @@ class SerialLogger:
                 break
             self._set_phase(phase)
             self._sleep_with_rx(duration_s)
-        self._stop_standard_run("step3")
-        print("Standard run complete: step3")
+        self._stop_standard_run("center_far")
+        print("Standard run complete: center_far")
+
+    def _cmd_std_step3(self) -> None:
+        print("LEGACY: /std step3 is deprecated. Running /std center_far instead without q n.")
+        self._log_host_marker("legacy_alias", alias="step3", redirect="center_far")
+        self._cmd_std_center_far()
 
     def _cmd_std_disturb(self) -> None:
         sp = self._query_setpoint()
@@ -752,12 +743,16 @@ class SerialLogger:
 
         prev_suppress = self._suppress_snapshots
         self._suppress_snapshots = True
+        bringup_complete = False
 
         try:
             print("Safety stop: sending k, then e 0 ...")
             self._send("k")
             time.sleep(0.05)
             self._send("e 0")
+            print("Disabling telemetry during guided calibration (sending t 0)...")
+            self._send("t 0")
+            self._wait_for_line(1.0, prefixes=("OK,telemetry=0",))
             print("Resetting calibration (sending d)...")
             self._send("d")
             self._wait_for_line(1.0, prefixes=("OK,cal_reset_saved",))
@@ -841,6 +836,11 @@ class SerialLogger:
                 print("FAIL: save failed.")
                 return
 
+            print("\nRe-enabling telemetry for the next run (sending t 1)...")
+            self._send("t 1")
+            self._wait_for_line(1.0, prefixes=("OK,telemetry=1",))
+            bringup_complete = True
+
             print(
                 "\nBRING-UP COMPLETE\n"
                 "Next steps:\n"
@@ -849,8 +849,7 @@ class SerialLogger:
                 "     q c\n"
                 "     e 1\n"
                 "     r\n"
-                "  2) Change target live if needed:\n"
-                "     q n\n"
+                "  2) Active validation scope:\n"
                 "     q f\n"
                 "     q c\n"
                 "  3) Stop:\n"
@@ -858,6 +857,9 @@ class SerialLogger:
                 "     e 0\n"
             )
         finally:
+            if not bringup_complete:
+                self._send("t 0", echo=False)
+                self._wait_for_line(0.6, prefixes=("OK,telemetry=0",))
             self._suppress_snapshots = prev_suppress
 
     def run(self) -> None:
@@ -948,17 +950,19 @@ class SerialLogger:
                         self._cmd_bringup()
                     elif cmd == "/std":
                         if len(parts) != 2:
-                            print("usage: /std center_reg|step3|disturb")
+                            print("usage: /std center_reg|center_far|disturb")
                             continue
                         std_name = parts[1].lower()
                         if std_name == "center_reg":
                             self._cmd_std_center_reg()
+                        elif std_name == "center_far":
+                            self._cmd_std_center_far()
                         elif std_name == "step3":
                             self._cmd_std_step3()
                         elif std_name == "disturb":
                             self._cmd_std_disturb()
                         else:
-                            print("usage: /std center_reg|step3|disturb")
+                            print("usage: /std center_reg|center_far|disturb")
                     elif cmd == "/as5600_stats":
                         n = 50
                         if len(parts) == 2:

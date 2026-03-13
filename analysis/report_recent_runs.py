@@ -256,11 +256,20 @@ def _diagnosis_label(refs: list[float],
     if len(refs) == 1 and abs(refs[0]) <= 1.0e-4 and phases[0].crossings >= 10:
         return "center oscillation"
 
-    for phase in phases:
-        if phase.x_ref_cm > 0.5 and abs(phase.x_end_cm - phase.x_ref_cm) > 2.0:
-            return "near-side undercommand"
-        if phase.x_ref_cm < -0.5 and abs(phase.x_end_cm - phase.x_ref_cm) > 2.0:
+    center_phases = [phase for phase in phases if abs(phase.x_ref_cm) <= 1.0e-4]
+    far_phases = [phase for phase in phases if phase.x_ref_cm < -0.5]
+    near_phases = [phase for phase in phases if phase.x_ref_cm > 0.5]
+
+    if center_phases and abs(center_phases[-1].x_end_cm) > 1.5:
+        return "center settling error"
+
+    for phase in far_phases:
+        if abs(phase.x_end_cm - phase.x_ref_cm) > 2.0:
             return "far-side shortfall"
+
+    for phase in near_phases:
+        if abs(phase.x_end_cm - phase.x_ref_cm) > 2.0:
+            return "near-side undercommand"
 
     if phases and all(phase.fault_rows == 0 for phase in phases):
         return "tracking improved"

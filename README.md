@@ -24,6 +24,9 @@ Run these in a normal terminal:
 ```bash
 cd /Users/piyush/code/ball-beam-control
 
+# Restore the archived HC-SR04 runtime as the active firmware path
+./.venv/bin/python analysis/switch_firmware_main.py --mode hcsr04_runtime
+
 # Build
 pio run -e nano_new
 
@@ -53,7 +56,6 @@ q c
 e 1
 r
 q f
-q n
 q c
 s
 /quit
@@ -62,7 +64,6 @@ s
 Timing for the live setpoint sequence:
 - hold the first `q c` segment for about `8 s`
 - then `q f` for about `8 s`
-- then `q n` for about `8 s`
 - then the final `q c` for about `15 s`
 
 Important:
@@ -98,12 +99,12 @@ If you use `/bringup`, the logger will prompt you for the required physical acti
 
 - Before `l`
   - Move the beam fully down by hand.
-  - Keep the ball at the far end, away from the Sharp distance sensor.
+  - Keep the ball at the far end, away from the HC-SR04.
   - Hold it steady.
 
 - Before `u`
   - Move the beam fully up by hand.
-  - Keep the ball at the near end, close to the Sharp distance sensor.
+  - Keep the ball at the near end, close to the HC-SR04.
   - Hold it steady.
 
 - Before `p`
@@ -141,10 +142,6 @@ If you use `/bringup`, the logger will prompt you for the required physical acti
 - Before `q f`
   - Do nothing special.
   - This changes the target to the far endpoint while running.
-
-- Before `q n`
-  - Do nothing special.
-  - This changes the target to the near endpoint while running.
 
 - Before the final `q c`
   - Do nothing special.
@@ -193,9 +190,6 @@ If you use `/bringup`, the logger will prompt you for the required physical acti
 
 - `q c`
   - Set target to center.
-
-- `q n`
-  - Set target to near endpoint.
 
 - `q f`
   - Set target to far endpoint.
@@ -267,6 +261,7 @@ In Terminal A:
 ```bash
 cd /Users/piyush/code/ball-beam-control
 ls /dev/cu.usb*
+./.venv/bin/python analysis/switch_firmware_main.py --mode hcsr04_runtime
 pio run -e nano_new
 pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
 ```
@@ -292,12 +287,6 @@ Wait about `8 s`, then:
 
 ```text
 q f
-```
-
-Wait about `8 s`, then:
-
-```text
-q n
 ```
 
 Wait about `8 s`, then:
@@ -341,7 +330,6 @@ q c
 e 1
 r
 q f
-q n
 q c
 k
 e 0
@@ -390,7 +378,7 @@ Use this mental model:
 6. Start control with `r`.
 7. Change target live with more `q ...` commands.
 
-### What `q`, `q c`, `q n`, and `q f` mean
+### What `q`, `q c`, and `q f` mean
 
 - `q`
   - Query only.
@@ -398,8 +386,6 @@ Use this mental model:
   - It prints the current target plus the two stored presets.
 - `q c`
   - Target is runner center.
-- `q n`
-  - Target is the calibrated near-sensor endpoint.
 - `q f`
   - Target is the calibrated far endpoint.
 - `q <cm>`
@@ -410,6 +396,7 @@ Important:
 
 - If the system is idle, `q ...` only changes the target. Motion starts after `r`.
 - If the system is already `RUNNING`, `q ...` changes target live. Do not send another `r`.
+- `q n` still exists in the restored HC-SR04 runtime for compatibility, but near-side validation is paused and it is not part of the active workflow.
 
 ### Workflow 1 — Fresh Calibration From Scratch
 
@@ -417,8 +404,8 @@ Use this after a fresh flash, a mechanical change, or when `s` shows any calibra
 
 #### Physical setup before each capture
 
-- Before `l`: hold the beam fully DOWN, with the ball at the far end away from the Sharp distance sensor.
-- Before `u`: hold the beam fully UP, with the ball at the near end close to the Sharp distance sensor.
+- Before `l`: hold the beam fully DOWN, with the ball at the far end away from the HC-SR04.
+- Before `u`: hold the beam fully UP, with the ball at the near end close to the HC-SR04.
 - Before `p`: place the ball at the physical center of the runner and hold it steady there. The firmware records runner center and actuator control origin here.
 - Before `b`: remove your hands and keep clear of the mechanism.
 
@@ -477,17 +464,6 @@ k
 e 0
 ```
 
-Near-side run:
-
-```text
-s
-q n
-e 1
-r
-k
-e 0
-```
-
 Far-side run:
 
 ```text
@@ -515,7 +491,6 @@ e 0
 If the system is already running, send target changes directly:
 
 ```text
-q n
 q f
 q c
 q -2.0
@@ -597,12 +572,12 @@ Run these from the local serial logger:
 
 ```text
 /std center_reg
-/std step3
+/std center_far
 /std disturb
 ```
 
 - `center_reg`: ball released off-center, recover to `q c`, total `12 s`
-- `step3`: `center -> near endpoint -> center -> far endpoint -> center`, total `36 s`
+- `center_far`: `center -> far endpoint -> center`, total `31 s`
 - `disturb`: hold `q c`, manual disturbance prompts at `5 s` and `10 s`, total `18 s`
 
 Recommended operator usage:
@@ -610,7 +585,7 @@ Recommended operator usage:
 | Test | What you do before starting | Local logger command | What happens |
 |------|-----------------------------|----------------------|--------------|
 | Center regulation | Place ball away from center, be ready to release | `/std center_reg` | Logger sets `q c`, starts run, logs `12 s` recovery |
-| 3-position step tracking | Start with ball near center | `/std step3` | Logger steps `q c -> q n -> q c -> q f -> q c` |
+| Center/far step tracking | Start with ball near center | `/std center_far` | Logger steps `q c -> q f -> q c` with `8 s -> 8 s -> 15 s` holds |
 | Disturbance rejection | Start centered, keep hand ready to nudge | `/std disturb` | Logger prompts you when to disturb |
 
 ---
@@ -650,7 +625,7 @@ Recommended operator usage:
 ### ISR Design
 
 - **Timer1 CTC** (40 kHz): step-pulse generation, integer-only, no `digitalWrite()`
-- No live ball-position sensor ISR; the Sharp sensor is sampled in the main loop
+- HC-SR04 echo capture runs through the live PCINT path while Timer1 continues to generate step pulses
 
 ### State Machine
 
@@ -660,7 +635,7 @@ SAFE_DISABLED → CALIB_SIGN → READY ⇄ RUNNING → FAULT
 
 ### Control Frame
 
-- Sharp GP2Y0A21YK0F on `A0` is the live ball-position sensor.
+- HC-SR04 on `D8/D9` is the live ball-position sensor.
 - Ball position is angle-corrected at runtime: the stored `sonar_*` offset from center is multiplied by `cos(theta_est)`.
 - `p` captures the physical runner center and also defines the actuator control origin.
 - AS5600 is used for calibration, run-start synchronization, and missed-step / drift verification.
@@ -671,26 +646,24 @@ SAFE_DISABLED → CALIB_SIGN → READY ⇄ RUNNING → FAULT
 
 ## 8 — Position Sensor
 
-### Current: Sharp GP2Y0A21YK0F (Analog IR)
+### Current: HC-SR04 (Ultrasonic)
 
-Wiring: A0 → VO, 5 V → VCC, GND → GND.  
-Main-loop analog sampling at `SHARP_IR_SAMPLE_PERIOD_MS` (default `40 ms`, about `25 Hz`).
-
-Valid range: `10–80 cm`. Conversion: `distance_cm ≈ 29.988 × voltage^-1.173`.
+Wiring: D8 → TRIG, D9 → ECHO, 5 V → VCC, GND → GND.  
+Sampling runs through the live HC-SR04 driver with median filtering, EMA smoothing, and hold-last-good validity handling.
 
 Compatibility note:
-- runtime state, telemetry, and calibration still use `sonar_*` names
-- the archived pre-Sharp HC-SR04 runtime is kept under `firmware/experiments/backup/hcsr04_runtime/`
+- runtime state, telemetry, and calibration use `sonar_*` names because HC-SR04 is the active runtime path
+- Sharp check firmware and characterization tooling remain in the repo as archived exploratory work
 
 ### Isolation Tests
 
 ```bash
-# Sharp IR only
-./.venv/bin/python analysis/switch_firmware_main.py --mode sharp_ir_check
 # HC-SR04 only
 ./.venv/bin/python analysis/switch_firmware_main.py --mode hcsr04_check
 # Archived HC-SR04 runtime
 ./.venv/bin/python analysis/switch_firmware_main.py --mode hcsr04_runtime
+# Sharp IR only
+./.venv/bin/python analysis/switch_firmware_main.py --mode sharp_ir_check
 # AS5600 only
 ./.venv/bin/python analysis/switch_firmware_main.py --mode as5600_check
 # Restore full controller
@@ -723,23 +696,25 @@ pio run -e nano_new -t upload
 
 ---
 
-## 10 — Position Sensor Filtering Tuning (Sharp IR)
+## 10 — Position Sensor Filtering Tuning (HC-SR04)
 
-Main-loop analog sampling → valid-range gating → jump clamp → EMA → hold-last-good across intermittent invalid reads.
+Live HC-SR04 processing uses trigger/echo acquisition, median filtering, EMA smoothing, jump rejection, and age-based hold-last-good validity.
 
 | Parameter | Default | Effect |
 |-----------|---------|--------|
-| `SHARP_IR_SAMPLE_PERIOD_MS` | 40 | ADC sample interval (~25 Hz) |
-| `SHARP_IR_MIN_VALID_CM` | 10.0f | Minimum accepted distance |
-| `SHARP_IR_MAX_VALID_CM` | 80.0f | Maximum accepted distance |
-| `SHARP_IR_MAX_JUMP_CM` | 25.0f | Per-sample jump clamp |
-| `SONAR_EMA_ALPHA` | 0.3f | EMA smoothing (lower = smoother) |
+| `SONAR_TRIGGER_PERIOD_US` | 40000 | Ping interval |
+| `SONAR_ECHO_TIMEOUT_US` | 25000 | Echo timeout guard |
 | `SONAR_POS_SAMPLE_FRESH_MS` | 500 | Fresh-sample window |
-| `SONAR_MAX_CONSECUTIVE_MISSES` | 6 | Compatibility threshold for recorded miss bursts |
+| `SONAR_MEDIAN_WINDOW` | 11 | Median filter window |
+| `SONAR_MIN_VALID_IN_WINDOW` | 3 | Minimum accepted samples per window |
+| `SONAR_MAX_VALID_MM` | 650.0f | Maximum accepted distance |
+| `SONAR_MAX_JUMP_CM` | 3.0f | Per-sample jump clamp |
+| `SONAR_EMA_ALPHA` | 0.3f | EMA smoothing |
+| `SONAR_MAX_CONSECUTIVE_MISSES` | 6 | Diagnostic miss counter only |
 
 Override via `build_flags` in `firmware/platformio.ini`:
 ```ini
-build_flags = -D SHARP_IR_SAMPLE_PERIOD_MS=40 -D SHARP_IR_MAX_JUMP_CM=20.0f -D SONAR_EMA_ALPHA=0.3f
+build_flags = -D SONAR_TRIGGER_PERIOD_US=40000UL -D SONAR_MAX_JUMP_CM=3.0f -D SONAR_EMA_ALPHA=0.3f
 ```
 
 ---
@@ -845,7 +820,7 @@ LATEST_RUN="$(find data/runs -maxdepth 1 -type d -name 'run_*' | sort | tail -n 
 
 ## Sensor Selection Workflow
 
-Use this when you need to choose between `Sharp GP2Y0A21YK0F` and `HC-SR04`, or between the `40 mm` table tennis ball and a golf ball.
+This is archived exploratory workflow. The active controller path has reverted to the HC-SR04 runtime, and current closed-loop validation is center/far only.
 
 1. Mark the candidate runner span at fixed points `p00 ... pNN`, about `2 cm` apart.
 2. Mount one sensor only. Do not switch sensors within the same block.
