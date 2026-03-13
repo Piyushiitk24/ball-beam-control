@@ -4,6 +4,52 @@ Core rule
 - `q ...` sets the desired ball position.
 - `r` starts closed-loop control.
 - Once control is already running, send more `q ...` commands directly. Do not send another `r`.
+- each logger session creates one timestamped run folder under `data/runs/`
+- end each test with `/quit` so the run is stopped cleanly and plots are generated automatically
+
+Recommended morning hardware workflow
+
+Terminal A:
+
+```bash
+cd /Users/piyush/code/ball-beam-control
+ls /dev/cu.usb*
+pio run -e nano_new
+pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
+```
+
+Terminal B:
+
+```bash
+cd /Users/piyush/code/ball-beam-control
+./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1
+```
+
+Logger terminal:
+
+```text
+/bringup
+s
+q c
+e 1
+r
+q f
+q n
+q c
+s
+/quit
+```
+
+Hold times for the retest:
+- first `q c`: about `8 s`
+- `q f`: about `8 s`
+- `q n`: about `8 s`
+- final `q c`: about `15 s`
+
+Important calibration note
+- `/bringup` already sends `d`, `l`, `u`, `p`, `e 1`, `b`, and `v`
+- if you use `/bringup`, do not send a second manual `v`
+- if you calibrate manually, you must send `v` after `b` or the calibration is not saved
 
 Target commands
 
@@ -46,6 +92,8 @@ b
 v
 s
 ```
+
+This manual sequence includes `v` because you are saving calibration yourself. The `/bringup` helper includes that same save step internally.
 
 What the calibration commands now mean
 - `l` stores the lower actuator limit and the far runner endpoint
@@ -144,9 +192,16 @@ k
 e 0
 ```
 
+Recommended clean logger exit
+
+```text
+/quit
+```
+
 Meaning
 - `k` stops closed-loop control
 - `e 0` disables the motor driver
+- `/quit` sends `k`, then `e 0`, exits the logger, and writes the summary plot into the run folder
 
 If `r` prints `ERR,run_blocked`
 
@@ -187,10 +242,16 @@ Local serial-logger commands
 /quit
 ```
 
+What they do
+- `/bringup`: guided calibration flow including save with `v`
+- `/diag`: prints a status snapshot
+- `/quit`: stop safely, disable driver, close logger, auto-generate plot
+
 Recommended manual workflow
 1. Build and upload firmware.
 2. Start the serial logger.
-3. Calibrate once: `d`, `l`, `u`, `p`, `e 1`, `b`, `v`, `s`.
-4. Start a center run: `q c`, `e 1`, `r`.
-5. Change target live: `q n`, `q f`, `q c`.
-6. Stop with `k`, `e 0`.
+3. Calibrate once with `/bringup`, or manually with `d`, `l`, `u`, `p`, `e 1`, `b`, `v`, `s`.
+4. Start the retest run: `q c`, `e 1`, `r`.
+5. Change target live in this order: `q f`, `q n`, `q c`.
+6. Capture a final `s`.
+7. End with `/quit`.

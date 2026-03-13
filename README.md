@@ -42,9 +42,35 @@ cd /Users/piyush/code/ball-beam-control
 
 After this, type the device commands below into the logger terminal and press Enter after each one.
 
-### 3. Fresh Calibration and First Run
+### 3. Fresh Calibration and First Retest
 
-Use this exact command order:
+Recommended workflow from a fresh power-up or after reflashing:
+
+```text
+/bringup
+s
+q c
+e 1
+r
+q f
+q n
+q c
+s
+/quit
+```
+
+Timing for the live setpoint sequence:
+- hold the first `q c` segment for about `8 s`
+- then `q f` for about `8 s`
+- then `q n` for about `8 s`
+- then the final `q c` for about `15 s`
+
+Important:
+- `/bringup` already performs the full calibration flow and sends `v` to save calibration for you
+- if you do calibration manually instead of `/bringup`, you must still send `v` yourself after `b`
+- `/quit` sends `k`, then `e 0`, exits the logger, and triggers automatic plot generation for that run folder
+
+Manual calibration equivalent to `/bringup`:
 
 ```text
 s
@@ -56,18 +82,11 @@ e 1
 b
 v
 s
-t
-q c
-e 1
-r
-q f
-q n
-q c
-k
-e 0
 ```
 
-### 4. What You Should Physically Do Before Each Command
+### 4. What You Should Physically Do During Calibration and Test
+
+If you use `/bringup`, the logger will prompt you for the required physical actions. The equivalent manual actions are:
 
 - Before `s`
   - Do nothing special.
@@ -139,6 +158,10 @@ e 0
   - Do nothing special.
   - This disables the driver.
 
+- Before `/quit`
+  - Do nothing special.
+  - This stops the run cleanly, disables the driver, exits the logger, and writes the summary plot.
+
 ### 5. What the Main Commands Mean
 
 - `s`
@@ -188,7 +211,7 @@ e 0
 
 ### 6. What You Want to See After Calibration
 
-After the second `s`, you want these:
+After `/bringup` completes, or after the manual final `s`, you want these:
 
 - `CAL,zero_calibrated=yes`
 - `CAL,limits_calibrated=yes`
@@ -235,7 +258,77 @@ That writes:
 - `docs/experiments/2026-03-control-debugging/generated/plots/`
 - `docs/experiments/2026-03-control-debugging/generated/metrics/`
 
-### 8. Daily Use After Calibration Is Already Saved
+### 8. Morning Hardware Test Workflow
+
+Use this exact workflow when you connect hardware and want one clean logged test run.
+
+In Terminal A:
+
+```bash
+cd /Users/piyush/code/ball-beam-control
+ls /dev/cu.usb*
+pio run -e nano_new
+pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
+```
+
+In Terminal B:
+
+```bash
+cd /Users/piyush/code/ball-beam-control
+./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1
+```
+
+Then in the logger terminal:
+
+```text
+/bringup
+s
+q c
+e 1
+r
+```
+
+Wait about `8 s`, then:
+
+```text
+q f
+```
+
+Wait about `8 s`, then:
+
+```text
+q n
+```
+
+Wait about `8 s`, then:
+
+```text
+q c
+```
+
+Wait about `15 s`, then finish with:
+
+```text
+s
+/quit
+```
+
+After the logger exits, inspect the latest run:
+
+```bash
+cd /Users/piyush/code/ball-beam-control
+LATEST_RUN="$(find data/runs -maxdepth 1 -type d -name 'run_*' | sort | tail -n 1)"
+RUN_STEM="$(basename "$LATEST_RUN")"
+find "$LATEST_RUN" -maxdepth 2 -type f | sort
+open "$LATEST_RUN/plots/${RUN_STEM}_summary.png"
+```
+
+Keep these files for analysis:
+- `run_<timestamp>_telemetry.csv`
+- `run_<timestamp>_events.txt`
+- `run_<timestamp>_raw.log`
+
+### 9. Daily Use After Calibration Is Already Saved
 
 If you already calibrated and nothing changed mechanically, you can skip `d l u p b v`.
 
