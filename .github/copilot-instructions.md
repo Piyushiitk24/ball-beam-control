@@ -2,82 +2,64 @@
 
 ## Architecture
 
-The repo now has two controller tracks that must be documented differently:
+This repo has three distinct tracks:
 
-| Track | Path | Status | Purpose |
-| --- | --- | --- | --- |
-| **Runtime controller** | `firmware/` | **Authoritative** | Current single position PID, dual-coordinate ball feedback, AS5600 safety/verification, HC-SR04-based runner control |
-| **Archived design model** | `model/first_principles/` | Historical/reference | First-principles nonlinear plant, linearization, and old cascade gain-design pipeline |
-| **Analysis/reporting** | `analysis/` | Active | Serial logging, plotting, run comparison, and thesis/report record generation |
+| Track | Path | Role |
+| --- | --- | --- |
+| Runtime controller | `firmware/` | **Authoritative** closed-loop implementation used on hardware |
+| Analysis and reporting | `analysis/` | Logging, plotting, run comparison, and experiment/report generation |
+| Archived design model | `model/first_principles/` | Historical first-principles derivation and old cascade gain-design pipeline |
 
-Current firmware state machine: `SAFE_DISABLED -> CALIB_SIGN -> READY -> RUNNING -> FAULT`
+Current runtime state machine: `SAFE_DISABLED -> CALIB_SIGN -> READY -> RUNNING -> FAULT`
 
-Active sensors and their roles:
-- **HC-SR04**: ball position along the runner; control-relevant signal with hold-last-good timeout policy
-- **AS5600**: actuator travel calibration, run-start synchronization, travel-limit safety, and drift verification
+The active runtime controller is the **single position PID** in `firmware/src/control/cascade_controller.cpp`, wired through `firmware/src/main.cpp` and tuned mainly from `firmware/include/config.h`.
 
-## Current Runtime Controller
+Treat `docs/modeling.md` as the canonical math/controller document. If runtime behavior changes, update it in the same change set.
 
-The runtime controller is **not** the old cascade controller from the first-principles design scripts.
+## Build and validation
 
-The current firmware uses:
-- `l`, `u`, `p` calibration frame
-- physical runner position `x_linear`
-- angle-corrected position `x_ctrl = x_linear * cos(theta_est)`
-- blended feedback position `x_feedback`
-- a **single position PID** that outputs an absolute actuator target in step counts
-- a motion generator that converts actuator position error to signed step rate
-- center-only bias adaptation and center hold logic
-- positive-side gain scaling to handle near-end asymmetry
+Use these commands for agent-driven verification:
 
-Key implementation references:
-- current controller: `firmware/src/control/cascade_controller.cpp`
-- runtime wiring/calibration/control loop: `firmware/src/main.cpp`
-- constants/tuning: `firmware/include/config.h`
-- telemetry/state types: `firmware/include/types.h`
+- Build firmware: `pio run -e nano_new`
+- Upload firmware: `pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1`
+- Fallback upload target for older bootloaders: `pio run -e nano_old -t upload`
+- Start host logger: `./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1`
+- Plot one run: `MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python analysis/plot_run.py --input data/runs/<run>`
+- Regenerate curated debug report: `MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python analysis/report_recent_runs.py`
 
-## Build, Upload, Logging, and Reporting
+There is no single automated test suite; validation is typically firmware build + relevant analysis/report scripts.
 
-```bash
-# Build
-pio run -e nano_new
+## Project-specific conventions
 
-# Upload
-pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1
+- **HC-SR04 is the active ball-position sensor.** AS5600 is for calibration, synchronization, travel-limit safety, and drift verification.
+- **Three runner coordinates matter:** `x_linear` (physical), `x_ctrl = x_linear * cos(theta_est)`, and `x_feedback` (target-dependent blend). Do not collapse them when reasoning about behavior.
+- **Center mode is special.** `q c` uses center-only logic and linear-position feedback; non-center targets use blended feedback.
+- **Calibration is ball-centric** via `l`, `u`, `p`, then `b`, then `v`. Signs are auto-derived from calibration measurements and the jog.
+- **Telemetry keeps `sonar_*` field names for compatibility** even though HC-SR04 is the live runtime sensor.
+- **`controller_gains.h` is not the active runtime path.** Treat it as archived model output unless the firmware is explicitly switched back.
 
-# Host logger
-./.venv/bin/python analysis/serial_logger.py --port /dev/cu.usbserial-A10N20X1
+## Important gotchas
 
-# Single-run plot
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python analysis/plot_run.py --input data/runs/<run>
+- Flash budget is tight on ATmega328P: **30,720 bytes flash, 2,048 bytes RAM**. Always check build size after firmware edits.
+- Use `F()` for `Serial.print` string literals and keep ISRs minimal: no floating-point work, no heavy logic, no verbose output.
+- `analysis/switch_firmware_main.py --mode ballbeam` is a script mode, **not** a PlatformIO environment.
+- When documenting debugging history, use `docs/experiments/2026-03-control-debugging/README.md` and its generated artifacts instead of reconstructing events from memory.
+- Current active validation scope is centered on `q c` and `q f`; `q n` remains implemented but is not the main validation path right now.
 
-# Curated recent-runs report
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python analysis/report_recent_runs.py
-```
+## Sources of truth
 
-## Critical Rules
+- Runtime math and controller description: `docs/modeling.md`
+- Operational workflow and calibration steps: `README.md`
+- Device command reference: `commands.md`
+- Debugging chronology and representative runs: `docs/experiments/2026-03-control-debugging/README.md`
+- Current runtime tuning knobs: `firmware/include/config.h`
+- Telemetry plotting: `analysis/plot_run.py`
+- Recent-runs report generation: `analysis/report_recent_runs.py`
 
-1. **Treat `docs/modeling.md` as the canonical math document.** If firmware behavior changes, update the math doc in the same change set.
-2. **Do not describe `controller_gains.h` as the active runtime controller path.** It belongs to the archived design pipeline unless a task is explicitly about that path.
-3. **Always check flash after firmware changes.** Budget: 30,720 bytes flash, 2,048 bytes RAM.
-4. **Use `F()` for `Serial.print` string literals and keep ISR work minimal.**
-5. **When documenting debugging progress, use the curated experiment record in `docs/experiments/2026-03-control-debugging/` rather than reconstructing history ad hoc.**
+## Scoped guidance
 
-## Current Sources of Truth
+Use the file-specific instructions in `.github/instructions/` when working in those areas:
 
-| Topic | File |
-| --- | --- |
-| Canonical math / controller description | `docs/modeling.md` |
-| Debugging chronology and representative runs | `docs/experiments/2026-03-control-debugging/README.md` |
-| Generated run index / plots / metrics | `docs/experiments/2026-03-control-debugging/generated/` |
-| Current firmware tuning knobs | `firmware/include/config.h` |
-| Calibration workflow / commands | `README.md`, `commands.md` |
-| Current telemetry plotting | `analysis/plot_run.py` |
-| Recent run report generation | `analysis/report_recent_runs.py` |
-
-## Scoped Guidance
-
-Detailed area-specific instructions live in `.github/instructions/`:
-- `firmware.instructions.md` — current runtime controller, calibration, safety, flash budget
-- `model.instructions.md` — archived first-principles pipeline and how it relates to runtime
-- `analysis.instructions.md` — telemetry schema, plotting, and experiment-record generation
+- `firmware.instructions.md` — flash budget, ISR safety, runtime control path, calibration, safety
+- `analysis.instructions.md` — telemetry schema, plotting, reporting, experiment record rules
+- `model.instructions.md` — archived first-principles/design pipeline and documentation rules
