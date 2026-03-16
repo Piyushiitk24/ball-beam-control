@@ -124,13 +124,16 @@ Interpretation:
 - near the endpoints, rely more on the physical runner coordinate
 
 ### 3.5 Center-mode special case
-The current controller intentionally overrides the general blended measurement at the center.
+The current controller intentionally overrides the general blended measurement only
+when `q c` is already near the calibrated center.
 
-In `q c` mode:
+Near center in `q c` mode:
 - measurement = `x_linear_filt_cm`
 - error = `-x_linear_filt_cm`
 
-So center regulation uses the direct linear runner coordinate and separate center-only logic, rather than the generic `x_feedback` path.
+Large return-to-center moves do **not** stay on this softened path.
+If `|x_linear_filt_cm| > kCenterBiasLearnPosWindowCm`, `q c` falls back to the
+normal blended-measurement PID path so the controller can recover from the runner ends.
 
 ### 3.6 Single-PID control law
 The active runtime controller is in `firmware/src/control/cascade_controller.cpp`.
@@ -156,11 +159,14 @@ The controller output is an **absolute actuator target** in step counts:
 where `n_min`, `n_max` are the calibrated actuator soft limits expressed in step counts.
 
 ### 3.7 Center-only modifications
-When `q c` is active, the controller adds center-specific behavior.
+When `q c` is active **and already near center**, the controller adds center-specific behavior.
 
 #### Reduced center gains
 - `Kp_eff = Kp * kCenterPidKpScale`
 - `Ki_eff = Ki * kCenterPidKiScale`
+
+For large return-to-center errors, these reduced gains are not used. The controller
+uses the normal base gains instead.
 
 #### Hold zone
 If both are true:
@@ -178,7 +184,7 @@ A runtime-only center bias is learned during center operation:
 
 `bias_center <- clamp(bias_center + kCenterBiasLearnStepsPerCmSec * e * dt, -kCenterBiasClampSteps, +kCenterBiasClampSteps)`
 
-This bias is used only in center mode and is cleared by recalibration.
+This bias is used only in the softened near-center region and is cleared by recalibration.
 
 ### 3.8 Positive-side asymmetry compensation
 When the target is positive (`q n` side), the controller can scale gains upward:
@@ -186,6 +192,9 @@ When the target is positive (`q n` side), the controller can scale gains upward:
 - `Ki_eff *= kPositiveSideKiScale`
 
 This is an empirical correction for the observed plant asymmetry where the near side required more actuator command than the far side.
+
+The same scaling is also applied during large `q c` recoveries that require positive-direction
+motion from the far side.
 
 This logic remains in the restored runtime, but it is not part of the current active validation scope.
 

@@ -61,6 +61,10 @@ class TelemetryRecord(TypedDict):
     x_ctrl_filt_cm: float
     x_feedback_cm: float
     feedback_blend: float
+    pos_fresh: int
+    pos_held: int
+    pos_control_usable: int
+    control_hold_active: int
 
 
 class SetpointRecord(TypedDict):
@@ -148,7 +152,8 @@ def _parse_tel(line: str) -> Optional[TelemetryRecord]:
     #   [,<x_ref_cm>,<sonar_age_ms>,<sonar_valid>,<sonar_miss_count>,
     #    <theta_cmd_unclamped_deg>,<theta_cmd_clamped_deg>,<theta_cmd_saturated>,
     #    <act_deg_abs>,<trim_deg>,<search_phase>,
-    #    <x_linear_cm>,<x_linear_filt_cm>,<x_ctrl_cm>,<x_ctrl_filt_cm>,<x_feedback_cm>,<feedback_blend>]
+    #    <x_linear_cm>,<x_linear_filt_cm>,<x_ctrl_cm>,<x_ctrl_filt_cm>,<x_feedback_cm>,<feedback_blend>,
+    #    <pos_fresh>,<pos_held>,<pos_control_usable>,<control_hold_active>]
     if not line.startswith("TEL,"):
         return None
     parts = [p.strip() for p in line.split(",")]
@@ -171,6 +176,10 @@ def _parse_tel(line: str) -> Optional[TelemetryRecord]:
         x_ctrl_filt_cm = float(parts[22]) if len(parts) >= 23 else float(parts[4])
         x_feedback_cm = float(parts[23]) if len(parts) >= 24 else float(parts[4])
         feedback_blend = float(parts[24]) if len(parts) >= 25 else 0.0
+        pos_fresh = int(float(parts[25])) if len(parts) >= 26 else 0
+        pos_held = int(float(parts[26])) if len(parts) >= 27 else 0
+        pos_control_usable = int(float(parts[27])) if len(parts) >= 28 else 0
+        control_hold_active = int(float(parts[28])) if len(parts) >= 29 else 0
         return {
             "t_ms": int(float(parts[1])),
             "state": parts[2],
@@ -196,6 +205,10 @@ def _parse_tel(line: str) -> Optional[TelemetryRecord]:
             "x_ctrl_filt_cm": x_ctrl_filt_cm,
             "x_feedback_cm": x_feedback_cm,
             "feedback_blend": feedback_blend,
+            "pos_fresh": pos_fresh,
+            "pos_held": pos_held,
+            "pos_control_usable": pos_control_usable,
+            "control_hold_active": control_hold_active,
         }
     except ValueError:
         return None
@@ -317,6 +330,10 @@ class SerialLogger:
                 "x_ctrl_filt_cm",
                 "x_feedback_cm",
                 "feedback_blend",
+                "pos_fresh",
+                "pos_held",
+                "pos_control_usable",
+                "control_hold_active",
                 "test_phase",
             ]
         )
@@ -424,6 +441,10 @@ class SerialLogger:
                     tel["x_ctrl_filt_cm"],
                     tel["x_feedback_cm"],
                     tel["feedback_blend"],
+                    tel["pos_fresh"],
+                    tel["pos_held"],
+                    tel["pos_control_usable"],
+                    tel["control_hold_active"],
                     self._active_phase,
                 ]
             )

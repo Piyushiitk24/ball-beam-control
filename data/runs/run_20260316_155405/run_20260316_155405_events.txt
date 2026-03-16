@@ -1,0 +1,65 @@
+[15:54:05] sent: s
+[15:54:06] BALL_BEAM_BOOT
+[15:54:06] HELP,keys
+[15:54:06] STATE,SAFE_DISABLED
+[15:54:06] SENSORS,angle=bad,pos=bad,m=n
+[15:54:06] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[15:54:06] AGE,angle_ms=0,pos_ms=0,miss=0
+[15:54:06] FAULTS,bits=0
+[15:54:06] CAL,zero_calibrated=no,limits_calibrated=no,sign_calibrated=no
+[15:54:06] SONAR_CFG,s=-1,u=1
+[15:54:06] ACT_CFG,t=0.0000,v=0,e=0.000
+[15:54:06] TEL,enabled=1
+[15:54:06] FAULT_INFO,bits=0
+[15:54:06] FAULT_INFO,none
+[15:54:14] sent: k
+[15:54:14] sent: e 0
+[15:54:14] sent: t 0
+[15:54:14] OK,stopped
+[15:54:14] OK,driver_disabled
+[15:54:14] OK,telemetry=0
+[15:54:14] sent: d
+[15:54:14] OK,cal_reset_saved
+[15:54:51] sent: l
+[15:54:52] OK,cal_limit_down_set=0.000000
+[15:54:52] CAL_LIMITS,lower_deg=-13.003281,upper_deg=13.003281,limits_calibrated=no
+[15:55:05] sent: u
+[15:55:06] OK,cal_limit_up_set=36.395782
+[15:55:06] OK,as5600_sign=-1,sonar_sign=-1
+[15:55:06] INFO,limits_ok
+[15:55:06] CAL_LIMITS,lower_deg=-18.197891,upper_deg=18.197891,limits_calibrated=yes
+[15:55:30] sent: p
+[15:55:31] OK,cal_zero_position_set=15.620708
+[15:55:31] sent: e 1
+[15:55:31] CAL_ZERO,sonar_center_cm=15.620708,zero_calibrated=yes
+[15:55:31] OK,driver_enabled
+[15:55:31] sent: b
+[15:55:33] OK,stepper_sign=-1,delta=-22.3031
+[15:55:33] sent: v
+[15:55:33] OK,cal_saved
+[15:55:33] sent: t 1
+[15:55:33] OK,telemetry=1
+[15:55:39] sent: s
+[15:55:39] STATE,READY
+[15:55:39] SENSORS,angle=ok,pos=ok,m=f
+[15:55:39] MEAS,theta_deg=0.0000,x_cm=-9.5555,x_filt_cm=-9.5718
+[15:55:39] AGE,angle_ms=18,pos_ms=12,miss=0
+[15:55:39] FAULTS,bits=0
+[15:55:39] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[15:55:39] SONAR_CFG,s=-1,u=1
+[15:55:39] ACT_CFG,t=18.2903,v=1,e=0.703
+[15:55:39] TEL,enabled=1
+[15:55:39] FAULT_INFO,bits=0
+[15:55:39] FAULT_INFO,none
+[15:55:41] sent: q c
+[15:55:41] SET,95383,0.0000,11.2299,-9.5557
+[15:55:44] sent: e 1
+[15:55:44] OK,driver_enabled
+[15:55:46] sent: r
+[15:55:46] OK,running
+[15:56:19] sent: q f
+[15:56:19] SET,132824,-9.5557,11.2299,-9.5557
+[15:56:26] sent: q c
+[15:56:26] SET,139890,0.0000,11.2299,-9.5557
+[15:56:40] sent: k
+[15:56:41] sent: e 0

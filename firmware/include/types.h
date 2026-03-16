@@ -45,6 +45,8 @@ struct SensorData {
   bool valid_pos = false;
   bool pos_fresh = false;
   bool pos_held = false;
+  bool pos_control_usable = false;
+  bool control_hold_active = false;
   uint32_t ts_ms = 0;
 };
 

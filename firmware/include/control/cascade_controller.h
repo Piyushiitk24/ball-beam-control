@@ -18,12 +18,16 @@ class CascadeController {
 
   float lastThetaCmdDeg() const;
   float lastThetaCmdUnclampedDeg() const;
- bool lastThetaCmdSaturated() const;
+  bool lastThetaCmdSaturated() const;
 
  private:
   float integral_output_steps_;
   float prev_measurement_cm_;
+  uint32_t prev_measurement_ts_ms_;
   bool has_prev_measurement_;
+  float prev_linear_measurement_cm_;
+  uint32_t prev_linear_measurement_ts_ms_;
+  bool has_prev_linear_measurement_;
   float last_target_steps_;
   float last_target_steps_unclamped_;
   bool last_target_saturated_;

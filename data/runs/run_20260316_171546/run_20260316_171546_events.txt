@@ -1,0 +1,67 @@
+[17:15:46] sent: s
+[17:15:47] BALL_BEAM_BOOT
+[17:15:47] HELP,keys
+[17:15:47] STATE,SAFE_DISABLED
+[17:15:47] SENSORS,angle=bad,pos=bad,m=n
+[17:15:47] MEAS,theta_deg=0.0000,x_cm=0.0000,x_filt_cm=0.0000
+[17:15:47] AGE,angle_ms=0,pos_ms=0,miss=0
+[17:15:47] FAULTS,bits=0
+[17:15:47] CAL,zero_calibrated=no,limits_calibrated=no,sign_calibrated=no
+[17:15:47] SONAR_CFG,s=-1,u=1
+[17:15:47] ACT_CFG,t=0.0000,v=0,e=0.000
+[17:15:47] TEL,enabled=1
+[17:15:47] FAULT_INFO,bits=0
+[17:15:47] FAULT_INFO,none
+[17:15:51] sent: k
+[17:15:51] sent: e 0
+[17:15:51] sent: t 0
+[17:15:51] OK,stopped
+[17:15:51] OK,driver_disabled
+[17:15:51] OK,telemetry=0
+[17:15:51] sent: d
+[17:15:51] OK,cal_reset_saved
+[17:16:03] sent: l
+[17:16:04] OK,cal_limit_down_set=0.000000
+[17:16:04] CAL_LIMITS,lower_deg=-9.360352,upper_deg=9.360352,limits_calibrated=no
+[17:16:11] sent: u
+[17:16:11] OK,cal_limit_up_set=48.779296
+[17:16:11] OK,as5600_sign=-1,sonar_sign=-1
+[17:16:11] INFO,limits_ok
+[17:16:11] CAL_LIMITS,lower_deg=-24.389648,upper_deg=24.389648,limits_calibrated=yes
+[17:16:24] sent: p
+[17:16:25] OK,cal_zero_position_set=12.896800
+[17:16:25] sent: e 1
+[17:16:25] CAL_ZERO,sonar_center_cm=12.896800,zero_calibrated=yes
+[17:16:25] OK,driver_enabled
+[17:16:25] sent: b
+[17:16:27] OK,stepper_sign=-1,delta=-22.7848
+[17:16:27] sent: v
+[17:16:27] OK,cal_saved
+[17:16:27] sent: t 1
+[17:16:27] OK,telemetry=1
+[17:16:31] sent: s
+[17:16:31] STATE,READY
+[17:16:31] SENSORS,angle=ok,pos=ok,m=f
+[17:16:31] MEAS,theta_deg=0.0000,x_cm=-12.7596,x_filt_cm=-12.7521
+[17:16:31] AGE,angle_ms=14,pos_ms=34,miss=0
+[17:16:31] FAULTS,bits=0
+[17:16:31] CAL,zero_calibrated=yes,limits_calibrated=yes,sign_calibrated=yes
+[17:16:31] SONAR_CFG,s=-1,u=1
+[17:16:31] ACT_CFG,t=22.0605,v=1,e=2.637
+[17:16:31] TEL,enabled=1
+[17:16:31] FAULT_INFO,bits=0
+[17:16:31] FAULT_INFO,none
+[17:16:32] sent: q
+[17:16:32] SET,45070,0.0000,8.5064,-12.3202
+[17:16:34] sent: q c
+[17:16:34] SET,46783,0.0000,8.5064,-12.3202
+[17:16:35] sent: e 1
+[17:16:35] OK,driver_enabled
+[17:16:37] sent: r
+[17:16:38] OK,running
+[17:17:36] sent: q f
+[17:17:36] SET,109017,-12.3202,8.5064,-12.3202
+[17:17:44] sent: q c
+[17:17:44] SET,116785,0.0000,8.5064,-12.3202
+[17:18:02] sent: k
+[17:18:02] sent: e 0

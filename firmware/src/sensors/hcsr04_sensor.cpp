@@ -176,6 +176,36 @@ void HCSR04Sensor::service(uint32_t now_us, uint32_t now_ms) {
 
 bool HCSR04Sensor::hasSample() const { return has_sample_; }
 
+void HCSR04Sensor::resetFilterState() {
+  history_count_ = 0;
+  history_index_ = 0;
+  valid_count_ = 0;
+  for (uint8_t i = 0; i < kWindow; ++i) {
+    history_[i] = 0.0f;
+    valid_flags_[i] = 0U;
+  }
+
+  ema_initialized_ = false;
+  ema_cm_ = 0.0f;
+  has_sample_ = false;
+  last_distance_cm_ = 0.0f;
+  last_x_cm_ = 0.0f;
+  last_x_filt_cm_ = 0.0f;
+  last_sample_ms_ = 0;
+  valid_streak_ = 0;
+  consecutive_miss_count_ = 0;
+  timeout_flag_ = false;
+  waiting_echo_ = false;
+
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+    echo_armed_ = false;
+    awaiting_fall_ = false;
+    sample_ready_ = false;
+  }
+
+  last_trigger_us_ = micros() - kSonarTriggerPeriodUs;
+}
+
 bool HCSR04Sensor::getPosition(float& x_cm, float& x_filt_cm, float& distance_raw_cm) const {
   if (!has_sample_) {
     return false;

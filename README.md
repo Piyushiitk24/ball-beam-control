@@ -4,6 +4,26 @@ Stepper-driven ball-beam balancer: firmware (C++/PlatformIO) + first-principles 
 
 ---
 
+## Current Active State
+
+- Final hardware beam was replaced on `2026-03-16` and is now the active hardware baseline.
+- HC-SR04 is the live ball-position sensor; Sharp work remains archived exploratory context.
+- The active measured-model record is:
+  - `model/first_principles/params_measured.yaml`
+  - `docs/modeling_measured_calculations.md`
+- Current closed-loop validation scope is center/far only:
+  - `/bringup`
+  - place the ball at physical center
+  - `s`
+  - `q`
+  - `q c -> q f -> q c`
+  - `s`
+  - `/quit`
+- `q n` remains implemented for compatibility/history, but it is not part of the current workflow.
+- Latest controller change: large `q c` return-to-center moves now use the normal stronger PID path; only the near-center region keeps the softened center hold/bias behavior.
+
+---
+
 ## Quick Start — Exact Commands
 
 This is the simplest full workflow:
@@ -52,6 +72,7 @@ Recommended workflow from a fresh power-up or after reflashing:
 ```text
 /bringup
 s
+q
 q c
 e 1
 r
@@ -68,6 +89,7 @@ Timing for the live setpoint sequence:
 
 Important:
 - `/bringup` already performs the full calibration flow and sends `v` to save calibration for you
+- after `/bringup`, place the ball at physical center and use `s` / `q` as a sanity check before the run
 - if you do calibration manually instead of `/bringup`, you must still send `v` yourself after `b`
 - `/quit` sends `k`, then `e 0`, exits the logger, and triggers automatic plot generation for that run folder
 

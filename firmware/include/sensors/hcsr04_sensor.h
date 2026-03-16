@@ -21,6 +21,7 @@ class HCSR04Sensor {
   bool hasTimeout() const;
   uint16_t consecutiveMissCount() const;
   void getDiag(uint32_t now_ms, SonarDiag& diag) const;
+  void resetFilterState();
 
   void handleEchoEdgeIsr(uint32_t now_us, bool level_high);
 

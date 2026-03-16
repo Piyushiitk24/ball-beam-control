@@ -22,7 +22,11 @@ float clampf(float value, float lo, float hi) {
 CascadeController::CascadeController()
     : integral_output_steps_(0.0f),
       prev_measurement_cm_(0.0f),
+      prev_measurement_ts_ms_(0),
       has_prev_measurement_(false),
+      prev_linear_measurement_cm_(0.0f),
+      prev_linear_measurement_ts_ms_(0),
+      has_prev_linear_measurement_(false),
       last_target_steps_(0.0f),
       last_target_steps_unclamped_(0.0f),
       last_target_saturated_(false),
@@ -32,7 +36,11 @@ CascadeController::CascadeController()
 void CascadeController::reset() {
   integral_output_steps_ = 0.0f;
   prev_measurement_cm_ = 0.0f;
+  prev_measurement_ts_ms_ = 0;
   has_prev_measurement_ = false;
+  prev_linear_measurement_cm_ = 0.0f;
+  prev_linear_measurement_ts_ms_ = 0;
+  has_prev_linear_measurement_ = false;
   last_target_steps_ = 0.0f;
   last_target_steps_unclamped_ = 0.0f;
   last_target_saturated_ = false;
@@ -63,17 +71,45 @@ ActuatorCmd CascadeController::update(const SensorData& sensor,
   }
 
   const bool center_mode = fabsf(setpoint.ball_pos_cm_target) <= 1.0e-4f;
-  const bool positive_side_mode = !center_mode && (setpoint.ball_pos_cm_target > 0.0f);
-  const float center_measure_cm = center_mode ? sensor.ball_pos_linear_filt_cm : sensor.ball_pos_filt_cm;
-  float pos_error_cm = center_mode ? -center_measure_cm
+  const uint32_t measurement_ts_ms = sensor.ts_ms - sensor.sonar_age_ms;
+  float linear_measurement_rate_cm_s = 0.0f;
+  const bool has_new_linear_measurement =
+      !has_prev_linear_measurement_ || (measurement_ts_ms != prev_linear_measurement_ts_ms_);
+  if (has_prev_linear_measurement_ && has_new_linear_measurement) {
+    const uint32_t delta_ms = measurement_ts_ms - prev_linear_measurement_ts_ms_;
+    if (delta_ms > 0U) {
+      linear_measurement_rate_cm_s =
+          (sensor.ball_pos_linear_filt_cm - prev_linear_measurement_cm_) /
+          (0.001f * static_cast<float>(delta_ms));
+    }
+  }
+  // Keep the softened center-only behavior only near the calibrated center.
+  // Large return-to-center moves use the normal stronger PID path so q c can
+  // recover from the runner ends instead of behaving like a tiny hold loop.
+  const bool center_soft_mode =
+      center_mode &&
+      (fabsf(sensor.ball_pos_linear_filt_cm) <= kCenterSoftPosWindowCm) &&
+      (fabsf(linear_measurement_rate_cm_s) <= kCenterSoftRateTolCmS);
+  const float measurement_cm = center_soft_mode ? sensor.ball_pos_linear_filt_cm
+                                                : sensor.ball_pos_filt_cm;
+  float pos_error_cm = center_mode ? -measurement_cm
                                    : (setpoint.ball_pos_cm_target - sensor.ball_pos_filt_cm);
+  const bool positive_side_mode =
+      (!center_mode && (setpoint.ball_pos_cm_target > 0.0f)) ||
+      (center_mode && !center_soft_mode && (pos_error_cm > 0.0f));
   float measurement_rate_cm_s = 0.0f;
-  if (has_prev_measurement_) {
-    measurement_rate_cm_s = (center_measure_cm - prev_measurement_cm_) / dt_s;
+  const bool has_new_measurement =
+      !has_prev_measurement_ || (measurement_ts_ms != prev_measurement_ts_ms_);
+  if (has_prev_measurement_ && has_new_measurement) {
+    const uint32_t delta_ms = measurement_ts_ms - prev_measurement_ts_ms_;
+    if (delta_ms > 0U) {
+      measurement_rate_cm_s =
+          (measurement_cm - prev_measurement_cm_) / (0.001f * static_cast<float>(delta_ms));
+    }
   }
 
   const bool center_hold =
-      center_mode &&
+      center_soft_mode &&
       (fabsf(sensor.ball_pos_linear_filt_cm) <= kCenterHoldPosTolCm) &&
       (fabsf(measurement_rate_cm_s) <= kCenterHoldRateTolCmS);
   if (center_hold) {
@@ -83,16 +119,17 @@ ActuatorCmd CascadeController::update(const SensorData& sensor,
     integral_output_steps_ *= (bleed > 0.0f) ? bleed : 0.0f;
   }
 
-  const float kp_scale = center_mode ? kCenterPidKpScale : 1.0f;
-  const float ki_scale = center_mode ? kCenterPidKiScale : 1.0f;
+  const float kp_scale = center_soft_mode ? kCenterPidKpScale : 1.0f;
+  const float ki_scale = center_soft_mode ? kCenterPidKiScale : 1.0f;
+  const float kd_scale = center_soft_mode ? kCenterPidKdScale : 1.0f;
   float kp_steps_per_cm = kPosPidKpStepsPerCm * kp_scale;
   float ki_steps_per_cm_s = kPosPidKiStepsPerCmSec * ki_scale;
   if (positive_side_mode) {
     kp_steps_per_cm *= kPositiveSideKpScale;
     ki_steps_per_cm_s *= kPositiveSideKiScale;
   }
-  if (center_mode &&
-      fabsf(center_measure_cm) <= kCenterBiasLearnPosWindowCm &&
+  if (center_soft_mode &&
+      fabsf(measurement_cm) <= kCenterBiasLearnPosWindowCm &&
       fabsf(measurement_rate_cm_s) <= kCenterBiasLearnRateTolCmS) {
     center_bias_steps_ += kCenterBiasLearnStepsPerCmSec * pos_error_cm * dt_s;
     center_bias_steps_ =
@@ -100,8 +137,8 @@ ActuatorCmd CascadeController::update(const SensorData& sensor,
   }
 
   const float p_term_steps = kp_steps_per_cm * pos_error_cm;
-  const float d_term_steps = -kPosPidKdStepsSecPerCm * measurement_rate_cm_s;
-  const float center_bias_steps = center_mode ? center_bias_steps_ : 0.0f;
+  const float d_term_steps = -(kPosPidKdStepsSecPerCm * kd_scale) * measurement_rate_cm_s;
+  const float center_bias_steps = center_soft_mode ? center_bias_steps_ : 0.0f;
   const float pre_i_output = center_bias_steps + p_term_steps + integral_output_steps_ + d_term_steps;
   const bool sat_high = (pre_i_output >= static_cast<float>(pos_max_steps));
   const bool sat_low = (pre_i_output <= static_cast<float>(pos_min_steps));
@@ -117,8 +154,16 @@ ActuatorCmd CascadeController::update(const SensorData& sensor,
                                     static_cast<float>(pos_max_steps));
   last_target_steps_ = target_steps;
   last_target_saturated_ = fabsf(last_target_steps_unclamped_ - last_target_steps_) > 1.0e-4f;
-  prev_measurement_cm_ = center_measure_cm;
-  has_prev_measurement_ = true;
+  if (has_new_measurement) {
+    prev_measurement_cm_ = measurement_cm;
+    prev_measurement_ts_ms_ = measurement_ts_ms;
+    has_prev_measurement_ = true;
+  }
+  if (has_new_linear_measurement) {
+    prev_linear_measurement_cm_ = sensor.ball_pos_linear_filt_cm;
+    prev_linear_measurement_ts_ms_ = measurement_ts_ms;
+    has_prev_linear_measurement_ = true;
+  }
 
   const float current_steps = sensor.beam_angle_deg / kStepperDegPerStep;
   const float step_error = target_steps - current_steps;

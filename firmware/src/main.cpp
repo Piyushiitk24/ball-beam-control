@@ -36,6 +36,7 @@ constexpr float kRunSoftLimitBandDeg = 1.0f;
 // from small AS5600/calibration mismatch near the travel ends.
 constexpr float kRunHardLimitMarginDeg = 3.0f;
 constexpr float kCenterFeedbackBlend = 0.40f;
+constexpr uint32_t kControlUsableSonarAgeMs = 150UL;
 
 StepperTMC2209 g_stepper(PIN_STEP, PIN_DIR, PIN_EN);
 AS5600Sensor g_as5600;
@@ -100,6 +101,7 @@ float linearToCorrectedBallPosCm(float x_linear_cm, float theta_deg);
 float computeFeedbackBlend(float target_cm);
 void updateBallFeedbackPosition();
 bool effectiveActuatorStepBounds(int32_t& min_steps, int32_t& max_steps);
+void rampRunningStepRateTowardZero();
 NOINLINE float telemetryThetaCmdDeg();
 NOINLINE float telemetryThetaCmdUnclampedDeg();
 NOINLINE bool telemetryThetaCmdSaturated();
@@ -270,6 +272,23 @@ NOINLINE float telemetryThetaCmdUnclampedDeg() {
 }
 
 NOINLINE bool telemetryThetaCmdSaturated() { return g_controller.lastThetaCmdSaturated(); }
+
+void rampRunningStepRateTowardZero() {
+  float target = 0.0f;
+  const float current_steps = g_sensor.beam_angle_deg / kStepperDegPerStep;
+  if (current_steps > kRunPositionDeadbandSteps) {
+    target = -600.0f;
+  } else if (current_steps < -kRunPositionDeadbandSteps) {
+    target = 600.0f;
+  }
+  float delta = target - g_prev_step_rate_sps;
+  if (delta > kMaxStepRateChangeSpsPerTick) delta = kMaxStepRateChangeSpsPerTick;
+  if (delta < -kMaxStepRateChangeSpsPerTick) delta = -kMaxStepRateChangeSpsPerTick;
+  target = g_prev_step_rate_sps + delta;
+  g_prev_step_rate_sps = target;
+  g_stepper.enable(true);
+  g_stepper.setSignedStepRate(target);
+}
 
 // Tiny float parser to avoid pulling in strtod()/atof() (saves significant flash).
 // Supported: optional whitespace, optional +/- sign, digits, optional .digits.
@@ -476,6 +495,7 @@ bool sampleSonarNow(uint32_t now_ms,
   g_sensor.sonar_miss_count = g_hcsr04.consecutiveMissCount();
   g_sensor.pos_fresh = false;
   g_sensor.pos_held = false;
+  g_sensor.pos_control_usable = false;
 
   float x_cm = 0.0f;
   float x_filt_cm = 0.0f;
@@ -509,6 +529,7 @@ bool sampleSonarNow(uint32_t now_ms,
   g_sensor.valid_pos = usable;
   g_sensor.pos_fresh = fresh;
   g_sensor.pos_held = usable && !fresh;
+  g_sensor.pos_control_usable = usable && (sample_age_ms <= kControlUsableSonarAgeMs);
 
   if (sample_age_ms <= stale_threshold_ms) {
     g_fault_flags.sonar_timeout = false;
@@ -882,19 +903,20 @@ void printFaultInfo() {
 }
 
 bool captureSonarCalDistanceCm(float& out_cm) {
-  // Calibration needs a stable distance even when the target is a weak reflector.
-  // Take multiple fresh filtered samples and smooth them again with EMA.
-  constexpr uint8_t kNeedGood = 8;
-  constexpr uint32_t kTimeoutMs = 1500;
+  // Calibration should not inherit stale endpoint history from the rolling
+  // runtime HC-SR04 filter. Start from a fresh filter state and use a robust
+  // multi-sample center estimate.
+  constexpr uint8_t kNeedGood = 12;
+  constexpr uint32_t kTimeoutMs = 2500;
   constexpr uint32_t kGoodDelayMs = 45;
   constexpr uint32_t kBadDelayMs = 10;
-  constexpr float kMaxSpanCm = 0.8f;
+  constexpr float kMaxSpanCm = 1.5f;
+  constexpr uint8_t kTrimCount = 3;
+
+  g_hcsr04.resetFilterState();
 
   uint8_t good = 0;
-  float ema = 0.0f;
-  bool ema_init = false;
-  float min_v = 0.0f;
-  float max_v = 0.0f;
+  float accepted[kNeedGood];
 
   const uint32_t start_ms = millis();
   while (good < kNeedGood && static_cast<uint32_t>(millis() - start_ms) < kTimeoutMs) {
@@ -911,21 +933,7 @@ bool captureSonarCalDistanceCm(float& out_cm) {
     if (diag.fresh && diag.has_sample && !diag.timeout) {
       const float v = (diag.filt_cm > 0.0f) ? diag.filt_cm : diag.raw_cm;
       if (v > 0.0f) {
-        if (!ema_init) {
-          ema = v;
-          ema_init = true;
-          min_v = v;
-          max_v = v;
-        } else {
-          ema = (kSonarEmaAlpha * v) + ((1.0f - kSonarEmaAlpha) * ema);
-          if (v < min_v) {
-            min_v = v;
-          }
-          if (v > max_v) {
-            max_v = v;
-          }
-        }
-        ++good;
+        accepted[good++] = v;
         delay(kGoodDelayMs);
         continue;
       }
@@ -934,10 +942,38 @@ bool captureSonarCalDistanceCm(float& out_cm) {
     delay(kBadDelayMs);
   }
 
-  if (!ema_init || good < kNeedGood || ((max_v - min_v) > kMaxSpanCm)) {
+  if (good < kNeedGood) {
     return false;
   }
-  out_cm = ema;
+
+  for (uint8_t i = 0; i + 1 < good; ++i) {
+    for (uint8_t j = 0; j + 1 < (good - i); ++j) {
+      if (accepted[j] > accepted[j + 1]) {
+        const float swap = accepted[j];
+        accepted[j] = accepted[j + 1];
+        accepted[j + 1] = swap;
+      }
+    }
+  }
+
+  const float span_cm = accepted[good - 1] - accepted[0];
+  if (span_cm > kMaxSpanCm) {
+    return false;
+  }
+
+  const uint8_t start_idx = kTrimCount;
+  const uint8_t end_idx = good - kTrimCount;
+  float sum_cm = 0.0f;
+  uint8_t used = 0;
+  for (uint8_t i = start_idx; i < end_idx; ++i) {
+    sum_cm += accepted[i];
+    ++used;
+  }
+  if (used == 0) {
+    return false;
+  }
+
+  out_cm = sum_cm / static_cast<float>(used);
   return true;
 }
 
@@ -1442,23 +1478,31 @@ void serviceControl(uint32_t now_ms) {
   updateFaultState(now_ms);
 
   if (g_state_machine.state() == AppState::RUNNING) {
+    const bool was_control_hold_active = g_sensor.control_hold_active;
     if (hasAnyFault()) {
+      g_sensor.control_hold_active = false;
       applySafeDisable();
       return;
     }
 
-    // Sonar dropout: ramp motor toward zero instead of holding last command.
+    // Sonar dropout: drive the beam back toward neutral instead of freezing it
+    // at the last tilt, which lets the ball keep accelerating across the rail.
     if (!g_sensor.valid_pos) {
-      float target = 0.0f;
-      float delta = target - g_prev_step_rate_sps;
-      if (delta > kMaxStepRateChangeSpsPerTick) delta = kMaxStepRateChangeSpsPerTick;
-      if (delta < -kMaxStepRateChangeSpsPerTick) delta = -kMaxStepRateChangeSpsPerTick;
-      target = g_prev_step_rate_sps + delta;
-      g_prev_step_rate_sps = target;
-      g_stepper.setSignedStepRate(target);
+      g_sensor.control_hold_active = false;
+      rampRunningStepRateTowardZero();
       return;
     }
 
+    if (!g_sensor.pos_control_usable) {
+      if (!was_control_hold_active) {
+        g_controller.reset();
+      }
+      g_sensor.control_hold_active = true;
+      rampRunningStepRateTowardZero();
+      return;
+    }
+
+    g_sensor.control_hold_active = false;
     g_setpoint.ball_pos_m_target = g_setpoint.ball_pos_cm_target * kCmToM;
     int32_t pos_min_steps = 0;
     int32_t pos_max_steps = 0;
@@ -1480,6 +1524,8 @@ void serviceControl(uint32_t now_ms) {
     }
     return;
   }
+
+  g_sensor.control_hold_active = false;
 
   if (g_stepper.jogActive()) {
     maybeStopJogAtLimits();

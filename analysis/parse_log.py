@@ -31,6 +31,10 @@ COLUMNS = [
     "x_ctrl_filt_cm",
     "x_feedback_cm",
     "feedback_blend",
+    "pos_fresh",
+    "pos_held",
+    "pos_control_usable",
+    "control_hold_active",
 ]
 
 
@@ -76,6 +80,10 @@ def parse_telemetry_lines(lines: list[str]) -> pd.DataFrame:
                     "x_ctrl_filt_cm": float(parts[21]) if len(parts) >= 22 else float(parts[3]),
                     "x_feedback_cm": float(parts[22]) if len(parts) >= 23 else float(parts[3]),
                     "feedback_blend": float(parts[23]) if len(parts) >= 24 else 0.0,
+                    "pos_fresh": int(float(parts[24])) if len(parts) >= 25 else 0,
+                    "pos_held": int(float(parts[25])) if len(parts) >= 26 else 0,
+                    "pos_control_usable": int(float(parts[26])) if len(parts) >= 27 else 0,
+                    "control_hold_active": int(float(parts[27])) if len(parts) >= 28 else 0,
                 }
             )
         except ValueError:

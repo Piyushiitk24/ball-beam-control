@@ -13,6 +13,38 @@ Use it for:
 - thesis/report writing
 - linking representative telemetry runs to the code changes that addressed them
 
+## Current Handoff State — 2026-03-16
+
+- Final hardware beam has been replaced and is now the active hardware baseline.
+- The active measured-model record is:
+  - `model/first_principles/params_measured.yaml`
+  - `docs/modeling_measured_calculations.md`
+- The active runtime path is still the restored HC-SR04 controller.
+- The active closed-loop validation workflow is now:
+
+```text
+/bringup
+s
+q
+q c
+e 1
+r
+q f
+q c
+s
+/quit
+```
+
+- `q n` remains part of the historical record below, but near-side work is paused and should not be used for current validation runs.
+- Representative pre-fix runs from the new beam:
+  - `run_20260316_155405`: `q f` worked, `q c` behavior remained poor, and HC-SR04 stayed valid enough that the main issue was not a simple sensor dropout.
+  - `run_20260316_160450`: with the ball checked at center before the run, `q f` still worked, but return `q c` from about `-10.3 cm` remained underpowered even though HC-SR04 stayed valid and fault-free.
+- Those runs led to the latest controller change in `firmware/src/control/cascade_controller.cpp`:
+  - near center, `q c` still uses softened center-only logic, hold behavior, and adaptive bias
+  - far from center, `q c` now uses the normal stronger PID path
+  - large positive return-to-center recovery can use the positive-side gain scaling
+- Fresh hardware validation after that controller change is still outstanding. A fresh agent should treat the next `q c -> q f -> q c` run as the first post-fix confirmation run.
+
 The generated appendix artifacts live in:
 - `generated/recent_runs_summary.csv`
 - `generated/recent_runs_summary.md`
@@ -83,6 +115,10 @@ These runs therefore cover three standard control-system experiment classes:
 - regulation at center
 - setpoint tracking to both ends of the runner
 - failure analysis during transitions and sensor dropouts
+
+Historical note:
+- the active workflow has since been narrowed to center/far/center only
+- keep the `q n` material below as engineering history, not as the current validation procedure
 
 ## 3. Milestone Timeline
 

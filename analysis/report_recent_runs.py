@@ -36,6 +36,7 @@ DEFAULT_MILESTONES = [
     "run_20260312_112718",
     "run_20260312_113933",
 ]
+CONTROL_USABLE_SONAR_AGE_MS = 150.0
 
 
 @dataclass
@@ -54,6 +55,9 @@ class RunSummary:
     center_crossings: int
     invalid_rows: int
     max_sonar_age_ms: int
+    stale_control_rows: int
+    stale_control_stretches: int
+    stale_control_windows: str
     near_end_error_cm: float | None
     far_end_error_cm: float | None
     center_end_error_cm: float | None
@@ -215,6 +219,33 @@ def _phase_summary(seg: pd.DataFrame) -> PhaseSummary:
     )
 
 
+def _stale_control_mask(df: pd.DataFrame) -> pd.Series:
+    sonar_valid = df.get("sonar_valid", pd.Series([1] * len(df), index=df.index)).fillna(1).astype(float) > 0.0
+    if "pos_control_usable" in df.columns:
+        usable = df["pos_control_usable"].fillna(0).astype(float) > 0.0
+        return sonar_valid & (~usable)
+    sonar_age_ms = df.get("sonar_age_ms", pd.Series([0] * len(df), index=df.index)).fillna(0).astype(float)
+    return sonar_valid & (sonar_age_ms > CONTROL_USABLE_SONAR_AGE_MS)
+
+
+def _stale_control_windows(df: pd.DataFrame) -> list[str]:
+    if df.empty:
+        return []
+
+    stale = _stale_control_mask(df)
+    if not stale.any():
+        return []
+
+    groups = (stale != stale.shift(fill_value=False)).cumsum()
+    windows: list[str] = []
+    for _, seg in df.loc[stale].groupby(groups[stale], sort=False):
+        start_ms = float(seg["t_ms"].iloc[0])
+        end_ms = float(seg["t_ms"].iloc[-1])
+        max_age_ms = int(seg.get("sonar_age_ms", pd.Series([0] * len(seg), index=seg.index)).fillna(0).astype(float).max())
+        windows.append(f"{int(start_ms)}-{int(end_ms)}ms(max_age={max_age_ms})")
+    return windows
+
+
 def _format_target_sequence(refs: list[float], ctx: dict[str, float]) -> str:
     near = ctx.get("near_target_cm")
     far = ctx.get("far_target_cm")
@@ -293,6 +324,7 @@ def _summarize_run(csv_path: Path) -> RunSummary:
     phases = [_phase_summary(seg) for seg in _phase_rows(work_df)]
     fault_labels = _decode_faults(work_df)
     final_state = str(work_df["state"].iloc[-1])
+    stale_control_windows = _stale_control_windows(work_df)
 
     def _find_end_error(target_sign: int) -> float | None:
         for phase in reversed(phases):
@@ -321,6 +353,9 @@ def _summarize_run(csv_path: Path) -> RunSummary:
         center_crossings=sum(phase.crossings for phase in phases if abs(phase.x_ref_cm) <= 1.0e-4),
         invalid_rows=int((work_df.get("sonar_valid", pd.Series([1] * len(work_df))).astype(float) <= 0.0).sum()),
         max_sonar_age_ms=int(work_df.get("sonar_age_ms", pd.Series([0] * len(work_df))).astype(float).max()),
+        stale_control_rows=int(_stale_control_mask(work_df).sum()),
+        stale_control_stretches=len(stale_control_windows),
+        stale_control_windows="; ".join(stale_control_windows),
         near_end_error_cm=_find_end_error(1),
         far_end_error_cm=_find_end_error(-1),
         center_end_error_cm=_find_end_error(0),
@@ -346,6 +381,9 @@ def _write_summary_csv(rows: list[RunSummary], out_path: Path) -> None:
                 "center_crossings",
                 "invalid_rows",
                 "max_sonar_age_ms",
+                "stale_control_rows",
+                "stale_control_stretches",
+                "stale_control_windows",
                 "near_end_error_cm",
                 "far_end_error_cm",
                 "center_end_error_cm",
@@ -367,6 +405,9 @@ def _write_summary_csv(rows: list[RunSummary], out_path: Path) -> None:
                     row.center_crossings,
                     row.invalid_rows,
                     row.max_sonar_age_ms,
+                    row.stale_control_rows,
+                    row.stale_control_stretches,
+                    row.stale_control_windows,
                     "" if row.near_end_error_cm is None else f"{row.near_end_error_cm:.3f}",
                     "" if row.far_end_error_cm is None else f"{row.far_end_error_cm:.3f}",
                     "" if row.center_end_error_cm is None else f"{row.center_end_error_cm:.3f}",
@@ -412,13 +453,13 @@ def _write_summary_markdown(rows: list[RunSummary], out_path: Path, output_root:
         "",
         f"Generated from runs dated 2026-03-10 onward on {datetime.now().isoformat(timespec='seconds')}",
         "",
-        "| Run | Targets | Diagnosis | Faults | End state | End x_filt (cm) | Center crossings | Max sonar age (ms) |",
-        "| --- | --- | --- | --- | --- | ---: | ---: | ---: |",
+        "| Run | Targets | Diagnosis | Faults | End state | End x_filt (cm) | Center crossings | Stale-control rows | Stale-control stretches | Max sonar age (ms) |",
+        "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in rows:
         run_rel = relative_path(out_path.parent, row.telemetry_path)
         lines.append(
-            "| [{run}]({link}) | {targets} | {diag} | {faults} | {state} | {x:.3f} | {cross} | {age} |".format(
+            "| [{run}]({link}) | {targets} | {diag} | {faults} | {state} | {x:.3f} | {cross} | {stale_rows} | {stale_stretches} | {age} |".format(
                 run=row.run_stem,
                 link=run_rel.as_posix(),
                 targets=row.target_sequence,
@@ -427,6 +468,8 @@ def _write_summary_markdown(rows: list[RunSummary], out_path: Path, output_root:
                 state=row.final_state,
                 x=row.final_x_filt_cm,
                 cross=row.center_crossings,
+                stale_rows=row.stale_control_rows,
+                stale_stretches=row.stale_control_stretches,
                 age=row.max_sonar_age_ms,
             )
         )

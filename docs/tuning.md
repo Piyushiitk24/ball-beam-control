@@ -91,6 +91,10 @@ If the far endpoint is weak:
 ### Step 3 — Center regulation
 Use a long `q c` run.
 
+Current center behavior is intentionally split:
+- large `q c` return moves use the normal stronger PID path
+- only the near-center region uses the softened center-only gains, hold zone, and adaptive bias
+
 If the ball crosses the center repeatedly:
 - adjust `kCenterFeedbackBlend`
 - then reduce center-only aggressiveness via:

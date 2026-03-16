@@ -11,6 +11,8 @@ Core rule
 - Once control is already running, send more `q ...` commands directly. Do not send another `r`.
 - each logger session creates one timestamped run folder under `data/runs/`
 - end each test with `/quit` so the run is stopped cleanly and plots are generated automatically
+- current active validation scope is center/far only; do not use `q n`
+- after `/bringup`, place the ball at physical center and use `s` / `q` as a sanity check before the run
 
 Recommended morning hardware workflow
 
@@ -36,6 +38,7 @@ Logger terminal:
 ```text
 /bringup
 s
+q
 q c
 e 1
 r
