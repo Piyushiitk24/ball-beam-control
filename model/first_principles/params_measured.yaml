@@ -1,0 +1,85 @@
+plant:
+  gravity_mps2: 9.81
+
+  # Ping pong ball properties (40 mm diameter, hollow sphere).
+  ball_mass_kg: 0.0028
+  ball_radius_m: 0.020
+  ball_inertia_ratio: 0.6666666666666666  # thin-shell hollow sphere
+
+  # Beam + attachments excluding ball.
+  # Final hardware: uniform 263 mm beam plus mounted HC-SR04 and wires.
+  beam_length_m: 0.263
+  beam_mass_kg: 0.0421
+  beam_com_l_m: 0.1075059382422803  # from pivot-side clevis hole, + toward motor side
+  beam_com_h_m: 0.0  # TODO: measure vertical COM offset from pivot axis
+
+  # Provisional J about the pivot-side clevis hole:
+  #   uniform beam rod about one end + sensor/wires lumped as a point mass.
+  beam_inertia_kgm2: 0.0007683538666666666
+
+  # Pre-identification placeholders; re-identify after assembly.
+  rolling_damping_ns_per_m: 0.0125
+  rolling_coulomb_n: 0.0
+  pivot_damping_nms: 0.006
+  pivot_coulomb_nm: 0.0
+
+limits:
+  theta_cmd_deg: 4.0
+  step_rate_sps: 2000.0
+
+actuator:
+  phi_tau_s: 0.08
+  torque_limit_nm: 0.35
+  stepper_steps_per_rev: 3200  # 200 full-steps * 16 microsteps
+  linkage_ratio: 1.0           # measured from runtime sign jog: 200 usteps -> ~22.7 deg beam
+
+calibration:
+  theta_from_phi:
+    mode: linear
+    linear:
+      phi0_rad: 0.0
+      theta0_rad: 0.0
+      gain_theta_per_phi: 1.0     # measured effective beam-per-motor gain
+    hysteresis:
+      enabled: false
+      up:
+        phi_rad: [-0.35, 0.0, 0.35]
+        theta_rad: [-0.35, 0.0, 0.35]
+      down:
+        phi_rad: [-0.35, 0.0, 0.35]
+        theta_rad: [-0.35, 0.0, 0.35]
+
+  x_from_d_theta:
+    mode: linear
+    linear:
+      center_m: 0.1295
+      sign: 1.0
+      gain_x_per_d: 1.0
+
+design:
+  inner_bw_hz: 0.6
+  inner_zeta: 0.9
+  outer_bw_hz: 0.12
+  outer_zeta: 0.85
+  extra_pole_factor: 4.0
+
+geometry:
+  measured:
+    pivot_side_to_motor_side_clevis_c2c_m: 0.263
+    runner_start_from_pivot_side_clevis_m: 0.048
+    runner_end_clearance_to_motor_side_clevis_m: 0.0125
+    runner_length_nominal_m: 0.199
+    runner_length_min_m: 0.198
+    runner_length_max_m: 0.200
+    sensor_face_from_pivot_side_clevis_m: 0.018
+    nearest_ball_clearance_from_sensor_face_m: 0.030
+    runner_inner_width_m: 0.0265
+    runner_depth_m: 0.015
+    runner_flat_bottom_width_m: 0.005
+    runner_wall_slant_length_m: 0.015
+    neutral_pose_motor_side_to_fulcrum_side_pivot_spacing_m: 0.270
+  notes:
+    - "This file replaces the old-beam measured model and is now the active final-hardware parameter set."
+    - "Sensor face reference is approximated from 48 mm runner start and 30 mm nearest-ball clearance."
+    - "Runner span uses 199 mm nominal with the user-stated 198-200 mm range recorded above."
+    - "The 270 mm neutral-pose assembly spacing is a documentation cross-check only, not an active modeled beam-arm length."

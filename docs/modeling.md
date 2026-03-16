@@ -10,6 +10,10 @@ The repo currently has **two controller tracks**:
 
 Track B is the authoritative description of the firmware that is currently flashed and tested on hardware.
 
+Current Track A measured-hardware inputs live in:
+- `model/first_principles/params_measured.yaml`
+- `docs/modeling_measured_calculations.md`
+
 ## 1. Current Physical Setup
 
 Measured/control-relevant quantities:
