@@ -3,164 +3,160 @@ from __future__ import annotations
 
 import argparse
 import json
+from math import pi
 from pathlib import Path
 
-import matplotlib.pyplot as plt
-import numpy as np
-from scipy.integrate import solve_ivp
-
 from first_principles_core import (
-    actuator_defaults,
-    clamp,
-    full_coupled_accels,
+    cm_per_s2_per_step,
+    effective_mass_kg,
     load_params,
     outer_model_coeffs,
-    phi_from_theta,
-    theta_from_phi,
-    theta_tracking_torque,
+    reference_pid_output_limit_steps,
+    reference_pid_physical_to_step_gains,
+    stepper_rad_per_step,
 )
+
 
 def design_gains(params: dict) -> dict:
     g = float(params["plant"]["gravity_mps2"])
+    m_e = effective_mass_kg(params)
     alpha, beta = outer_model_coeffs(params)
-    act = actuator_defaults(params)
-    tau = float(act["phi_tau_s"])
+    step_rad = stepper_rad_per_step(params)
+    kappa = cm_per_s2_per_step(params)
 
-    k_theta_to_xddot = alpha * g
+    design = params["design"]
+    outer_bw_hz = float(design["outer_bw_hz"])
+    outer_zeta = float(design["outer_zeta"])
+    extra_pole_factor = float(design["extra_pole_factor"])
 
-    inner_bw_hz = float(params["design"]["inner_bw_hz"])
-    inner_zeta = float(params["design"]["inner_zeta"])
-    outer_bw_hz = float(params["design"]["outer_bw_hz"])
-    outer_zeta = float(params["design"]["outer_zeta"])
-    extra_pole_factor = float(params["design"]["extra_pole_factor"])
+    wn = 2.0 * pi * outer_bw_hz
+    p3 = extra_pole_factor * wn
+    a2 = (2.0 * outer_zeta * wn) + p3
+    a1 = (wn**2) + (2.0 * outer_zeta * wn * p3)
+    a0 = (wn**2) * p3
 
-    wn_i = 2.0 * np.pi * inner_bw_hz
-    wn_o = 2.0 * np.pi * outer_bw_hz
+    k_theta_to_xddot_m = alpha * g
+    kp_phys = a1 / k_theta_to_xddot_m
+    ki_phys = a0 / k_theta_to_xddot_m
+    kd_phys = (a2 - beta) / k_theta_to_xddot_m
 
-    # Stepper integrator plant: theta_beam(s)/step_rate(s) = K_beam/s
-    # K_beam = (2*pi / steps_per_rev) * linkage_ratio  (rad beam per microstep)
-    # PI on integrator: s^2 + Kp*K_beam*s + Ki*K_beam = 0
-    # Match to: s^2 + 2*zeta*wn*s + wn^2
-    steps_per_rev = float(params["actuator"]["stepper_steps_per_rev"])
-    linkage_ratio = float(params["actuator"].get("linkage_ratio", 1.0))
-    K_step_motor = 2.0 * np.pi / steps_per_rev
-    K_beam = K_step_motor * linkage_ratio
-    kpi = max(0.05, 2.0 * inner_zeta * wn_i / K_beam)
-    kii = max(0.05, wn_i**2 / K_beam)
-    kdi = 0.0
+    kp_step, ki_step, kd_step = reference_pid_physical_to_step_gains(
+        kp_phys,
+        ki_phys,
+        kd_phys,
+        params,
+    )
 
-    p3 = extra_pole_factor * wn_o
-    a2 = (2.0 * outer_zeta * wn_o) + p3
-    a1 = (wn_o**2) + (2.0 * outer_zeta * wn_o * p3)
-    a0 = (wn_o**2) * p3
-
-    # For plant k/s^2 with PID: s^3 + k*Kd*s^2 + k*Kp*s + k*Ki = 0
-    kpo = a1 / k_theta_to_xddot
-    kdo = a2 / k_theta_to_xddot
-    kio = a0 / k_theta_to_xddot
-
-    theta_lim_deg = float(params["limits"]["theta_cmd_deg"])
-    theta_lim_rad = np.deg2rad(theta_lim_deg)
-    step_lim = float(params["limits"]["step_rate_sps"])
-
-    eps = 1e-6
-    inner_i_lim = step_lim / max(abs(kii), eps)
-    outer_i_lim = theta_lim_rad / max(abs(kio), eps)
+    out_limit_steps = reference_pid_output_limit_steps(params)
+    out_limit_rad = out_limit_steps * step_rad
+    modeled_theta_limit_deg = float(params["limits"]["theta_cmd_deg"])
 
     return {
         "meta": {
-            "method": "linearized-first-principles-cascade",
-            "k_theta_to_xddot": k_theta_to_xddot,
+            "method": "linearized-first-principles-reference-pid",
+            "controller_architecture": "single-loop-absolute-position-pid",
+            "controller_output": "absolute_microstep_target",
+            "notes": [
+                "This design matches firmware/src/main.cpp reference PID architecture.",
+                "The plant assumes an ideal beam-angle actuator and small-angle ball-beam linearization.",
+                "The current software output clamp matches the reference sketch and exceeds the small-angle modeling limit.",
+            ],
+            "units": {
+                "physical_error": "m",
+                "physical_output": "rad",
+                "step_error": "cm",
+                "step_output": "steps",
+                "physical_kp": "rad/m",
+                "physical_ki": "rad/(m*s)",
+                "physical_kd": "rad*s/m",
+                "kp": "steps/cm",
+                "ki": "steps/(cm*s)",
+                "kd": "step*s/cm",
+            },
+            "effective_mass_kg": m_e,
             "alpha": alpha,
             "beta_1ps": beta,
-            "inner_bw_hz": inner_bw_hz,
-            "outer_bw_hz": outer_bw_hz,
-            "units": {
-                "outer_error": "m",
-                "outer_output": "rad",
-                "inner_error": "rad",
-                "inner_output": "step_per_s",
-                "outer_integral_state": "m*s",
-                "inner_integral_state": "rad*s",
+            "rad_per_step": step_rad,
+            "kappa_cmps2_per_step": kappa,
+            "design_targets": {
+                "outer_bw_hz": outer_bw_hz,
+                "outer_zeta": outer_zeta,
+                "extra_pole_factor": extra_pole_factor,
+                "wn_radps": wn,
+                "p3_radps": p3,
             },
+            "desired_polynomial": {
+                "a2": a2,
+                "a1": a1,
+                "a0": a0,
+            },
+            "model_theta_limit_deg": modeled_theta_limit_deg,
+            "software_output_limit_steps": out_limit_steps,
+            "software_output_limit_rad": out_limit_rad,
+            "software_output_limit_deg": out_limit_rad * (180.0 / pi),
         },
-        "inner": {
-            "kp": float(kpi),
-            "ki": float(kii),
-            "kd": float(kdi),
-            "i_min": -float(inner_i_lim),
-            "i_max": float(inner_i_lim),
-            "out_min": -step_lim,
-            "out_max": step_lim,
+        "physical_pid": {
+            "kp": kp_phys,
+            "ki": ki_phys,
+            "kd": kd_phys,
         },
-        "outer": {
-            "kp": float(kpo),
-            "ki": float(kio),
-            "kd": float(kdo),
-            "i_min": -float(outer_i_lim),
-            "i_max": float(outer_i_lim),
-            "out_min": -float(theta_lim_rad),
-            "out_max": float(theta_lim_rad),
+        "pid": {
+            "kp": kp_step,
+            "ki": ki_step,
+            "kd": kd_step,
         },
+        "out_min_steps": -out_limit_steps,
+        "out_max_steps": out_limit_steps,
     }
 
 
-def simulate_seed_response(
-    params: dict, gains: dict, t_end: float = 10.0
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    act = actuator_defaults(params)
-    theta_map_cfg = params.get("calibration", {}).get("theta_from_phi", {})
+def print_derivation(gains: dict) -> None:
+    meta = gains["meta"]
+    phys = gains["physical_pid"]
+    step = gains["pid"]
+    poly = meta["desired_polynomial"]
+    targets = meta["design_targets"]
 
-    theta_limit_deg = float(params["limits"]["theta_cmd_deg"])
-    theta_limit_rad = np.deg2rad(theta_limit_deg)
-
-    ko = gains["outer"]
-    phi_eq = phi_from_theta(0.0, theta_map_cfg, direction=1.0)
-
-    def rhs(t: float, y: np.ndarray) -> np.ndarray:
-        x, x_dot, theta, theta_dot, phi, i_outer = y
-        r = 0.0 if t < 1.0 else 0.03  # 3 cm target step (meters)
-
-        e = r - x
-        e_dot = -x_dot
-
-        theta_cmd_rad = ko["kp"] * e + ko["ki"] * i_outer + ko["kd"] * e_dot
-        theta_cmd_rad = clamp(theta_cmd_rad, ko["out_min"], ko["out_max"])
-        theta_cmd_rad = clamp(theta_cmd_rad, -theta_limit_rad, theta_limit_rad)
-
-        phi_cmd = phi_from_theta(theta_cmd_rad, theta_map_cfg, direction=np.sign(theta_cmd_rad - theta))
-        phi_dot = (phi_cmd - phi) / max(act["phi_tau_s"], 1e-6)
-        theta_ref, _, _ = theta_from_phi(phi, theta_map_cfg, direction=np.sign(phi_dot))
-
-        tau_act = theta_tracking_torque(theta_ref, theta, theta_dot, params)
-        x_ddot, theta_ddot = full_coupled_accels(x, x_dot, theta, theta_dot, tau_act, params)
-        i_dot = e
-
-        return np.array([x_dot, x_ddot, theta_dot, theta_ddot, phi_dot, i_dot], dtype=float)
-
-    t_eval = np.linspace(0.0, t_end, 1500)
-    y0 = np.array([0.0, 0.0, 0.0, 0.0, phi_eq, 0.0], dtype=float)
-    sol = solve_ivp(rhs, (0.0, t_end), y0, t_eval=t_eval, rtol=1e-7, atol=1e-9)
-
-    x = sol.y[0]
-    theta_deg = np.rad2deg(sol.y[2])
-    phi_deg = np.rad2deg(sol.y[4])
-    ref = np.where(sol.t >= 1.0, 0.03, 0.0)
-
-    theta_cmd_deg = np.empty_like(sol.t)
-    for i in range(sol.t.size):
-        e = ref[i] - x[i]
-        e_dot = -sol.y[1, i]
-        theta_cmd_rad = ko["kp"] * e + ko["ki"] * sol.y[5, i] + ko["kd"] * e_dot
-        theta_cmd_rad = clamp(theta_cmd_rad, ko["out_min"], ko["out_max"])
-        theta_cmd_rad = clamp(theta_cmd_rad, -theta_limit_rad, theta_limit_rad)
-        theta_cmd_deg[i] = np.rad2deg(theta_cmd_rad)
-
-    return sol.t, ref, x, theta_deg, theta_cmd_deg, phi_deg
+    print("Reference PID first-principles design")
+    print("------------------------------------")
+    print(f"m_e = {meta['effective_mass_kg']:.9f} kg")
+    print(f"alpha = {meta['alpha']:.9f}")
+    print(f"beta = {meta['beta_1ps']:.9f} 1/s")
+    print(f"k_step_rad = {meta['rad_per_step']:.12f} rad/step")
+    print(f"kappa = {meta['kappa_cmps2_per_step']:.9f} cm/s^2/step")
+    print()
+    print(f"wn = 2*pi*{targets['outer_bw_hz']:.6f} = {targets['wn_radps']:.9f} rad/s")
+    print(
+        f"p3 = {targets['extra_pole_factor']:.6f}*wn = {targets['p3_radps']:.9f} rad/s"
+    )
+    print(f"a2 = 2*zeta*wn + p3 = {poly['a2']:.9f}")
+    print(f"a1 = wn^2 + 2*zeta*wn*p3 = {poly['a1']:.9f}")
+    print(f"a0 = wn^2*p3 = {poly['a0']:.9f}")
+    print()
+    print("Physical PID gains:")
+    print(f"  Kp = {phys['kp']:.9f} rad/m")
+    print(f"  Ki = {phys['ki']:.9f} rad/(m*s)")
+    print(f"  Kd = {phys['kd']:.9f} rad*s/m")
+    print()
+    print("Microstep-target PID gains:")
+    print(f"  Kp = {step['kp']:.9f} steps/cm")
+    print(f"  Ki = {step['ki']:.9f} steps/(cm*s)")
+    print(f"  Kd = {step['kd']:.9f} step*s/cm")
+    print()
+    print(
+        f"Output clamp = [{gains['out_min_steps']:.3f}, {gains['out_max_steps']:.3f}] steps"
+    )
+    print(
+        "Equivalent beam range = "
+        f"+/-{meta['software_output_limit_deg']:.6f} deg "
+        f"(model small-angle limit is +/-{meta['model_theta_limit_deg']:.6f} deg)"
+    )
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Design initial cascade PID gains")
+    parser = argparse.ArgumentParser(
+        description="Design single-loop reference PID gains from the first-principles model"
+    )
     parser.add_argument(
         "--params",
         type=Path,
@@ -177,35 +173,9 @@ def main() -> None:
     with gains_path.open("w", encoding="utf-8") as f:
         json.dump(gains, f, indent=2)
 
-    t, ref, x, theta_deg, theta_cmd_deg, phi_deg = simulate_seed_response(params, gains)
-
-    fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
-    axes[0].plot(t, ref * 100.0, label="Reference (cm)", color="#6a994e")
-    axes[0].plot(t, x * 100.0, label="x (cm)", color="#1d3557")
-    axes[0].set_ylabel("Position (cm)")
-    axes[0].grid(True, alpha=0.3)
-    axes[0].legend()
-
-    axes[1].plot(t, theta_deg, label="theta (deg)", color="#e63946")
-    axes[1].plot(t, theta_cmd_deg, label="theta_cmd (deg)", color="#f4a261", alpha=0.9)
-    axes[1].set_ylabel("Beam Angle (deg)")
-    axes[1].grid(True, alpha=0.3)
-    axes[1].legend()
-
-    axes[2].plot(t, phi_deg, label="phi (deg)", color="#3d405b")
-    axes[2].set_ylabel("Motor Angle (deg)")
-    axes[2].set_xlabel("Time (s)")
-    axes[2].grid(True, alpha=0.3)
-    axes[2].legend()
-
-    fig.suptitle("Seed Closed-Loop Simulation (Full Nonlinear Coupled Plant)")
-    fig.tight_layout()
-
-    plot_path = out_dir / "closed_loop_seed.png"
-    fig.savefig(plot_path, dpi=160)
-
+    print_derivation(gains)
+    print()
     print("Saved:", gains_path)
-    print("Saved:", plot_path)
 
 
 if __name__ == "__main__":

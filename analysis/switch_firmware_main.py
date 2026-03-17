@@ -19,12 +19,23 @@ def _ensure_main_backup(src_main: Path, bak_main: Path) -> None:
     src_main.rename(bak_main)
 
 
-def _keep_current_main(src_main: Path, tag: str, repo: Path) -> None:
+def _keep_current_main(src_main: Path, tag: str, repo: Path) -> Path | None:
     if not src_main.exists():
-        return
+        return None
     keep = repo / "firmware" / "src" / f"main.cpp.{tag}_{_stamp()}.bak"
     print(f"Keeping current main as: {keep}")
     src_main.rename(keep)
+    return keep
+
+
+def _is_reference_pid_main(path: Path) -> bool:
+    if not path.exists():
+        return False
+    try:
+        content = path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return False
+    return "BALL_BEAM_REF_BOOT" in content
 
 
 def switch_to_hcsr04_check(repo: Path) -> None:
@@ -114,6 +125,32 @@ def switch_to_hcsr04_runtime(repo: Path) -> None:
     print("  cd firmware && pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1")
 
 
+def switch_to_reference_pid(repo: Path) -> None:
+    src_main = repo / "firmware" / "src" / "main.cpp"
+    exp_main = repo / "firmware" / "experiments" / "main_reference_pid.cpp"
+    restore_main = repo / "firmware" / "src" / "main.cpp.reference_pid_prev.bak"
+
+    if not exp_main.exists():
+        raise SystemExit(f"Missing experiment source: {exp_main}")
+    if not src_main.exists():
+        raise SystemExit(f"Missing firmware main.cpp: {src_main}")
+
+    if not _is_reference_pid_main(src_main):
+        kept_main = _keep_current_main(src_main, "reference_pid", repo)
+        if kept_main is not None:
+            print(f"Saving explicit reference restore backup: {kept_main} -> {restore_main}")
+            shutil.copyfile(kept_main, restore_main)
+    else:
+        print("Reference PID firmware already active; refreshing main.cpp from experiment source.")
+
+    print(f"Installing reference PID firmware: {exp_main} -> {src_main}")
+    shutil.copyfile(exp_main, src_main)
+
+    print("OK: main.cpp is now reference PID firmware.")
+    print("Next:")
+    print("  cd firmware && pio run -e nano_new -t upload --upload-port /dev/cu.usbserial-A10N20X1")
+
+
 def switch_to_tfmini(repo: Path) -> None:
     src_main = repo / "firmware" / "src" / "main.cpp"
     bak_main = repo / "firmware" / "src" / "main.cpp.bak"
@@ -137,6 +174,14 @@ def switch_to_tfmini(repo: Path) -> None:
 def restore_ballbeam(repo: Path) -> None:
     src_main = repo / "firmware" / "src" / "main.cpp"
     bak_main = repo / "firmware" / "src" / "main.cpp.bak"
+    ref_restore_main = repo / "firmware" / "src" / "main.cpp.reference_pid_prev.bak"
+
+    if _is_reference_pid_main(src_main) and ref_restore_main.exists():
+        _keep_current_main(src_main, "reference_pid", repo)
+        print(f"Restoring {ref_restore_main} -> {src_main}")
+        shutil.copyfile(ref_restore_main, src_main)
+        print("OK: main.cpp restored from reference PID backup.")
+        return
 
     if not bak_main.exists():
         raise SystemExit(f"Backup not found: {bak_main}")
@@ -170,13 +215,22 @@ def main() -> None:
     parser.add_argument(
         "--mode",
         required=True,
-        choices=["hcsr04_check", "hcsr04_runtime", "as5600_check", "tfmini", "sharp_ir_check", "ballbeam"],
+        choices=[
+            "hcsr04_check",
+            "hcsr04_runtime",
+            "as5600_check",
+            "tfmini",
+            "sharp_ir_check",
+            "reference_pid",
+            "ballbeam",
+        ],
         help="hcsr04_check installs the HC-SR04 sonar diagnostic firmware. "
         "hcsr04_runtime restores the archived pre-Sharp HC-SR04 runtime bundle. "
         "as5600_check installs the AS5600 checker. "
         "tfmini installs the TFMini backup main (legacy). "
+        "reference_pid installs the literal reference PID sketch and stores the replaced main for restore. "
         "sharp_ir_check installs the Sharp IR diagnostic firmware. "
-        "ballbeam restores main.cpp.bak -> main.cpp.",
+        "ballbeam restores the prior BallBeam main, including the explicit reference-PID backup when applicable.",
     )
     args = parser.parse_args()
 
@@ -189,6 +243,8 @@ def main() -> None:
         switch_to_as5600_check(repo)
     elif args.mode == "sharp_ir_check":
         switch_to_sharp_ir_check(repo)
+    elif args.mode == "reference_pid":
+        switch_to_reference_pid(repo)
     elif args.mode == "tfmini":
         switch_to_tfmini(repo)
     else:

@@ -113,7 +113,7 @@ Combined estimate used in params:
 - `J = J_beam + J_sensor`
 - `J = 0.0007683538666666666 kg·m^2`
 
-This is acceptable for current Track A modeling only.
+This is acceptable for the current first-principles modeling workflow.
 If needed later, replace with CAD mass properties or pendulum identification.
 
 ## 7) Resulting Measured Parameter Set

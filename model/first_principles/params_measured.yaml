@@ -57,6 +57,8 @@ calibration:
       gain_x_per_d: 1.0
 
 design:
+  # Archived cascade-only fields retained for history; the active reference PID
+  # design below uses outer_bw_hz, outer_zeta, and extra_pole_factor.
   inner_bw_hz: 0.6
   inner_zeta: 0.9
   outer_bw_hz: 0.12

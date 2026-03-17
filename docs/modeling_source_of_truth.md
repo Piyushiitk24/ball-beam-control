@@ -1,16 +1,22 @@
 # Modeling Source of Truth
 
-Canonical modeling and control document:
+Canonical modeling and control documents:
 - `docs/modeling.md`
+- `docs/reference_pid_first_principles_derivation.md`
 
 Interpretation rule:
-- **Track B** in `docs/modeling.md` is the authoritative description of the controller currently implemented in firmware.
-- **Track A** preserves the archived first-principles and cascade-design history for thesis/report use.
+- the authoritative controller architecture is the reference PID sketch in
+  `firmware/src/main.cpp`
+- the authoritative first-principles design artifacts are in
+  `model/first_principles/`
+- the generated gains in `model/first_principles/controller_initial_gains.json`
+  and `firmware/include/generated/controller_gains.h` are the seed values for
+  that architecture
 
 Companion references:
-- runtime/debugging chronology: `docs/experiments/2026-03-control-debugging/README.md`
 - active measured parameters: `model/first_principles/params_measured.yaml`
+- reduced linear model: `model/first_principles/linearized_model.json`
 - measured-parameter worksheet: `docs/modeling_measured_calculations.md`
-- current empirical tuning notes: `docs/tuning.md`
+- archived empirical runtime notes: `docs/tuning.md`
 
 If code and math drift, reconcile both in the same change set.

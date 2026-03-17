@@ -114,6 +114,46 @@ def outer_model_coeffs(params: dict[str, Any]) -> tuple[float, float]:
     return alpha, beta
 
 
+def stepper_rad_per_step(params: dict[str, Any]) -> float:
+    actuator = params["actuator"]
+    steps_per_rev = float(actuator["stepper_steps_per_rev"])
+    linkage_ratio = float(actuator.get("linkage_ratio", 1.0))
+    return (2.0 * np.pi / steps_per_rev) * linkage_ratio
+
+
+def reference_pid_output_limit_steps(params: dict[str, Any]) -> float:
+    steps_per_rev = float(params["actuator"]["stepper_steps_per_rev"])
+    return 25.0 * (steps_per_rev / 200.0)
+
+
+def cm_per_s2_per_step(params: dict[str, Any]) -> float:
+    g = float(params["plant"]["gravity_mps2"])
+    alpha, _ = outer_model_coeffs(params)
+    return 100.0 * alpha * g * stepper_rad_per_step(params)
+
+
+def reference_pid_physical_to_step_gains(
+    kp_rad_per_m: float,
+    ki_rad_per_mps: float,
+    kd_rad_s_per_m: float,
+    params: dict[str, Any],
+) -> tuple[float, float, float]:
+    step_rad = stepper_rad_per_step(params)
+    scale = 100.0 * step_rad
+    return kp_rad_per_m / scale, ki_rad_per_mps / scale, kd_rad_s_per_m / scale
+
+
+def reference_pid_step_to_physical_gains(
+    kp_steps_per_cm: float,
+    ki_steps_per_cmps: float,
+    kd_step_s_per_cm: float,
+    params: dict[str, Any],
+) -> tuple[float, float, float]:
+    step_rad = stepper_rad_per_step(params)
+    scale = 100.0 * step_rad
+    return kp_steps_per_cm * scale, ki_steps_per_cmps * scale, kd_step_s_per_cm * scale
+
+
 def theta_from_phi(
     phi_rad: float,
     theta_map_cfg: dict[str, Any],

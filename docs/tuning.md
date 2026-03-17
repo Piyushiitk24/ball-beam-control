@@ -1,8 +1,11 @@
 # Runtime Tuning Workflow
 
-This document describes the **current empirical tuning workflow** for the runtime controller in firmware.
+This document describes the archived empirical tuning workflow for the older
+command-driven runtime controller.
 
-The active runtime controller is the single position PID in `firmware/src/control/cascade_controller.cpp`, not the archived cascade-design pipeline.
+The active firmware today is the reference PID sketch in `firmware/src/main.cpp`.
+So this document is historical context only; it does not describe the current
+authoritative firmware path.
 
 ## 1. What We Tune Today
 

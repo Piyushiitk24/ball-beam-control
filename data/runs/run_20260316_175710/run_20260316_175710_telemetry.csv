@@ -1,0 +1,1 @@
+t_ms,state,x_cm,x_filt_cm,theta_deg,theta_cmd_deg,u_step_rate,fault_flags,x_ref_cm,sonar_age_ms,sonar_valid,sonar_miss_count,theta_cmd_unclamped_deg,theta_cmd_clamped_deg,theta_cmd_saturated,act_deg_abs,trim_deg,search_phase,x_linear_cm,x_linear_filt_cm,x_ctrl_cm,x_ctrl_filt_cm,x_feedback_cm,feedback_blend,pos_fresh,pos_held,pos_control_usable,control_hold_active,test_phase

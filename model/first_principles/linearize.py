@@ -8,49 +8,64 @@ from pathlib import Path
 import numpy as np
 
 from first_principles_core import (
-    actuator_defaults,
-    full_coupled_accels,
+    cm_per_s2_per_step,
     load_params,
-    phi_from_theta,
-    theta_from_phi,
-    theta_tracking_torque,
+    outer_model_coeffs,
+    stepper_rad_per_step,
 )
 
 
-def f(state: np.ndarray, u: float, p: dict) -> np.ndarray:
-    x, x_dot, theta, theta_dot, phi = state
+def linearized_reference_model(params: dict) -> dict:
+    alpha, beta = outer_model_coeffs(params)
+    kappa_cm = cm_per_s2_per_step(params)
+    kappa_m = kappa_cm / 100.0
+    step_rad = stepper_rad_per_step(params)
 
-    theta_map_cfg = p.get("calibration", {}).get("theta_from_phi", {})
-    act = actuator_defaults(p)
+    a = np.array(
+        [
+            [0.0, 1.0],
+            [0.0, -beta],
+        ],
+        dtype=float,
+    )
+    b = np.array(
+        [
+            [0.0],
+            [kappa_m],
+        ],
+        dtype=float,
+    )
+    c = np.eye(2, dtype=float)
+    d = np.zeros((2, 1), dtype=float)
 
-    phi_dot = (u - phi) / max(act["phi_tau_s"], 1e-6)
-    theta_ref, _, _ = theta_from_phi(phi, theta_map_cfg, direction=np.sign(phi_dot))
-    tau_act = theta_tracking_torque(theta_ref, theta, theta_dot, p)
-
-    x_ddot, theta_ddot = full_coupled_accels(x, x_dot, theta, theta_dot, tau_act, p)
-    return np.array([x_dot, x_ddot, theta_dot, theta_ddot, phi_dot], dtype=float)
-
-
-def jacobian_state(x0: np.ndarray, u0: float, p: dict, eps: float = 1e-6) -> np.ndarray:
-    n = x0.size
-    A = np.zeros((n, n), dtype=float)
-    for i in range(n):
-        dx = np.zeros(n, dtype=float)
-        dx[i] = eps
-        fp = f(x0 + dx, u0, p)
-        fm = f(x0 - dx, u0, p)
-        A[:, i] = (fp - fm) / (2.0 * eps)
-    return A
-
-
-def jacobian_input(x0: np.ndarray, u0: float, p: dict, eps: float = 1e-6) -> np.ndarray:
-    fp = f(x0, u0 + eps, p)
-    fm = f(x0, u0 - eps, p)
-    return ((fp - fm) / (2.0 * eps)).reshape((-1, 1))
+    return {
+        "state_order": ["x_m", "x_dot_mps"],
+        "input_order": ["n_cmd_steps"],
+        "A": a.tolist(),
+        "B": b.tolist(),
+        "C": c.tolist(),
+        "D": d.tolist(),
+        "meta": {
+            "method": "linearized-reference-pid-plant",
+            "model": "x_ddot + beta*x_dot = alpha*g*k_step_rad*n_cmd_steps",
+            "alpha": alpha,
+            "beta_1ps": beta,
+            "rad_per_step": step_rad,
+            "kappa_cmps2_per_step": kappa_cm,
+            "transfer_function": {
+                "output": "X_cm(s)",
+                "input": "N_cmd_steps(s)",
+                "numerator": [kappa_cm],
+                "denominator": [1.0, beta, 0.0],
+            },
+        },
+    }
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Linearize nonlinear ball-beam model")
+    parser = argparse.ArgumentParser(
+        description="Linearize the reduced single-loop reference PID plant"
+    )
     parser.add_argument(
         "--params",
         type=Path,
@@ -59,35 +74,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    params = load_params(args.params)
-    theta_map_cfg = params.get("calibration", {}).get("theta_from_phi", {})
-
-    phi_eq = phi_from_theta(0.0, theta_map_cfg, direction=1.0)
-    x_eq = np.array([0.0, 0.0, 0.0, 0.0, phi_eq], dtype=float)
-    u_eq = float(phi_eq)
-
-    A = jacobian_state(x_eq, u_eq, params)
-    B = jacobian_input(x_eq, u_eq, params)
-    C = np.eye(5)
-    D = np.zeros((5, 1), dtype=float)
-
-    payload = {
-        "state_order": ["x_m", "x_dot_mps", "theta_rad", "theta_dot_radps", "phi_rad"],
-        "input_order": ["phi_cmd_rad"],
-        "A": A.tolist(),
-        "B": B.tolist(),
-        "C": C.tolist(),
-        "D": D.tolist(),
-    }
-
+    payload = linearized_reference_model(load_params(args.params))
     out_path = Path(__file__).with_name("linearized_model.json")
     with out_path.open("w", encoding="utf-8") as f_out:
         json.dump(payload, f_out, indent=2)
 
-    print("Linearized full model around x=0, x_dot=0, theta=0, theta_dot=0")
+    print("Linearized reduced reference PID model around x=0, x_dot=0, theta=0")
     print("Saved:", out_path)
-    print("A=\n", A)
-    print("B=\n", B)
+    print("A=\n", np.array(payload["A"], dtype=float))
+    print("B=\n", np.array(payload["B"], dtype=float))
 
 
 if __name__ == "__main__":
