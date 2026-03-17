@@ -17,13 +17,15 @@ constexpr int MICROSTEPS = 16;
 
 constexpr double MEASUREMENT_ERROR = 0.04;
 constexpr double VARIANCE = 1.0;
-constexpr double KP = 3.836778110512597;
-constexpr double KI = 1.4835192523619078;
-constexpr double KD = 1.4009765095107707;
+constexpr double KP = 13.75;
+constexpr double KI = 7.5;
+constexpr double KD = 3.0;
 constexpr double SET_POINT = 0.0;
 constexpr double CENTER_DISTANCE_CM = 13.5;
 constexpr double MIN_VALID_DISTANCE_CM = 2.0;
-constexpr double MAX_VALID_DISTANCE_CM = 25.0;
+constexpr double MAX_VALID_DISTANCE_CM = 26.5;
+constexpr unsigned long INVALID_GRACE_MS = 250UL;
+constexpr int INVALID_GRACE_READS = 4;
 constexpr unsigned long kRefSerialBaud = 115200UL;
 constexpr int PID_SAMPLE_TIME_MS = 100;
 constexpr int WARMUP_SAMPLES = 10;
@@ -35,6 +37,11 @@ double setPoint = SET_POINT;
 double input = 0.0;
 double output = 0.0;
 double radiansPerStep = 0.0;
+bool invalidFallbackActive = false;
+unsigned long invalidSequenceStartMs = 0UL;
+int invalidReadStreak = 0;
+long lastCommandedTargetSteps = 0;
+bool hasCommandedTarget = false;
 
 AccelStepper stepper(AccelStepper::DRIVER, STEP_PIN, DIR_PIN);
 HCSR04 sensor(TRIG_PIN, ECHO_PIN);
@@ -70,7 +77,28 @@ void emitTelemetry() {
   Serial.println(beam_angle_rad, 6);
 }
 
-void move() { stepper.runToNewPosition(-output); }
+void moveToTarget(long target_steps) {
+  lastCommandedTargetSteps = target_steps;
+  hasCommandedTarget = true;
+  stepper.runToNewPosition(target_steps);
+}
+
+void move() { moveToTarget(lround(-output)); }
+
+void holdLastTarget() {
+  if (hasCommandedTarget) {
+    stepper.runToNewPosition(lastCommandedTargetSteps);
+    return;
+  }
+  stepper.runToNewPosition(0);
+}
+
+void resetPidState() {
+  output = 0.0;
+  input = 0.0;
+  pid.SetMode(MANUAL);
+  pid.SetMode(AUTOMATIC);
+}
 
 }  // namespace
 
@@ -105,12 +133,37 @@ void setup() {
 
 void loop() {
   if (!readSensor()) {
+    const unsigned long now_ms = millis();
+    if (invalidReadStreak == 0) {
+      invalidSequenceStartMs = now_ms;
+    }
+    ++invalidReadStreak;
+
+    const unsigned long invalidDurationMs = now_ms - invalidSequenceStartMs;
+    const bool graceActive =
+        hasCommandedTarget &&
+        (invalidDurationMs < INVALID_GRACE_MS || invalidReadStreak <= INVALID_GRACE_READS);
+
+    if (graceActive) {
+      emitTelemetry();
+      holdLastTarget();
+      return;
+    }
+
+    if (!invalidFallbackActive) {
+      resetPidState();
+      invalidFallbackActive = true;
+    }
     input = 0.0;
     output = 0.0;
     emitTelemetry();
     stepper.runToNewPosition(0);
     return;
   }
+
+  invalidReadStreak = 0;
+  invalidSequenceStartMs = 0UL;
+  invalidFallbackActive = false;
 
   const double h = CENTER_DISTANCE_CM - ball_position;
   const double a = static_cast<double>(stepper.currentPosition()) * radiansPerStep;
