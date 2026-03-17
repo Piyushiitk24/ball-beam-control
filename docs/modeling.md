@@ -15,16 +15,16 @@ V-groove runner mounted on top of the beam. An HC-SR04 ultrasonic rangefinder mo
 at the pivot end of the beam measures the ball's distance from the sensor face.
 
 ```text
-                           HC-SR04
-                           sensor
-                            ||||
-                            ||||
-  pivot                     ||||          motor crank
-    O===========[ runner ]==============O--( )
-    ^            ~~~ball~~~             ^
-    |                                  |
-  fulcrum                          motor-side
-  (fixed)                          clevis
+  HC-SR04
+  sensor
+  ||||
+  ||||
+  ||||  pivot                                motor crank
+  ||||====O===========[ runner ]==============O--( )
+          ^            ~~~ball~~~             ^
+          |                                  |
+        fulcrum                          motor-side
+        (fixed)                          clevis
 ```
 
 The pivot-side clevis hole is the coordinate origin for all length measurements along
@@ -43,13 +43,14 @@ The state vector of the full system is **q** = [r, θ]ᵀ.
 
 ### 1.3 Firmware Sign Convention
 
-In the active firmware (`firmware/src/main.cpp`):
+In the canonical control convention used by this project:
 
-- Positive microstep count → beam tilts motor-side up (θ > 0)
-- Positive θ → ball accelerates away from pivot (+r direction)
-- The HC-SR04 reports distance from the sensor face; ball position in the firmware
-  coordinate is `x_ctrl = center_m − d`, where `d` is the measured distance and
-  `center_m = 0.1295 m` is the nominal center
+- Positive microstep count is intended to mean motor-side-up actuator motion (`θ > 0`).
+- Positive `θ` makes gravity pull the ball toward the pivot, so `r` decreases.
+- For a pivot-mounted distance sensor, the controller coordinate is
+  `x_ctrl = center_m − d`, where `d` is the measured distance and
+  `center_m = 0.1295 m` is the nominal center. Therefore `x_ctrl > 0`
+  means the ball is toward the motor side.
 
 ---
 
@@ -523,10 +524,11 @@ where:
 β = b_x / m_e  =  0.0125 / 0.004667  =  2.6786  s⁻¹
 ```
 
-**Sign note:** With the positive-θ convention (motor side up), a positive δ tilts the
-beam so that gravity pulls the ball away from the pivot (increasing r). The firmware
-uses the mirror of this: positive step count drives positive x_ctrl in the control
-frame, which requires a negative sign in the actuation mapping. The derivation here
+**Sign note:** With the positive-θ convention (motor side up), a positive `δ` tilts the
+beam so that gravity pulls the ball toward the pivot (decreasing `r`). Any control
+coordinate that defines positive position toward the motor side therefore needs the
+actuation mapping to preserve the intended logical meaning of "positive command =
+motor side up" rather than silently flipping PID or sensor signs. The derivation here
 tracks the physics; sign bookkeeping is done in the unit-conversion step (§9).
 
 ### 7.3 Linearized Beam Equation

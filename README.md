@@ -694,6 +694,37 @@ Compatibility note:
 
 > Archived HC-SR04 and TFMini code is in `firmware/experiments/backup/`.
 
+### Sharp Sign Audit
+
+Run the Sharp sign audit before any Sharp-based sign fix, after rewiring the driver,
+or any time the ball consistently runs to the wrong side and stays there.
+
+Upload the dedicated audit sketch:
+
+```bash
+cd /Users/piyush/code/ball-beam-control/firmware
+pio run -e sharp_sign_audit -t upload --upload-port /dev/cu.usbserial-A10N20X1
+```
+
+Run the host-side audit:
+
+```bash
+cd /Users/piyush/code/ball-beam-control
+./.venv/bin/python analysis/run_sharp_sign_audit.py --port /dev/cu.usbserial-A10N20X1
+```
+
+Artifacts:
+
+- raw log: `data/runs/run_<timestamp>/run_<timestamp>_raw.log`
+- JSON summary: `data/runs/run_<timestamp>/run_<timestamp>_sign_audit_summary.json`
+- Markdown summary: `data/runs/run_<timestamp>/run_<timestamp>_sign_audit_summary.md`
+
+Policy:
+
+- cite the latest Sharp sign-audit summary before changing actuator direction
+- make actuator sign changes at the stepper boundary first, not by flipping PID, setpoint, or sensor math
+- use `docs/calibration_signs.md` as the canonical sign reference
+
 ---
 
 ## 9 — Runtime Tuning
@@ -794,7 +825,7 @@ When adding code:
 | Upload hangs | Wrong bootloader profile, or monitor still open |
 | Motor barely moves | Check telemetry for `theta_cmd_saturated`, `actuator_drift`, and sonar age before retuning |
 | `FAULT` immediately on `r` | Usually sonar dropout, actuator drift, or a hard limit violation — inspect `s` and the saved limits |
-| Wrong motor direction | Sign calibration is wrong — redo `l`, `u`, then `b` |
+| Wrong motor direction | Run `sharp_sign_audit`, use the saved summary, and fix direction at the stepper boundary instead of flipping PID or sensor signs |
 
 Stop when needed:
 

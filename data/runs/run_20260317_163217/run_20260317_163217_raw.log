@@ -1,0 +1,63 @@
+AUDIT_BOOT,baud=115200,sample_ms=40,default_jog_steps=120,default_jog_rate_sps=500.000,stream=1
+HOST_CMD,t
+Wiring: STEP->D2 DIR->D3 EN->D4 Sharp->A0
+SHARP_SIGN_AUDIT_HELP
+Commands:
+  h / ?            help
+  e 0|1            disable / enable driver
+  s                emit one AUDIT_TEL sample
+  t                toggle AUDIT_TEL streaming
+  z                zero logical step position
+  j <steps> [rate] blocking jog, holds final position
+OK,stream=0
+HOST_INPUT,Sensor mount end [pivot/motor]: =>pivot
+HOST_INPUT,Place the ball near the Sharp sensor, then press Enter to capture.=>ENTER
+HOST_CMD,t
+OK,stream=1
+AUDIT_TEL,27359,323,17.5729,0
+AUDIT_TEL,27399,323,17.5729,0
+AUDIT_TEL,27439,323,17.5729,0
+AUDIT_TEL,27479,323,17.5729,0
+AUDIT_TEL,27520,405,13.4770,0
+AUDIT_TEL,27560,342,16.4333,0
+AUDIT_TEL,27600,331,17.0757,0
+HOST_CMD,t
+OK,stream=0
+HOST_INPUT,Place the ball far from the Sharp sensor, then press Enter to capture.=>ENTER
+HOST_CMD,t
+OK,stream=1
+AUDIT_TEL,38497,283,20.5207,0
+AUDIT_TEL,38537,283,20.5207,0
+AUDIT_TEL,38577,283,20.5207,0
+AUDIT_TEL,38617,283,20.5207,0
+AUDIT_TEL,38657,284,20.4360,0
+AUDIT_TEL,38697,284,20.4360,0
+AUDIT_TEL,38737,284,20.4360,0
+HOST_CMD,t
+OK,stream=0
+HOST_CMD,e 1
+OK,driver_enabled=1
+HOST_CMD,z
+OK,step_pos=0
+HOST_INPUT,Keep clear of the mechanism, then press Enter for one positive jog.=>ENTER
+HOST_CMD,j 120 500.000
+AUDIT_JOG_BEGIN,120,500.000,0
+AUDIT_JOG_END,120
+HOST_INPUT,Which end rose? [motor/sensor]: =>sensor
+HOST_CMD,j -120 500.000
+AUDIT_JOG_BEGIN,-120,500.000,120
+AUDIT_JOG_END,0
+HOST_CMD,z
+OK,step_pos=0
+HOST_INPUT,Place the ball at the physical center, keep clear, then press Enter to capture the pre-jog snapshot.=>ENTER
+HOST_CMD,t
+OK,stream=1
+AUDIT_TEL,78019,280,20.7788,0
+AUDIT_TEL,78059,279,20.8662,0
+AUDIT_TEL,78099,348,16.1015,0
+AUDIT_TEL,78139,304,18.8680,0
+AUDIT_TEL,78179,290,19.9409,0
+AUDIT_TEL,78219,283,20.5207,0
+AUDIT_TEL,78259,282,20.6061,0
+HOST_CMD,t
+OK,stream=0

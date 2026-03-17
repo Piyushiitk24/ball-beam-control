@@ -1,0 +1,91 @@
+AUDIT_BOOT,baud=115200,sample_ms=40,default_jog_steps=120,default_jog_rate_sps=500.000,stream=1
+HOST_CMD,t
+Wiring: STEP->D2 DIR->D3 EN->D4 Sharp->A0
+SHARP_SIGN_AUDIT_HELP
+Commands:
+  h / ?            help
+  e 0|1            disable / enable driver
+  s                emit one AUDIT_TEL sample
+  t                toggle AUDIT_TEL streaming
+  z                zero logical step position
+  j <steps> [rate] blocking jog, holds final position
+OK,stream=0
+HOST_INPUT,Sensor mount end [pivot/motor]: =>motor
+HOST_INPUT,Place the ball near the Sharp sensor, then press Enter to capture.=>ENTER
+HOST_CMD,t
+OK,stream=1
+AUDIT_TEL,11444,327,17.3210,0
+AUDIT_TEL,11484,323,17.5729,0
+AUDIT_TEL,11524,321,17.7014,0
+AUDIT_TEL,11564,408,13.3608,0
+AUDIT_TEL,11604,340,16.5468,0
+AUDIT_TEL,11644,335,16.8368,0
+AUDIT_TEL,11684,327,17.3210,0
+HOST_CMD,t
+OK,stream=0
+HOST_INPUT,Place the ball far from the Sharp sensor, then press Enter to capture.=>ENTER
+HOST_CMD,t
+OK,stream=1
+AUDIT_TEL,18987,284,20.4360,0
+AUDIT_TEL,19027,286,20.2684,0
+AUDIT_TEL,19067,286,20.2684,0
+AUDIT_TEL,19107,285,20.3519,0
+AUDIT_TEL,19147,280,20.7788,0
+AUDIT_TEL,19187,349,16.0473,0
+AUDIT_TEL,19227,307,18.6520,0
+HOST_CMD,t
+OK,stream=0
+HOST_CMD,e 1
+OK,driver_enabled=1
+HOST_CMD,z
+OK,step_pos=0
+HOST_INPUT,Keep clear of the mechanism, then press Enter for one positive jog.=>ENTER
+HOST_CMD,j 120 500.000
+AUDIT_JOG_BEGIN,120,500.000,0
+AUDIT_JOG_END,120
+HOST_INPUT,Which end rose? [motor/sensor]: =>sensor
+HOST_CMD,j -120 500.000
+AUDIT_JOG_BEGIN,-120,500.000,120
+AUDIT_JOG_END,0
+HOST_CMD,z
+OK,step_pos=0
+HOST_CMD,e 0
+OK,driver_enabled=0
+HOST_INPUT,Place the ball at the physical center with the driver disabled, manually level the beam as needed, and press Enter to capture the pre-jog snapshot.=>ENTER
+HOST_CMD,t
+OK,stream=1
+AUDIT_TEL,55139,548,9.4525,0
+AUDIT_TEL,55179,540,9.6170,0
+AUDIT_TEL,55219,535,9.7225,0
+AUDIT_TEL,55259,533,9.7653,0
+AUDIT_TEL,55299,531,9.8085,0
+AUDIT_TEL,55339,527,9.8959,0
+AUDIT_TEL,55379,572,8.9890,0
+HOST_CMD,t
+OK,stream=0
+HOST_CMD,z
+OK,step_pos=0
+HOST_INPUT,Keep the ball in that centered start pose, then press Enter to enable the driver and run the centered positive jog immediately.=>ENTER
+HOST_CMD,e 1
+OK,driver_enabled=1
+HOST_CMD,j 120 500.000
+AUDIT_JOG_BEGIN,120,500.000,0
+AUDIT_JOG_END,120
+HOST_CMD,t
+OK,stream=1
+AUDIT_TEL,65139,472,11.2617,120
+AUDIT_TEL,65179,457,11.6965,120
+AUDIT_TEL,65219,548,9.4525,120
+AUDIT_TEL,65259,458,11.6665,120
+AUDIT_TEL,65299,437,12.3269,120
+AUDIT_TEL,65339,425,12.7361,120
+AUDIT_TEL,65379,414,13.1340,120
+HOST_CMD,t
+OK,stream=0
+HOST_CMD,j -120 500.000
+AUDIT_JOG_BEGIN,-120,500.000,120
+AUDIT_JOG_END,0
+HOST_CMD,z
+OK,step_pos=0
+HOST_CMD,e 0
+OK,driver_enabled=0

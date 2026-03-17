@@ -1,0 +1,16 @@
+{
+  "created_at_iso": "2026-03-17T16:41:17",
+  "d_after_jog_cm": 11.6965,
+  "d_before_jog_cm": 9.7225,
+  "d_far_cm": 20.2684,
+  "d_near_cm": 17.321,
+  "positive_jog_moves_ball_toward_sensor": false,
+  "positive_jog_raises_motor": false,
+  "recommended_stepper_dir_sign": -1,
+  "reference_pid_actuator_mapping_ok": false,
+  "reference_pid_stepper_boundary_action": "invert",
+  "run_stem": "run_20260317_164009",
+  "sensor_distance_increases_toward_motor": false,
+  "sensor_mount_end": "motor",
+  "status": "pass"
+}
