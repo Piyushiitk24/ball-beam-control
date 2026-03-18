@@ -1,6 +1,5 @@
 #include <AccelStepper.h>
 #include <Arduino.h>
-#include <PID_v1.h>
 #include <SimpleKalmanFilter.h>
 
 namespace {
@@ -24,48 +23,58 @@ constexpr unsigned long SENSOR_SAMPLE_MS = 40UL;
 constexpr double MEASUREMENT_ERROR = 2.0;
 constexpr double VARIANCE = 1.0;
 
-// Gains tuned from run analysis.
-// KP = 18.0: raised from 13 to ensure far-end recovery is friction-proof.
-//   At 8 cm error (ball at far end, CENTER=12): P = 144 steps = 16.2°.
-//   With run_173954 KP=13: D-noise (±50 steps from Kalman jitter at far end)
-//   could drop net output to 54 steps (6°) — below friction threshold of ~8.5°
-//   (76 steps). Ball got stuck at far end. KP=18 gives min net = 144-50 = 94
-//   steps (10.6°), reliably above friction regardless of D-term oscillation.
-//   Near center (0.5 cm error): P = 9 steps = 1° — below friction, same as before.
-// KI = 0.3: prevents integral windup.
-// KD = 2.5: PID_v1 internally scales kd = Kd / SampleTimeInSec = 2.5/0.1 = 25.
-//   At 25 cm/s approach (2.5 cm/100ms sample), D provides ~62 steps of braking.
-constexpr double KP = 18.0;
-constexpr double KI = 0.3;
-constexpr double KD = 2.5;
-constexpr double SET_POINT = 0.0;
+// Ball-and-beam position is effectively a double-integrator plant, so a plain
+// PD controller is the standard simple choice: proportional position error plus
+// derivative damping from measured ball velocity. Avoid the recent rule-heavy
+// capture logic that turned the loop into saturated bang-bang control.
+constexpr double KP = 20.0;
+constexpr double KI = 0.0;
+constexpr double KD = 8.0;
+constexpr double SETPOINT_HOLD_POS_TOL_CM = 0.35;
+constexpr double SETPOINT_HOLD_RATE_TOL_CM_S = 1.2;
+constexpr int CENTER_LIMIT_FULL_STEPS = 8;
+constexpr int TRACKING_LIMIT_FULL_STEPS = 10;
 
-// CENTER_DISTANCE_CM is the Sharp reading when the ball is at the target
-// equilibrium position. Sharp is mounted at the FULCRUM/PIVOT end, so it reads
-// SMALL when the ball is near the sensor and LARGE when the ball is at the
-// far/motor end.
-//
-// Target equilibrium. Set to the sensor reading at the physical ball rest
-// position. In run_173954 the ball averaged 11.64 cm when placed at physical
-// centre; CENTER=13.0 caused 22s of negative integral buildup (ball couldn't
-// reach 13 cm due to friction at small beam angles) that weakened far-end
-// recovery. 12.0 matches actual resting position, keeping integral near zero.
-constexpr double CENTER_DISTANCE_CM = 12.0;
+// Sharp is mounted at the pivot end, so the measured distance is SMALL near the
+// sensor and LARGE toward the motor end. The near stop now physically blocks
+// the ball from entering the Sharp dead zone below about 8 cm, leaving roughly
+// 13 cm of runner travel. For a 40 mm ball, the sensed near-surface travel is
+// runner_length - ball_diameter ≈ 9 cm.
+constexpr double NEAR_STOP_DISTANCE_CM = 8.5;
+constexpr double USABLE_RUNNER_LENGTH_CM = 13.0;
+constexpr double BALL_DIAMETER_CM = 4.0;
+constexpr double SENSED_TRAVEL_CM = USABLE_RUNNER_LENGTH_CM - BALL_DIAMETER_CM;
+constexpr double FAR_STOP_DISTANCE_CM = NEAR_STOP_DISTANCE_CM + SENSED_TRAVEL_CM;
+constexpr double CENTER_DISTANCE_CM = 0.5 * (NEAR_STOP_DISTANCE_CM + FAR_STOP_DISTANCE_CM);
+constexpr double ENDPOINT_TARGET_MARGIN_CM = 0.5;
+constexpr double NEAR_TARGET_DISTANCE_CM = NEAR_STOP_DISTANCE_CM + ENDPOINT_TARGET_MARGIN_CM;
+constexpr double FAR_TARGET_DISTANCE_CM = FAR_STOP_DISTANCE_CM - ENDPOINT_TARGET_MARGIN_CM;
 
-// Working Sharp window for the current mount. Near-end fold-back is handled
-// by the physical runner stop (ball cannot reach the fold-back zone < 8 cm).
-// MAX = 22.0 covers the full far-end range so the controller can pull the
-// ball in from the far end (~20 cm).
-// MIN = 9.0: Sharp GP2Y0A21YK0F folds back below ~8 cm (output voltage drops,
-// power-law maps 4-5 cm physical distance back to ~10 cm). Near-end stop must
-// be at ≥9 cm from sensor face to stay in the monotonic region.
-constexpr double MIN_VALID_DISTANCE_CM = 9.0;
-constexpr double MAX_VALID_DISTANCE_CM = 27.0;
+// Tighten the valid window to the shortened runner geometry. Allow a small
+// margin around the physical stops so noise at the new near stop does not
+// immediately force grace-mode hold.
+constexpr double MIN_VALID_DISTANCE_CM = 8.0;
+constexpr double MAX_VALID_DISTANCE_CM = 19.5;
 
 // Grace period extended and applies to ALL invalid reading types.
 constexpr unsigned long INVALID_GRACE_MS = 600UL;
 constexpr int INVALID_GRACE_READS = 15;
 
+enum class ReferenceProfile : uint8_t {
+  kCenterHold,
+  kCenterFarNear90s,
+};
+
+enum class ResetMode : uint8_t {
+  kAcquireTarget,
+  kBumplessResume,
+};
+
+// Keep the working controller unchanged and only move the reference. Endpoint
+// targets stay 0.5 cm inside the physical stops to avoid chatter against the
+// obstruction and Sharp fold-back region.
+constexpr ReferenceProfile ACTIVE_REFERENCE_PROFILE = ReferenceProfile::kCenterFarNear90s;
+constexpr unsigned long REFERENCE_PHASE_MS = 30000UL;
 
 constexpr unsigned long kRefSerialBaud = 115200UL;
 constexpr int PID_SAMPLE_TIME_MS = 100;
@@ -75,18 +84,25 @@ constexpr unsigned long WARMUP_DELAY_MS = 40UL;  // one sensor cycle per warmup 
 
 double raw_distance_cm = 0.0;
 double ball_position = 0.0;
-double setPoint = SET_POINT;
+double targetDistanceCm = CENTER_DISTANCE_CM;
 double input = 0.0;
 double output = 0.0;
 double radiansPerStep = 0.0;
+double ballVelocityCmS = 0.0;
+double integralOutputSteps = 0.0;
 bool invalidFallbackActive = false;
 unsigned long invalidSequenceStartMs = 0UL;
+unsigned long lastControlComputeMs = 0UL;
+unsigned long profileStartMs = 0UL;
+unsigned long prevValidBallPositionMs = 0UL;
 int invalidReadStreak = 0;
+int activeReferencePhase = -1;
 long graceHoldTargetSteps = 0;
+double prevValidBallPositionCm = 0.0;
+bool hasPrevValidBallPosition = false;
 
 AccelStepper stepper(AccelStepper::DRIVER, STEP_PIN, DIR_PIN);
 SimpleKalmanFilter filter(MEASUREMENT_ERROR, MEASUREMENT_ERROR, VARIANCE);
-PID pid(&input, &output, &setPoint, KP, KI, KD, DIRECT);
 
 // GP2Y0A21YK0F empirical power-law: distance_cm = 29.988 * voltage^(-1.173)
 float sharpAdcToCm(uint16_t adc) {
@@ -94,6 +110,98 @@ float sharpAdcToCm(uint16_t adc) {
   const float v = static_cast<float>(adc) * (5.0f / 1024.0f);
   if (v < 0.05f) return 0.0f;
   return 29.988f * powf(v, -1.173f);
+}
+
+double clampOutput(double value) {
+  const bool targetIsCenterNow = fabs(targetDistanceCm - CENTER_DISTANCE_CM) <= 0.05;
+  const int fullSteps = targetIsCenterNow ? CENTER_LIMIT_FULL_STEPS : TRACKING_LIMIT_FULL_STEPS;
+  const double stepperMax = fullSteps * MICROSTEPS;
+  const double stepperMin = -stepperMax;
+  if (value > stepperMax) return stepperMax;
+  if (value < stepperMin) return stepperMin;
+  return value;
+}
+
+const __FlashStringHelper* referenceProfileName() {
+  switch (ACTIVE_REFERENCE_PROFILE) {
+    case ReferenceProfile::kCenterHold:
+      return F("center_hold");
+    case ReferenceProfile::kCenterFarNear90s:
+      return F("center_far_near_90s");
+  }
+  return F("unknown");
+}
+
+int referencePhaseForElapsedMs(unsigned long elapsedMs) {
+  switch (ACTIVE_REFERENCE_PROFILE) {
+    case ReferenceProfile::kCenterHold:
+      return 0;
+    case ReferenceProfile::kCenterFarNear90s:
+      if (elapsedMs < REFERENCE_PHASE_MS) return 0;
+      if (elapsedMs < (2UL * REFERENCE_PHASE_MS)) return 1;
+      return 2;
+  }
+  return 0;
+}
+
+double referenceTargetCmForPhase(int phase) {
+  switch (ACTIVE_REFERENCE_PROFILE) {
+    case ReferenceProfile::kCenterHold:
+      return CENTER_DISTANCE_CM;
+    case ReferenceProfile::kCenterFarNear90s:
+      if (phase <= 0) return CENTER_DISTANCE_CM;
+      if (phase == 1) return FAR_TARGET_DISTANCE_CM;
+      return NEAR_TARGET_DISTANCE_CM;
+  }
+  return CENTER_DISTANCE_CM;
+}
+
+const __FlashStringHelper* referencePhaseLabel(int phase) {
+  switch (ACTIVE_REFERENCE_PROFILE) {
+    case ReferenceProfile::kCenterHold:
+      return F("hold_center");
+    case ReferenceProfile::kCenterFarNear90s:
+      if (phase <= 0) return F("hold_center");
+      if (phase == 1) return F("hold_far");
+      return F("hold_near");
+  }
+  return F("hold_center");
+}
+
+void emitReferenceConfig() {
+  Serial.print(F("REF_CFG,profile="));
+  Serial.print(referenceProfileName());
+  Serial.print(F(",center_cm="));
+  Serial.print(CENTER_DISTANCE_CM, 4);
+  Serial.print(F(",near_cm="));
+  Serial.print(NEAR_TARGET_DISTANCE_CM, 4);
+  Serial.print(F(",far_cm="));
+  Serial.print(FAR_TARGET_DISTANCE_CM, 4);
+  Serial.print(F(",segment_ms="));
+  Serial.println(REFERENCE_PHASE_MS);
+}
+
+void emitReferenceChange(unsigned long nowMs, int phase) {
+  Serial.print(F("REF,"));
+  Serial.print(nowMs);
+  Serial.print(',');
+  Serial.print(targetDistanceCm, 4);
+  Serial.print(',');
+  Serial.println(referencePhaseLabel(phase));
+}
+
+void updateReferenceProfile() {
+  if (profileStartMs == 0UL) return;
+  const unsigned long nowMs = millis();
+  const unsigned long elapsedMs = nowMs - profileStartMs;
+  const int phase = referencePhaseForElapsedMs(elapsedMs);
+  const double newTargetCm = referenceTargetCmForPhase(phase);
+  if (phase == activeReferencePhase && fabs(newTargetCm - targetDistanceCm) <= 1.0e-6) {
+    return;
+  }
+  targetDistanceCm = newTargetCm;
+  activeReferencePhase = phase;
+  emitReferenceChange(nowMs, phase);
 }
 
 bool readSensor() {
@@ -109,6 +217,18 @@ bool readSensor() {
   raw_distance_cm = dist;
   if (dist > MIN_VALID_DISTANCE_CM && dist < MAX_VALID_DISTANCE_CM) {
     ball_position = filter.updateEstimate(dist);
+    if (hasPrevValidBallPosition) {
+      const unsigned long delta_ms = now_ms - prevValidBallPositionMs;
+      if (delta_ms > 0UL) {
+        ballVelocityCmS =
+            (ball_position - prevValidBallPositionCm) * (1000.0 / static_cast<double>(delta_ms));
+      }
+    } else {
+      ballVelocityCmS = 0.0;
+      hasPrevValidBallPosition = true;
+    }
+    prevValidBallPositionCm = ball_position;
+    prevValidBallPositionMs = now_ms;
     return true;
   }
   return false;
@@ -142,22 +262,21 @@ void emitTelemetry() {
 }
 
 void move() {
-  // Sign audit run_20260317_164432: positive AccelStepper steps → distance
-  // INCREASES (pivot end rises, ball rolls toward motor). Negate output so that
-  // a positive PID output (ball too far) commands negative steps → distance
-  // DECREASES → ball moves toward sensor.
+  // Positive AccelStepper steps move the ball away from the sensor on the live
+  // Sharp setup, so negate the PID output at the stepper boundary:
+  //   positive PID output (ball too far) -> negative steps -> ball toward sensor
+  //   negative PID output (ball too close) -> positive steps -> ball away
   stepper.moveTo(lround(-output));
 }
 
 void holdGracePosition() { stepper.moveTo(graceHoldTargetSteps); }
 
-void resetPidState() {
-  // Preload output for bumpless transfer: desired = lround(-output), so to
-  // make desired == currentPosition we need output = -currentPosition.
-  output = -static_cast<double>(stepper.currentPosition());
-  input = ball_position;
-  pid.SetMode(MANUAL);
-  pid.SetMode(AUTOMATIC);
+void resetControllerState(ResetMode mode) {
+  (void)mode;
+  input = targetDistanceCm - ball_position;
+  output = 0.0;
+  integralOutputSteps = 0.0;
+  lastControlComputeMs = millis();
 }
 
 }  // namespace
@@ -176,27 +295,23 @@ void setup() {
   stepper.setMaxSpeed(1000.0);
   stepper.setAcceleration(15000.0);
   stepper.setMinPulseWidth(5);
-  // No DIR inversion: positive AccelStepper steps → pivot UP → distance
-  // increases. move() negates output so positive PID output → negative steps
-  // → distance decreases → ball toward sensor. See move() comment.
-
-  const int stepperMax = 25 * MICROSTEPS;  // ±400 steps ≈ ±45° — matches reference design
-  const int stepperMin = -stepperMax;
-  pid = PID(&input, &output, &setPoint, KP, KI, KD, DIRECT);
-  pid.SetSampleTime(PID_SAMPLE_TIME_MS);
-  pid.SetMode(AUTOMATIC);
-  pid.SetOutputLimits(stepperMin, stepperMax);
+  // No DIR inversion. The stepper boundary mapping is handled in move().
 
   for (int i = 0; i < WARMUP_SAMPLES; ++i) {
     readSensor();
     delay(WARMUP_DELAY_MS);
   }
 
+  profileStartMs = millis();
+  emitReferenceConfig();
+  updateReferenceProfile();
   digitalWrite(ENABLE_PIN, LOW);
+  resetControllerState(ResetMode::kAcquireTarget);
 }
 
 void loop() {
   stepper.run();
+  updateReferenceProfile();
 
   if (!readSensor()) {
     const unsigned long now_ms = millis();
@@ -218,7 +333,7 @@ void loop() {
     }
 
     if (!invalidFallbackActive) {
-      resetPidState();
+      resetControllerState(ResetMode::kBumplessResume);
       invalidFallbackActive = true;
     }
     input = 0.0;
@@ -231,12 +346,27 @@ void loop() {
 
   invalidReadStreak = 0;
   invalidSequenceStartMs = 0UL;
+  if (invalidFallbackActive) {
+    resetControllerState(ResetMode::kBumplessResume);
+  }
   invalidFallbackActive = false;
 
-  // input = distance error: positive when ball is too close, negative when too far.
-  // setPoint = 0, so PID drives this to zero → ball_position → CENTER_DISTANCE_CM.
-  input = CENTER_DISTANCE_CM - ball_position;
-  pid.Compute();
+  const unsigned long now_ms = millis();
+  if (lastControlComputeMs == 0UL || now_ms - lastControlComputeMs >= PID_SAMPLE_TIME_MS) {
+    lastControlComputeMs = now_ms;
+
+    input = targetDistanceCm - ball_position;
+    const bool holdWindow = fabs(input) <= SETPOINT_HOLD_POS_TOL_CM &&
+                            fabs(ballVelocityCmS) <= SETPOINT_HOLD_RATE_TOL_CM_S;
+    integralOutputSteps = 0.0;
+    if (holdWindow) {
+      output = 0.0;
+    } else {
+      const double pTermSteps = -KP * input;
+      const double dTermSteps = KD * ballVelocityCmS;
+      output = clampOutput(pTermSteps + dTermSteps);
+    }
+  }
   emitTelemetry();
   move();
   stepper.run();

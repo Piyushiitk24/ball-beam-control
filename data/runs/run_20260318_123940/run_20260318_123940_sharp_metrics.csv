@@ -1,0 +1,2 @@
+phase,x_ref_cm,duration_s,step_cm,steady_state_error_cm,overshoot_cm,settling_time_s,rise_time_s,rmse_cm,iae_cm_s,itae_cm_s2,peak_abs_output_steps,peak_abs_beam_deg
+hold_center,13.0,43.203,,1.2316809523809524,4.892499999999998,,2.001,1.2347996825695668,39.77721090000001,1097.0428330442,128.0,14.174975851536567
