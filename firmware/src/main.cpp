@@ -23,17 +23,52 @@ constexpr unsigned long SENSOR_SAMPLE_MS = 40UL;
 constexpr double MEASUREMENT_ERROR = 2.0;
 constexpr double VARIANCE = 1.0;
 
-// Ball-and-beam position is effectively a double-integrator plant, so a plain
-// PD controller is the standard simple choice: proportional position error plus
-// derivative damping from measured ball velocity. Avoid the recent rule-heavy
-// capture logic that turned the loop into saturated bang-bang control.
-constexpr double KP = 20.0;
-constexpr double KI = 0.0;
-constexpr double KD = 8.0;
+// The stepper has no homing reference, so control must stay purely relative
+// within a run. Recent logs show the "ball too far, come back toward near"
+// branch is the unstable one: far tracking is acceptable, but center and near
+// fall into a far-side limit cycle once that branch takes over. Keep the
+// away-from-sensor branch stronger, and make the toward-near branch softer and
+// more damped. The remaining missing piece is a slow within-run trim estimate:
+// when the ball stalls far from target, plain P/D stops growing and never
+// learns the static bias needed to pull it back.
+constexpr double REGULATION_TOWARD_FAR_KP = 18.0;
+constexpr double REGULATION_TOWARD_NEAR_KP = 17.0;
+constexpr double ACQUIRE_TOWARD_FAR_KP = 28.0;
+constexpr double ACQUIRE_TOWARD_NEAR_KP = 25.0;
+constexpr double REGULATION_TOWARD_FAR_KI = 0.8;
+constexpr double REGULATION_TOWARD_NEAR_KI = 0.7;
+constexpr double ACQUIRE_TOWARD_FAR_KI = 0.2;
+constexpr double ACQUIRE_TOWARD_NEAR_KI = 0.2;
+constexpr double REGULATION_TOWARD_FAR_KD = 7.0;
+constexpr double REGULATION_TOWARD_NEAR_KD = 8.0;
+constexpr double ACQUIRE_TOWARD_FAR_KD = 4.5;
+constexpr double ACQUIRE_TOWARD_NEAR_KD = 5.5;
 constexpr double SETPOINT_HOLD_POS_TOL_CM = 0.35;
 constexpr double SETPOINT_HOLD_RATE_TOL_CM_S = 1.2;
-constexpr int CENTER_LIMIT_FULL_STEPS = 8;
-constexpr int TRACKING_LIMIT_FULL_STEPS = 10;
+constexpr int REGULATION_TOWARD_FAR_LIMIT_FULL_STEPS = 6;
+constexpr int REGULATION_TOWARD_NEAR_LIMIT_FULL_STEPS = 6;
+constexpr int ACQUIRE_TOWARD_FAR_LIMIT_FULL_STEPS = 14;
+constexpr int ACQUIRE_TOWARD_NEAR_LIMIT_FULL_STEPS = 12;
+constexpr double REGULATION_BAND_CM = 2.0;
+constexpr double INTEGRAL_ACTIVE_BAND_CM = 2.0;
+constexpr double INTEGRAL_ACTIVE_RATE_TOL_CM_S = 2.5;
+constexpr double REGULATION_INTEGRAL_LIMIT_STEPS = 32.0;
+constexpr double ACQUIRE_INTEGRAL_LIMIT_STEPS = 32.0;
+constexpr double INTEGRAL_UNWIND_TAU_S = 0.30;
+constexpr double INTEGRAL_LEAK_TAU_S = 4.0;
+constexpr double BIAS_ADAPT_RATE_STEPS_PER_CM_S = 0.45;
+constexpr double BIAS_ACTIVE_POS_TOL_CM = 1.0;
+constexpr double BIAS_ACTIVE_RATE_TOL_CM_S = 0.8;
+constexpr double BIAS_LIMIT_STEPS = 96.0;
+constexpr double BIAS_UNWIND_TAU_S = 0.40;
+constexpr double BIAS_LEAK_TAU_S = 12.0;
+constexpr double REGULATION_TOWARD_FAR_OUTPUT_SLEW_STEPS_PER_TICK = 40.0;
+constexpr double REGULATION_TOWARD_NEAR_OUTPUT_SLEW_STEPS_PER_TICK = 34.0;
+constexpr double ACQUIRE_TOWARD_FAR_OUTPUT_SLEW_STEPS_PER_TICK = 72.0;
+constexpr double ACQUIRE_TOWARD_NEAR_OUTPUT_SLEW_STEPS_PER_TICK = 56.0;
+// Band-limit the derivative term so Sharp velocity spikes do not dominate P
+// right as the ball approaches the target.
+constexpr double VELOCITY_FILTER_TAU_S = 0.25;
 
 // Sharp is mounted at the pivot end, so the measured distance is SMALL near the
 // sensor and LARGE toward the motor end. The near stop now physically blocks
@@ -53,7 +88,11 @@ constexpr double FAR_TARGET_DISTANCE_CM = FAR_STOP_DISTANCE_CM - ENDPOINT_TARGET
 // Tighten the valid window to the shortened runner geometry. Allow a small
 // margin around the physical stops so noise at the new near stop does not
 // immediately force grace-mode hold.
-constexpr double MIN_VALID_DISTANCE_CM = 8.0;
+// The obstruction keeps the ball out of the true Sharp dead zone, but the raw
+// sensor still throws occasional 7.5-8.0 cm dips when the ball is parked near
+// the lower stop. Accept those noisy edge samples so the controller does not
+// keep dropping into grace-hold right where near-end regulation matters most.
+constexpr double MIN_VALID_DISTANCE_CM = 7.5;
 constexpr double MAX_VALID_DISTANCE_CM = 19.5;
 
 // Grace period extended and applies to ALL invalid reading types.
@@ -89,8 +128,11 @@ double input = 0.0;
 double output = 0.0;
 double radiansPerStep = 0.0;
 double ballVelocityCmS = 0.0;
+double filteredBallVelocityCmS = 0.0;
 double integralOutputSteps = 0.0;
+double biasOutputSteps = 0.0;
 bool invalidFallbackActive = false;
+bool controlRunActive = false;
 unsigned long invalidSequenceStartMs = 0UL;
 unsigned long lastControlComputeMs = 0UL;
 unsigned long profileStartMs = 0UL;
@@ -112,14 +154,33 @@ float sharpAdcToCm(uint16_t adc) {
   return 29.988f * powf(v, -1.173f);
 }
 
-double clampOutput(double value) {
-  const bool targetIsCenterNow = fabs(targetDistanceCm - CENTER_DISTANCE_CM) <= 0.05;
-  const int fullSteps = targetIsCenterNow ? CENTER_LIMIT_FULL_STEPS : TRACKING_LIMIT_FULL_STEPS;
-  const double stepperMax = fullSteps * MICROSTEPS;
-  const double stepperMin = -stepperMax;
-  if (value > stepperMax) return stepperMax;
-  if (value < stepperMin) return stepperMin;
+double slewToward(double current, double target, double maxDelta) {
+  if (target > current + maxDelta) return current + maxDelta;
+  if (target < current - maxDelta) return current - maxDelta;
+  return target;
+}
+
+double clampAbs(double value, double limit) {
+  if (value > limit) return limit;
+  if (value < -limit) return -limit;
   return value;
+}
+
+double controlLimitSteps(bool regulateNow, bool demandTowardNear) {
+  const int fullSteps =
+      regulateNow ? (demandTowardNear ? REGULATION_TOWARD_NEAR_LIMIT_FULL_STEPS
+                                      : REGULATION_TOWARD_FAR_LIMIT_FULL_STEPS)
+                  : (demandTowardNear ? ACQUIRE_TOWARD_NEAR_LIMIT_FULL_STEPS
+                                      : ACQUIRE_TOWARD_FAR_LIMIT_FULL_STEPS);
+  return static_cast<double>(fullSteps * MICROSTEPS);
+}
+
+double outputSlewLimitSteps(bool regulateNow, bool demandTowardNear) {
+  return regulateNow
+             ? (demandTowardNear ? REGULATION_TOWARD_NEAR_OUTPUT_SLEW_STEPS_PER_TICK
+                                 : REGULATION_TOWARD_FAR_OUTPUT_SLEW_STEPS_PER_TICK)
+             : (demandTowardNear ? ACQUIRE_TOWARD_NEAR_OUTPUT_SLEW_STEPS_PER_TICK
+                                 : ACQUIRE_TOWARD_FAR_OUTPUT_SLEW_STEPS_PER_TICK);
 }
 
 const __FlashStringHelper* referenceProfileName() {
@@ -181,6 +242,18 @@ void emitReferenceConfig() {
   Serial.println(REFERENCE_PHASE_MS);
 }
 
+void emitHostStartReady() { Serial.println(F("HOST_START_READY")); }
+
+bool consumeHostStartRequest() {
+  while (Serial.available() > 0) {
+    const int c = Serial.read();
+    if (c == '\n' || c == '\r') {
+      return true;
+    }
+  }
+  return false;
+}
+
 void emitReferenceChange(unsigned long nowMs, int phase) {
   Serial.print(F("REF,"));
   Serial.print(nowMs);
@@ -201,6 +274,11 @@ void updateReferenceProfile() {
   }
   targetDistanceCm = newTargetCm;
   activeReferencePhase = phase;
+  input = targetDistanceCm - ball_position;
+  integralOutputSteps = 0.0;
+  filteredBallVelocityCmS = ballVelocityCmS;
+  output = 0.0;
+  lastControlComputeMs = 0UL;
   emitReferenceChange(nowMs, phase);
 }
 
@@ -275,8 +353,25 @@ void resetControllerState(ResetMode mode) {
   (void)mode;
   input = targetDistanceCm - ball_position;
   output = 0.0;
+  filteredBallVelocityCmS = ballVelocityCmS;
   integralOutputSteps = 0.0;
   lastControlComputeMs = millis();
+}
+
+void startControlRun() {
+  if (controlRunActive) return;
+  invalidFallbackActive = false;
+  invalidReadStreak = 0;
+  invalidSequenceStartMs = 0UL;
+  biasOutputSteps = 0.0;
+  graceHoldTargetSteps = stepper.currentPosition();
+  profileStartMs = millis();
+  activeReferencePhase = -1;
+  emitReferenceConfig();
+  updateReferenceProfile();
+  digitalWrite(ENABLE_PIN, LOW);
+  resetControllerState(ResetMode::kAcquireTarget);
+  controlRunActive = true;
 }
 
 }  // namespace
@@ -302,14 +397,18 @@ void setup() {
     delay(WARMUP_DELAY_MS);
   }
 
-  profileStartMs = millis();
-  emitReferenceConfig();
-  updateReferenceProfile();
-  digitalWrite(ENABLE_PIN, LOW);
-  resetControllerState(ResetMode::kAcquireTarget);
+  emitHostStartReady();
 }
 
 void loop() {
+  if (!controlRunActive) {
+    readSensor();
+    if (consumeHostStartRequest()) {
+      startControlRun();
+    }
+    return;
+  }
+
   stepper.run();
   updateReferenceProfile();
 
@@ -353,19 +452,70 @@ void loop() {
 
   const unsigned long now_ms = millis();
   if (lastControlComputeMs == 0UL || now_ms - lastControlComputeMs >= PID_SAMPLE_TIME_MS) {
+    const unsigned long sampleIntervalMs =
+        lastControlComputeMs == 0UL ? PID_SAMPLE_TIME_MS : (now_ms - lastControlComputeMs);
     lastControlComputeMs = now_ms;
 
     input = targetDistanceCm - ball_position;
+    const bool regulateNow = fabs(input) <= REGULATION_BAND_CM;
+    const bool demandTowardNear = input < 0.0;
+    const double dt_s = static_cast<double>(sampleIntervalMs) / 1000.0;
+    const double velocityAlpha = dt_s / (VELOCITY_FILTER_TAU_S + dt_s);
+    filteredBallVelocityCmS += velocityAlpha * (ballVelocityCmS - filteredBallVelocityCmS);
     const bool holdWindow = fabs(input) <= SETPOINT_HOLD_POS_TOL_CM &&
-                            fabs(ballVelocityCmS) <= SETPOINT_HOLD_RATE_TOL_CM_S;
-    integralOutputSteps = 0.0;
-    if (holdWindow) {
-      output = 0.0;
-    } else {
-      const double pTermSteps = -KP * input;
-      const double dTermSteps = KD * ballVelocityCmS;
-      output = clampOutput(pTermSteps + dTermSteps);
-    }
+                            fabs(filteredBallVelocityCmS) <= SETPOINT_HOLD_RATE_TOL_CM_S;
+    const double desiredOutput =
+        [&]() {
+          const double kp =
+              regulateNow ? (demandTowardNear ? REGULATION_TOWARD_NEAR_KP
+                                              : REGULATION_TOWARD_FAR_KP)
+                          : (demandTowardNear ? ACQUIRE_TOWARD_NEAR_KP : ACQUIRE_TOWARD_FAR_KP);
+          const double ki =
+              regulateNow ? (demandTowardNear ? REGULATION_TOWARD_NEAR_KI
+                                              : REGULATION_TOWARD_FAR_KI)
+                          : (demandTowardNear ? ACQUIRE_TOWARD_NEAR_KI : ACQUIRE_TOWARD_FAR_KI);
+          const double kd =
+              regulateNow ? (demandTowardNear ? REGULATION_TOWARD_NEAR_KD
+                                              : REGULATION_TOWARD_FAR_KD)
+                          : (demandTowardNear ? ACQUIRE_TOWARD_NEAR_KD : ACQUIRE_TOWARD_FAR_KD);
+          const double controlLimit = controlLimitSteps(regulateNow, demandTowardNear);
+          const double integralLimit =
+              regulateNow ? REGULATION_INTEGRAL_LIMIT_STEPS : ACQUIRE_INTEGRAL_LIMIT_STEPS;
+          const bool integralSignMismatch = input * integralOutputSteps > 0.0;
+          const bool biasSignMismatch = input * biasOutputSteps > 0.0;
+          const double unwindAlpha = dt_s / (INTEGRAL_UNWIND_TAU_S + dt_s);
+          const double leakAlpha = dt_s / (INTEGRAL_LEAK_TAU_S + dt_s);
+          const double biasUnwindAlpha = dt_s / (BIAS_UNWIND_TAU_S + dt_s);
+          const double biasLeakAlpha = dt_s / (BIAS_LEAK_TAU_S + dt_s);
+          const bool stalledOffTarget = fabs(input) >= BIAS_ACTIVE_POS_TOL_CM &&
+                                        fabs(filteredBallVelocityCmS) <= BIAS_ACTIVE_RATE_TOL_CM_S;
+          if (!holdWindow && integralSignMismatch) {
+            integralOutputSteps *= (1.0 - unwindAlpha);
+          } else if (!holdWindow && fabs(input) <= INTEGRAL_ACTIVE_BAND_CM &&
+                     fabs(filteredBallVelocityCmS) <= INTEGRAL_ACTIVE_RATE_TOL_CM_S) {
+            integralOutputSteps -= ki * input * dt_s;
+          } else if (!holdWindow) {
+            integralOutputSteps *= (1.0 - leakAlpha);
+          }
+          integralOutputSteps = clampAbs(integralOutputSteps, integralLimit);
+          if (!holdWindow && biasSignMismatch) {
+            biasOutputSteps *= (1.0 - biasUnwindAlpha);
+          } else if (!holdWindow && stalledOffTarget) {
+            biasOutputSteps -= BIAS_ADAPT_RATE_STEPS_PER_CM_S * input * dt_s;
+          } else if (!holdWindow) {
+            biasOutputSteps *= (1.0 - biasLeakAlpha);
+          }
+          biasOutputSteps = clampAbs(biasOutputSteps, BIAS_LIMIT_STEPS);
+          const double pTermSteps = -kp * input;
+          const double dTermSteps = kd * filteredBallVelocityCmS;
+          if (holdWindow) {
+            return clampAbs(integralOutputSteps + biasOutputSteps, controlLimit);
+          }
+          return clampAbs(pTermSteps + dTermSteps + integralOutputSteps + biasOutputSteps,
+                          controlLimit);
+        }();
+    const double maxDelta = outputSlewLimitSteps(regulateNow, demandTowardNear);
+    output = slewToward(output, desiredOutput, maxDelta);
   }
   emitTelemetry();
   move();

@@ -43,6 +43,11 @@ def main() -> None:
     parser.add_argument("--baud", type=int, default=115200, help="Baud rate")
     parser.add_argument("--seconds", type=float, default=30.0, help="Capture duration in seconds")
     parser.add_argument(
+        "--auto-start",
+        action="store_true",
+        help="Send the start newline immediately instead of waiting for Enter",
+    )
+    parser.add_argument(
         "--outdir",
         type=Path,
         default=Path(__file__).resolve().parents[1] / "data" / "runs",
@@ -65,16 +70,50 @@ def main() -> None:
     ref_ctx: dict[str, str] = {}
     saw_ref_start = False
     last_t_ms: int | None = None
+    capture_deadline_ts: float | None = None
     with serial.Serial(args.port, args.baud, timeout=0.2) as ser, out_file.open(
         "w", encoding="utf-8"
     ) as f_out, events_file.open("w", encoding="utf-8") as f_events:
-        end_time = datetime.now().timestamp() + args.seconds
-        while datetime.now().timestamp() < end_time:
+        ready_deadline_ts = datetime.now().timestamp() + 5.0
+        host_ready_seen = False
+        while datetime.now().timestamp() < ready_deadline_ts:
             line = ser.readline().decode("utf-8", errors="replace")
             if not line:
                 continue
             f_out.write(line)
             f_out.flush()
+            if line.strip() == "HOST_START_READY":
+                host_ready_seen = True
+                break
+
+        if host_ready_seen:
+            print("Firmware is idle and waiting for host start.")
+        else:
+            print("No explicit host-start banner seen; continuing with manual start.")
+
+        if args.auto_start:
+            ser.write(b"\n")
+            ser.flush()
+            print("Sent immediate start.")
+        else:
+            input("Press Enter to start control and begin the timed capture...")
+            ser.write(b"\n")
+            ser.flush()
+
+        start_timeout_ts = datetime.now().timestamp() + 10.0
+        while True:
+            line = ser.readline().decode("utf-8", errors="replace")
+            if not line:
+                now_ts = datetime.now().timestamp()
+                if capture_deadline_ts is not None and now_ts >= capture_deadline_ts:
+                    break
+                if capture_deadline_ts is None and now_ts >= start_timeout_ts:
+                    raise SystemExit("Timed out waiting for the controller to emit REF start")
+                continue
+            f_out.write(line)
+            f_out.flush()
+            if capture_deadline_ts is not None and datetime.now().timestamp() >= capture_deadline_ts:
+                break
 
             stripped = line.strip()
             if stripped.startswith("REF_CFG,"):
@@ -105,6 +144,8 @@ def main() -> None:
                         target_cm = math.nan
                     if t_ms >= 0:
                         last_t_ms = t_ms
+                        if capture_deadline_ts is None:
+                            capture_deadline_ts = datetime.now().timestamp() + args.seconds
                         profile = ref_ctx.get("profile", "sharp_ref")
                         near_cm = float(ref_ctx.get("near_cm", "nan"))
                         far_cm = float(ref_ctx.get("far_cm", "nan"))

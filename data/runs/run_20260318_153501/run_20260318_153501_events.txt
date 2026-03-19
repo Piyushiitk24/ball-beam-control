@@ -1,0 +1,13 @@
+REF_CFG,profile=center_far_near_90s,center_cm=13.0000,near_cm=9.0000,far_cm=17.0000,segment_ms=30000
+HOST_STD,manifest,run=center_far_near_90s,center_target_cm=13.0000,near_target_cm=9.0000,far_target_cm=17.0000,segment_ms=30000
+HOST_STD,start,run=center_far_near_90s,t_ms=1148
+REF,1148,13.0000,hold_center
+SET,1148,13.0000,9.0000,17.0000
+HOST_STD,phase,name=hold_center,t_ms=1148
+REF,31145,17.0000,hold_far
+SET,31145,17.0000,9.0000,17.0000
+HOST_STD,phase,name=hold_far,t_ms=31145
+REF,61145,9.0000,hold_near
+SET,61145,9.0000,9.0000,17.0000
+HOST_STD,phase,name=hold_near,t_ms=61145
+HOST_STD,stop,run=center_far_near_90s,t_ms=96252
