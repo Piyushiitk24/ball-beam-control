@@ -111,16 +111,35 @@ def _parse_raw_log(raw_path: Path, default_target_cm: float) -> tuple[pd.DataFra
         if len(parts) < 8:
             continue
         try:
+            row = {
+                "t_ms": int(float(parts[1])),
+                "x_raw_cm": float(parts[2]),
+                "x_filt_cm": float(parts[3]),
+                "input_cm": float(parts[4]),
+                "u_steps": float(parts[5]),
+                "beam_steps": int(float(parts[6])),
+                "beam_angle_rad": float(parts[7]),
+                "ball_vel_cm_s": math.nan,
+                "integral_steps": math.nan,
+                "bias_steps": math.nan,
+                "theta_meas_deg": math.nan,
+                "theta_cmd_deg": math.nan,
+                "theta_err_deg": math.nan,
+                "inner_rate_sps": math.nan,
+                "as5600_ok": math.nan,
+            }
+            if len(parts) >= 11:
+                row["ball_vel_cm_s"] = float(parts[8])
+                row["integral_steps"] = float(parts[9])
+                row["bias_steps"] = float(parts[10])
+            if len(parts) >= 16:
+                row["theta_meas_deg"] = float(parts[11])
+                row["theta_cmd_deg"] = float(parts[12])
+                row["theta_err_deg"] = float(parts[13])
+                row["inner_rate_sps"] = float(parts[14])
+                row["as5600_ok"] = float(parts[15])
             tel_rows.append(
-                {
-                    "t_ms": int(float(parts[1])),
-                    "x_raw_cm": float(parts[2]),
-                    "x_filt_cm": float(parts[3]),
-                    "input_cm": float(parts[4]),
-                    "u_steps": float(parts[5]),
-                    "beam_steps": int(float(parts[6])),
-                    "beam_angle_rad": float(parts[7]),
-                }
+                row
             )
         except ValueError:
             continue
@@ -143,6 +162,8 @@ def _parse_raw_log(raw_path: Path, default_target_cm: float) -> tuple[pd.DataFra
     tel_df["t_s"] = 0.001 * (tel_df["t_ms"] - float(tel_df["t_ms"].iloc[0]))
     tel_df["error_cm"] = tel_df["x_filt_cm"] - tel_df["x_ref_cm"]
     tel_df["beam_angle_deg"] = tel_df["beam_angle_rad"] * (180.0 / math.pi)
+    if "theta_meas_deg" in tel_df:
+        tel_df["step_vs_encoder_deg"] = tel_df["beam_angle_deg"] - tel_df["theta_meas_deg"]
     return tel_df, ref_df, cfg
 
 
@@ -203,6 +224,27 @@ def _integral_metrics(seg: pd.DataFrame) -> tuple[float, float]:
     return iae, itae
 
 
+def _max_invalid_duration_s(seg: pd.DataFrame) -> float:
+    if "as5600_ok" not in seg or seg["as5600_ok"].isna().all():
+        return math.nan
+
+    max_invalid_s = 0.0
+    current_invalid_s = 0.0
+    prev_t = None
+    for _, row in seg.iterrows():
+        t_s = float(row["t_s"])
+        ok = float(row["as5600_ok"]) >= 0.5
+        if prev_t is not None:
+            dt_s = max(0.0, t_s - prev_t)
+            if not ok:
+                current_invalid_s += dt_s
+                max_invalid_s = max(max_invalid_s, current_invalid_s)
+            else:
+                current_invalid_s = 0.0
+        prev_t = t_s
+    return max_invalid_s
+
+
 def _compute_metrics(df: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     prev_target: float | None = None
@@ -241,6 +283,27 @@ def _compute_metrics(df: pd.DataFrame) -> pd.DataFrame:
                 "itae_cm_s2": itae,
                 "peak_abs_output_steps": float(seg["u_steps"].abs().max()),
                 "peak_abs_beam_deg": float(seg["beam_angle_deg"].abs().max()),
+                "tail_theta_err_deg": (
+                    math.nan
+                    if "theta_err_deg" not in seg or tail["theta_err_deg"].isna().all()
+                    else float(tail["theta_err_deg"].mean())
+                ),
+                "peak_abs_theta_cmd_deg": (
+                    math.nan
+                    if "theta_cmd_deg" not in seg or seg["theta_cmd_deg"].isna().all()
+                    else float(seg["theta_cmd_deg"].abs().max())
+                ),
+                "peak_abs_theta_meas_deg": (
+                    math.nan
+                    if "theta_meas_deg" not in seg or seg["theta_meas_deg"].isna().all()
+                    else float(seg["theta_meas_deg"].abs().max())
+                ),
+                "max_as5600_invalid_s": _max_invalid_duration_s(seg),
+                "max_abs_step_vs_encoder_deg": (
+                    math.nan
+                    if "step_vs_encoder_deg" not in seg or seg["step_vs_encoder_deg"].isna().all()
+                    else float(seg["step_vs_encoder_deg"].abs().max())
+                ),
             }
         )
         prev_target = target
@@ -263,7 +326,11 @@ def _plot(df: pd.DataFrame, ref_df: pd.DataFrame, cfg: RefConfig, out_path: Path
     axes[1].grid(alpha=0.25)
 
     axes[2].plot(df["t_s"], df["u_steps"], color="#0f766e", linewidth=1.4, label="control output")
-    axes[2].plot(df["t_s"], df["beam_angle_deg"], color="#7c3aed", linewidth=1.1, alpha=0.85, label="beam angle")
+    axes[2].plot(df["t_s"], df["beam_angle_deg"], color="#94a3b8", linewidth=1.0, alpha=0.8, label="step angle est")
+    if "theta_meas_deg" in df and not df["theta_meas_deg"].isna().all():
+        axes[2].plot(df["t_s"], df["theta_meas_deg"], color="#7c3aed", linewidth=1.1, alpha=0.9, label="theta meas")
+    if "theta_cmd_deg" in df and not df["theta_cmd_deg"].isna().all():
+        axes[2].plot(df["t_s"], df["theta_cmd_deg"], color="#d97706", linewidth=1.0, alpha=0.85, linestyle="--", label="theta cmd")
     axes[2].set_ylabel("Steps / deg")
     axes[2].set_xlabel("Time (s)")
     axes[2].grid(alpha=0.25)

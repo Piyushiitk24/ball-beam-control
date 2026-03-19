@@ -71,6 +71,7 @@ def main() -> None:
     saw_ref_start = False
     last_t_ms: int | None = None
     capture_deadline_ts: float | None = None
+    start_failure: str | None = None
     with serial.Serial(args.port, args.baud, timeout=0.2) as ser, out_file.open(
         "w", encoding="utf-8"
     ) as f_out, events_file.open("w", encoding="utf-8") as f_events:
@@ -116,6 +117,16 @@ def main() -> None:
                 break
 
             stripped = line.strip()
+            if capture_deadline_ts is None and (
+                stripped.startswith("AS5600_START_FAIL")
+                or stripped.startswith("AS5600_VERIFY_FAIL")
+                or stripped.startswith("SAFETY_STOP,")
+            ):
+                start_failure = stripped
+                break
+            if capture_deadline_ts is None and stripped == "HOST_START_READY":
+                start_failure = "Controller returned to idle before REF start"
+                break
             if stripped.startswith("REF_CFG,"):
                 ref_ctx.update(_parse_keyvals("REF_CFG,", stripped))
                 f_events.write(stripped + "\n")
@@ -172,6 +183,10 @@ def main() -> None:
             profile = ref_ctx.get("profile", "sharp_ref")
             f_events.write(f"HOST_STD,stop,run={profile},t_ms={last_t_ms}\n")
             f_events.flush()
+
+    if start_failure is not None:
+        print("Saved:", out_file)
+        raise SystemExit(f"Controller refused run start: {start_failure}")
 
     print("Saved:", out_file)
 
