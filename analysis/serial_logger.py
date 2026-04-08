@@ -823,16 +823,36 @@ class SerialLogger:
                 print("FAIL: could not capture valid limits after 3 attempts. No save performed.")
                 return
 
-            resp = self._prompt_user("Step 3/6: Place the ball at the physical center of the runner. Hold it steady and press Enter.")
-            if resp is None or resp.strip().lower() == "q":
-                print("Bring-up aborted.")
-                return
+            center_ok = False
+            for attempt in range(1, 6):
+                resp = self._prompt_user(
+                    f"Step 3/6 (attempt {attempt}/5): Move the beam roughly level, place the ball at the physical center of the runner, hold it steady, and press Enter."
+                )
+                if resp is None or resp.strip().lower() == "q":
+                    print("Bring-up aborted.")
+                    return
 
-            print("Capturing center reference and control origin (sending p)...")
-            self._send("p")
-            pline = self._wait_for_line(2.0, prefixes=("OK,cal_zero_position_set=", "ERR,sonar_not_ready", "ERR,center_outside_limits"))
-            if not pline or pline.startswith("ERR,"):
-                print("FAIL: center capture failed.")
+                print("Letting HC-SR04 settle briefly before center capture...")
+                self._sleep_with_rx(0.6)
+                print("Capturing center reference and control origin (sending p)...")
+                self._send("p")
+                pline = self._wait_for_line(
+                    3.0,
+                    prefixes=("OK,cal_zero_position_set=", "ERR,sonar_not_ready", "ERR,center_outside_limits"),
+                )
+                if pline and not pline.startswith("ERR,"):
+                    center_ok = True
+                    break
+
+                reason = pline or "no response"
+                print(f"FAIL: center capture failed ({reason}).")
+                if pline and pline.startswith("ERR,center_outside_limits"):
+                    print("Move the ball between the captured endpoints and try center capture again.")
+                else:
+                    print("Keep the sponge ball still and centered in the HC-SR04 beam, then retry.")
+
+            if not center_ok:
+                print("FAIL: center capture failed after 5 attempts. Limits were captured, but no save was performed.")
                 return
 
             print("\nStep 4/6: Enabling driver (sending e 1)...")

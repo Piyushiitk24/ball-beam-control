@@ -27,11 +27,11 @@ constexpr float kAs5600VerifyMaxErrDeg = 8.0f;
 constexpr uint32_t kAs5600VerifyFaultMs = 250;
 
 // Single position PID, modeled on PID_v1 behavior: derivative on measured
-// position, not derivative on setpoint error. Gains stay close to the working
-// sketch but are softened for this beam's higher overshoot tendency.
-constexpr float kPosPidKpStepsPerCm = 10.0f;
-constexpr float kPosPidKiStepsPerCmSec = 0.6f;
-constexpr float kPosPidKdStepsSecPerCm = 4.5f;
+// position, not derivative on setpoint error. Gains are in physical-beam
+// microstep units after applying the AS5600 motor-angle -> beam-angle map.
+constexpr float kPosPidKpStepsPerCm = 25.0f;
+constexpr float kPosPidKiStepsPerCmSec = 0.8f;
+constexpr float kPosPidKdStepsSecPerCm = 10.0f;
 constexpr float kCenterPidKpScale = 0.6f;
 constexpr float kCenterPidKiScale = 0.5f;
 constexpr float kCenterPidKdScale = 0.25f;
@@ -44,8 +44,8 @@ constexpr float kCenterBiasLearnStepsPerCmSec = 0.25f;
 constexpr float kCenterBiasLearnPosWindowCm = 6.0f;
 constexpr float kCenterBiasLearnRateTolCmS = 10.0f;
 constexpr float kCenterBiasClampSteps = 160.0f;
-constexpr float kPositiveSideKpScale = 1.6f;
-constexpr float kPositiveSideKiScale = 1.2f;
+constexpr float kPositiveSideKpScale = 1.0f;
+constexpr float kPositiveSideKiScale = 1.0f;
 
 // Stepper angle (reference-style step-count angle source).
 #ifndef STEPPER_STEPS_PER_REV
@@ -67,6 +67,9 @@ constexpr float kBallPosHardLimitM = kBallPosHardLimitCm * kCmToM;
 
 constexpr float kStepperDegPerStep =
     360.0f / (static_cast<float>(STEPPER_STEPS_PER_REV) * static_cast<float>(STEPPER_MICROSTEPS));
+constexpr float kBeamDegPerActuatorDeg = 0.0767406f;
+constexpr float kBeamLevelFracFromLower = 0.79618f;
+constexpr float kBeamDegPerStep = kStepperDegPerStep * kBeamDegPerActuatorDeg;
 constexpr int32_t kStepperPosLimitSteps =
     static_cast<int32_t>(STEPPER_LIMIT_FULL_STEPS) * static_cast<int32_t>(STEPPER_MICROSTEPS);
 constexpr int32_t kStepperPosLimitMarginSteps = 8;

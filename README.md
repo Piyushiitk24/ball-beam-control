@@ -11,16 +11,16 @@ Stepper-driven ball-beam balancer: firmware (C++/PlatformIO) + first-principles 
 - The active measured-model record is:
   - `model/first_principles/params_measured.yaml`
   - `docs/modeling_measured_calculations.md`
-- Current closed-loop validation scope is center/far only:
+- Current closed-loop validation scope is center/far plus cautious near-end validation:
   - `/bringup`
   - place the ball at physical center
   - `s`
   - `q`
-  - `q c -> q f -> q c`
+  - `q c -> q f -> q c -> q n -> q c`
   - `s`
   - `/quit`
-- `q n` remains implemented for compatibility/history, but it is not part of the current workflow.
-- Latest controller change: large `q c` return-to-center moves now use the normal stronger PID path; only the near-center region keeps the softened center hold/bias behavior.
+- `q n` targets an inside-near setpoint, not the hard near stop.
+- Latest controller change: AS5600 motor angle is mapped to calibrated physical beam angle before control/telemetry.
 
 ---
 
@@ -78,14 +78,18 @@ e 1
 r
 q f
 q c
+q n
+q c
 s
 /quit
 ```
 
 Timing for the live setpoint sequence:
-- hold the first `q c` segment for about `8 s`
-- then `q f` for about `8 s`
-- then the final `q c` for about `15 s`
+- hold the first `q c` segment for about `15 s`
+- then `q f` for about `20 s`
+- then `q c` for about `30 s`
+- then `q n` for about `15 s`
+- then the final `q c` for about `30 s`
 
 Important:
 - `/bringup` already performs the full calibration flow and sends `v` to save calibration for you
@@ -130,6 +134,7 @@ If you use `/bringup`, the logger will prompt you for the required physical acti
   - Hold it steady.
 
 - Before `p`
+  - Move the beam roughly level, away from the hard stops.
   - Place the ball at the physical center of the runner.
   - Hold it steady.
 
@@ -418,7 +423,7 @@ Important:
 
 - If the system is idle, `q ...` only changes the target. Motion starts after `r`.
 - If the system is already `RUNNING`, `q ...` changes target live. Do not send another `r`.
-- `q n` still exists in the restored HC-SR04 runtime for compatibility, but near-side validation is paused and it is not part of the active workflow.
+- `q n` is part of cautious near-side validation and targets an inside-near setpoint, not the hard near stop.
 
 ### Workflow 1 — Fresh Calibration From Scratch
 
@@ -428,7 +433,7 @@ Use this after a fresh flash, a mechanical change, or when `s` shows any calibra
 
 - Before `l`: hold the beam fully DOWN, with the ball at the far end away from the HC-SR04.
 - Before `u`: hold the beam fully UP, with the ball at the near end close to the HC-SR04.
-- Before `p`: place the ball at the physical center of the runner and hold it steady there. The firmware records runner center and actuator control origin here.
+- Before `p`: move the beam roughly level, place the ball at the physical center of the runner, and hold it steady there. The firmware records runner center; beam level is derived from the calibrated AS5600 limit span.
 - Before `b`: remove your hands and keep clear of the mechanism.
 
 #### Exact command sequence
@@ -659,10 +664,10 @@ SAFE_DISABLED → CALIB_SIGN → READY ⇄ RUNNING → FAULT
 
 - HC-SR04 on `D8/D9` is the live ball-position sensor.
 - Ball position is angle-corrected at runtime: the stored `sonar_*` offset from center is multiplied by `cos(theta_est)`.
-- `p` captures the physical runner center and also defines the actuator control origin.
+- `p` captures the physical runner center; actuator control origin is derived from the AS5600 limit span and beam-angle calibration.
 - AS5600 is used for calibration, run-start synchronization, and missed-step / drift verification.
 - Telemetry and calibration keep `sonar_*` names for compatibility with the existing logger and reports.
-- `theta_deg` and `theta_cmd_deg` in telemetry are step-count-relative actuator coordinates around the `p` origin.
+- `theta_deg` and `theta_cmd_deg` in telemetry are calibrated physical beam degrees. `act_deg_abs` and `trim_deg` remain AS5600 motor-angle coordinates.
 
 ---
 
@@ -873,7 +878,7 @@ LATEST_RUN="$(find data/runs -maxdepth 1 -type d -name 'run_*' | sort | tail -n 
 
 ## Sensor Selection Workflow
 
-This is archived exploratory workflow. The active controller path has reverted to the HC-SR04 runtime, and current closed-loop validation is center/far only.
+This is archived exploratory workflow. The active controller path has reverted to the HC-SR04 runtime, and current closed-loop validation is center/far plus cautious near-end validation.
 
 1. Mark the candidate runner span at fixed points `p00 ... pNN`, about `2 cm` apart.
 2. Mount one sensor only. Do not switch sensors within the same block.

@@ -5,12 +5,14 @@
 #include <stddef.h>
 
 #include "calibration.h"
+#include "config.h"
 
 namespace bb {
 namespace {
 
 constexpr uint16_t kRuntimeCalMagic = 0xBB10;
-constexpr uint16_t kRuntimeCalVersion = 5;
+constexpr uint16_t kRuntimeCalVersion = 6;
+constexpr uint16_t kRuntimeCalVersionV5 = 5;
 constexpr uint16_t kRuntimeCalVersionV4 = 4;
 constexpr uint16_t kRuntimeCalVersionV3 = 3;
 constexpr int kRuntimeCalEepromAddress = 0;
@@ -180,6 +182,11 @@ float actuatorMidpointDeg(const RuntimeCalibration& cal) {
   return 0.5f * rawSpanDeg(cal);
 }
 
+float beamLevelActuatorDeg(const RuntimeCalibration& cal) {
+  const float span = rawSpanDeg(cal);
+  return (span > 0.0f) ? (kBeamLevelFracFromLower * span) : 0.0f;
+}
+
 float activeActuatorTrimDeg(const RuntimeCalibration& cal) {
   const float span = rawSpanDeg(cal);
   if (span <= 0.0f) {
@@ -188,7 +195,7 @@ float activeActuatorTrimDeg(const RuntimeCalibration& cal) {
   if (normalizeBoolByte(cal.actuator_trim_valid) != 0u) {
     return clampf(cal.actuator_trim_deg, 0.0f, span);
   }
-  return actuatorMidpointDeg(cal);
+  return beamLevelActuatorDeg(cal);
 }
 
 void applyDefaults(RuntimeCalibration& cal) {
@@ -237,8 +244,6 @@ void sanitizeLoaded(RuntimeCalibration& cal) {
 
   if (cal.sonar_center_cm <= 0.0f) {
     cal.flags &= static_cast<uint8_t>(~kFlagZeroPosCaptured);
-  } else {
-    cal.flags |= kFlagZeroPosCaptured;
   }
 
   const float span = rawSpanDeg(cal);
@@ -250,7 +255,7 @@ void sanitizeLoaded(RuntimeCalibration& cal) {
   cal.actuator_trim_valid =
       (cal.actuator_trim_valid != 0u) && (span > 0.0f) ? 1u : 0u;
   if (cal.actuator_trim_valid == 0u && span > 0.0f) {
-    cal.actuator_trim_deg = actuatorMidpointDeg(cal);
+    cal.actuator_trim_deg = beamLevelActuatorDeg(cal);
   }
   cal.flags &= static_cast<uint8_t>(~kFlagZeroAngleCaptured);
 }
@@ -328,6 +333,25 @@ bool runtimeCalLoad() {
       g_runtime_cal.actuator_trim_source = static_cast<uint8_t>(ActuatorTrimSource::kSaved);
     }
     g_runtime_cal.crc16 = runtimeCalCrc(g_runtime_cal);
+    return true;
+  }
+
+  if (loaded.version == kRuntimeCalVersionV5) {
+    const uint16_t expected_crc = runtimeCalCrc(loaded);
+    if (loaded.crc16 != expected_crc) {
+      applyDefaults(g_runtime_cal);
+      return false;
+    }
+
+    g_runtime_cal = loaded;
+    // V5 stored the center/trim as a captured actuator pose. V6 derives the
+    // level trim from the measured beam-angle calibration, so require a fresh
+    // center capture while preserving limit and sonar endpoint data.
+    g_runtime_cal.actuator_trim_valid = 0u;
+    g_runtime_cal.actuator_trim_source = static_cast<uint8_t>(ActuatorTrimSource::kSearched);
+    g_runtime_cal.flags &= static_cast<uint8_t>(~kFlagZeroAngleCaptured);
+    sanitizeLoaded(g_runtime_cal);
+    runtimeCalSave();
     return true;
   }
 
@@ -510,6 +534,8 @@ void runtimeCalSetActuatorTrimDeg(float deg) { g_runtime_cal.actuator_trim_deg =
 
 float runtimeCalActiveActuatorTrimDeg() { return activeActuatorTrimDeg(g_runtime_cal); }
 
+float runtimeCalBeamLevelActuatorDeg() { return beamLevelActuatorDeg(g_runtime_cal); }
+
 float runtimeCalActuatorSpanDeg() {
   const float span = rawSpanDeg(g_runtime_cal);
   return (span > 0.0f) ? span : 0.0f;
@@ -529,20 +555,25 @@ float runtimeCalActiveSonarCenterCm() {
 
 float runtimeCalDerivedSonarCenterCm() { return derivedSonarCenterCm(g_runtime_cal); }
 
-float runtimeCalThetaLowerLimitDeg() { return -runtimeCalActiveActuatorTrimDeg(); }
+float runtimeCalThetaLowerLimitDeg() { return runtimeMapBeamDegFromActuatorDeg(0.0f); }
 
-float runtimeCalThetaUpperLimitDeg() { return runtimeCalActuatorSpanDeg() - runtimeCalActiveActuatorTrimDeg(); }
+float runtimeCalThetaUpperLimitDeg() {
+  return runtimeMapBeamDegFromActuatorDeg(runtimeCalActuatorSpanDeg());
+}
 
 void runtimeCalSetThetaLowerLimitDeg(float deg) {
   g_runtime_cal.as5600_lower_raw_deg = wrapAngle360(g_runtime_cal.as5600_lower_raw_deg);
-  const float span = runtimeCalActuatorSpanDeg();
-  const float trim = span - deg;
+  const float trim = -deg / kBeamDegPerActuatorDeg;
   g_runtime_cal.actuator_trim_deg = trim;
 }
 
 void runtimeCalSetThetaUpperLimitDeg(float deg) {
-  const float trim = runtimeCalActuatorSpanDeg() - deg;
+  const float trim = runtimeCalActuatorSpanDeg() - (deg / kBeamDegPerActuatorDeg);
   g_runtime_cal.actuator_trim_deg = trim;
+}
+
+float runtimeMapBeamDegFromActuatorDeg(float actuator_deg) {
+  return (actuator_deg - runtimeCalActiveActuatorTrimDeg()) * kBeamDegPerActuatorDeg;
 }
 
 float runtimeMapActuatorDeg(float raw_angle_deg) {
@@ -552,7 +583,7 @@ float runtimeMapActuatorDeg(float raw_angle_deg) {
 }
 
 float runtimeMapThetaDeg(float raw_angle_deg) {
-  return runtimeMapActuatorDeg(raw_angle_deg) - runtimeCalActiveActuatorTrimDeg();
+  return runtimeMapBeamDegFromActuatorDeg(runtimeMapActuatorDeg(raw_angle_deg));
 }
 
 float runtimeMapBallPosCm(float sonar_distance_cm) {

@@ -104,6 +104,7 @@ void runtimeCalSetSonarUpperCm(float cm);
 float runtimeCalActuatorTrimDeg();
 void runtimeCalSetActuatorTrimDeg(float deg);
 float runtimeCalActiveActuatorTrimDeg();
+float runtimeCalBeamLevelActuatorDeg();
 float runtimeCalActuatorSpanDeg();
 float runtimeCalActuatorMidpointDeg();
 float runtimeCalActiveSonarCenterCm();
@@ -114,6 +115,7 @@ float runtimeCalThetaUpperLimitDeg();
 void runtimeCalSetThetaLowerLimitDeg(float deg);
 void runtimeCalSetThetaUpperLimitDeg(float deg);
 
+float runtimeMapBeamDegFromActuatorDeg(float actuator_deg);
 float runtimeMapActuatorDeg(float raw_angle_deg);
 float runtimeMapThetaDeg(float raw_angle_deg);
 float runtimeMapBallPosCm(float sonar_distance_cm);

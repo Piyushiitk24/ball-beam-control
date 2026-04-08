@@ -41,9 +41,11 @@ Primary tuning knobs:
 Use these target classes for runtime tuning:
 - `q c`: center regulation / neutral-bias stability
 - `q f`: far-end endpoint hold
+- `q n`: cautious near-end endpoint hold, inside the hard stop
 - `q c -> q f -> q c`: active transition and return-to-center test
+- `q c -> q f -> q c -> q n -> q c`: full calibrated-angle validation sequence
 
-Current active tuning scope is center/far only. `q n` remains in the restored HC-SR04 runtime for compatibility/history, but near-side validation is paused.
+Current active tuning scope is center/far plus cautious near-end validation. `q n` should be interpreted as an inside-near target, not a hard-stop target.
 
 ## 3. What to Look For in the Plots
 
@@ -69,6 +71,8 @@ Key metrics to judge each run:
 - invalid sonar rows and peak sonar age
 - fault rows and fault labels
 - whether `theta_deg` is reaching `theta_cmd_deg` while the ball is still short of target
+
+`theta_deg` and `theta_cmd_deg` are calibrated physical beam degrees. Use `act_deg_abs` and `trim_deg` when checking AS5600 motor-angle calibration or drift.
 
 ## 4. Practical Tuning Sequence
 

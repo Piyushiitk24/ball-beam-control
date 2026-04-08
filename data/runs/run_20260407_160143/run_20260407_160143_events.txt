@@ -1,0 +1,38 @@
+[16:01:43] sent: s
+[16:01:45] # -- Ball-and-Beam HC-SR04 + AS5600 Controller --
+[16:01:45] # HC-SR04 TRIG/ECHO = D8/D9
+[16:01:45] # AS5600 addr = 0x36
+[16:01:45] # POSITION_CALIBRATED = NO
+[16:01:45] # D_MIN/D_MAX/setpoint = 2.00, 35.00, 14.10
+[16:01:45] # theta = 0.07666807 * as5600 + -23.28443908
+[16:01:45] # theta_balance_deg = 0.00000
+[16:01:45] # theta cal safe range = [-0.60, 3.00] deg
+[16:01:45] # outer Kp/Kv/sign = 0.1200, 0.0800, -1
+[16:01:45] # inner Kp/steps_per_beam_deg/step_sign = 0.700, 115.94, -1
+[16:01:45] # mode = M0  driver = DISABLED
+[16:01:45] # telemetry stream = OFF
+[16:01:45] # Commands: G X M0 M1 M2 A<deg> Z S<cm> Y P<float> V<float> R H O T C ?
+[16:01:45] # ------------------------------------------------
+[16:01:45] t_ms,mode,valid,d_raw_cm,d_filt_cm,x_cm,x_dot_cm_s,theta_cal_deg,theta_rel_deg,theta_dot_deg_s,theta_cmd_rel_deg,outer_sign,step_delta,invalid_count
+[16:01:45] HOST_WARN,unknown_firmware_protocol: device output does not look like BallBeam (BALL_BEAM_BOOT/TEL/STATE) or AS5600_CHECK. You may have flashed a different Arduino sketch. First lines: # -- Ball-and-Beam HC-SR04 + AS5600 Controller -- | # HC-SR04 TRIG/ECHO = D8/D9 | # AS5600 addr = 0x36
+[16:01:51] sent: T1
+[16:01:51] # Telemetry stream ON
+[16:01:52] 6827,0,0,-1.00,14.10,0.000,0.000,0.9266,0.9266,0.027,0.0000,-1,0,171
+[16:01:53] 7826,0,0,-1.00,14.10,0.000,0.000,0.9199,0.9199,-0.001,0.0000,-1,0,196
+[16:01:54] 8828,0,0,-1.00,14.10,0.000,0.000,0.9266,0.9266,0.019,0.0000,-1,0,221
+[16:01:54] sent: T 1
+[16:01:54] # Telemetry stream OFF
+[16:02:00] sent: V
+[16:02:00] # outer Kv -> 0.00000
+[16:02:03] sent: F
+[16:02:03] # ERR: unknown command
+[16:02:06] sent: f
+[16:02:06] # ERR: unknown command
+[16:02:08] sent: v
+[16:02:08] # outer Kv -> 0.00000
+[16:02:09] sent: f
+[16:02:09] # ERR: unknown command
+[16:02:10] sent: s 
+[16:02:10] # ERR: setpoint must be in [2.0, 35.0] cm
+[16:02:17] sent: k
+[16:02:17] sent: e 0

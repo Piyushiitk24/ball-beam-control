@@ -21,8 +21,8 @@ from analysis.run_layout import (
     summary_plot_path,
 )
 
-RUN_SOFT_LIMIT_BAND_DEG = 1.0
-RUN_HARD_LIMIT_MARGIN_DEG = 3.0
+RUN_SOFT_LIMIT_BAND_DEG = 1.0 * 0.0767406
+RUN_HARD_LIMIT_MARGIN_DEG = 3.0 * 0.0767406
 FAULT_BITS = {
     0x01: "sonar_timeout",
     0x02: "i2c_error",
@@ -311,12 +311,7 @@ def _compute_ball_position_series(df: pd.DataFrame, show_raw: bool) -> tuple[pd.
 
 
 def _compute_beam_angle_series(df: pd.DataFrame) -> tuple[pd.Series, str]:
-    if "act_deg_abs" in df.columns and "trim_deg" in df.columns:
-        act = df["act_deg_abs"].astype(float)
-        trim = df["trim_deg"].astype(float)
-        if act.notna().any() and trim.notna().any():
-            return act - trim, "AS5600"
-    return df["theta_deg"].astype(float), "Stepper estimate"
+    return df["theta_deg"].astype(float), "Physical beam telemetry"
 
 
 def _set_standard_style() -> None:
@@ -441,9 +436,9 @@ def _render_diagnostic(
             alpha=0.8,
         )
     if "act_deg_abs" in df.columns and df["act_deg_abs"].notna().any():
-        axes[1].plot(t_s, df["act_deg_abs"], label="act_deg_abs", color="#264653", alpha=0.55)
+        axes[1].plot(t_s, df["act_deg_abs"], label="act_deg_abs (actuator)", color="#264653", alpha=0.55)
     if "trim_deg" in df.columns and df["trim_deg"].notna().any():
-        axes[1].plot(t_s, df["trim_deg"], label="trim_deg", color="#8d99ae", linestyle=":", alpha=0.9)
+        axes[1].plot(t_s, df["trim_deg"], label="trim_deg (actuator)", color="#8d99ae", linestyle=":", alpha=0.9)
     if "theta_lower_limit_deg" in cal_ctx and "theta_upper_limit_deg" in cal_ctx:
         lo = cal_ctx["theta_lower_limit_deg"]
         hi = cal_ctx["theta_upper_limit_deg"]
@@ -451,7 +446,7 @@ def _render_diagnostic(
         axes[1].axhline(hi - RUN_SOFT_LIMIT_BAND_DEG, color="#6c757d", linestyle=":", linewidth=0.9, alpha=0.7)
         axes[1].axhline(lo - RUN_HARD_LIMIT_MARGIN_DEG, color="#495057", linestyle="--", linewidth=0.9, alpha=0.7)
         axes[1].axhline(hi + RUN_HARD_LIMIT_MARGIN_DEG, color="#495057", linestyle="--", linewidth=0.9, alpha=0.7)
-    axes[1].set_ylabel("Actuator (deg)")
+    axes[1].set_ylabel("Angle (deg)")
     axes[1].legend()
     axes[1].grid(True, alpha=0.3)
 

@@ -115,8 +115,8 @@ I = (2/3) × 0.0028 × (0.020)²
 | Symbol | Formula | Value | Unit |
 | -------- | --------- | ------- | ------ |
 | N_steps | 200 × 16 | 3200 | steps/rev |
-| k_step_rad | 2π / N_steps | 1.9635 × 10⁻³ | rad/step |
-| λ | linkage_ratio | 1.0 | — |
+| k_step_rad | (2π / N_steps) × λ | 1.5068 × 10⁻⁴ | rad/step |
+| λ | linkage_ratio | 0.0767406 | — |
 | center_m | 30 mm + 199/2 mm | 0.1295 | m |
 
 **Physical constants:**
@@ -633,8 +633,8 @@ where:
 
 ```text
 k_step_rad = (2π / N_steps) × λ
-           = (2π / 3200) × 1.0
-           = 0.0019635  rad/step
+           = (2π / 3200) × 0.0767406
+           = 0.000150680  rad/step
 ```
 
 ### 9.2 Plant Transfer Function in Step and Centimetre Units
@@ -654,17 +654,15 @@ where:
 
 ```text
 κ = 100 × α × g × k_step_rad
-  = 100 × 0.600000 × 9.81 × 0.0019635
-  = 100 × 0.600000 × 0.019262
-  = 100 × 0.011557
-  = 1.155713  cm / s² / step
+  = 100 × 0.600000 × 9.81 × 0.000150680
+  = 0.088690  cm / s² / step
 ```
 
 Laplace transform:
 
 ```text
 G(s) = X_cm(s) / N(s) = κ / (s (s + β))
-                       = 1.155713 / (s (s + 2.678571))
+                       = 0.088690 / (s (s + 2.678571))
 ```
 
 This is the plant model used for all controller design.
@@ -820,11 +818,11 @@ Kd = Kd_θ / (100 × k_step_rad)
 The factor 100 converts m⁻¹ to cm⁻¹; k_step_rad converts rad to steps.
 
 ```text
-100 × k_step_rad = 100 × 0.0019635 = 0.19635  cm⁻¹·step⁻¹·rad
+100 × k_step_rad = 100 × 0.000150680 = 0.0150680  cm⁻¹·step⁻¹·rad
 
-Kp = 0.753350 / 0.19635 = 3.8368  steps/cm
-Ki = 0.291288 / 0.19635 = 1.4835  steps/(cm·s)
-Kd = 0.275081 / 0.19635 = 1.4010  step·s/cm
+Kp = 0.753350 / 0.0150680 = 49.9967  steps/cm
+Ki = 0.291288 / 0.0150680 = 19.3316  steps/(cm·s)
+Kd = 0.275081 / 0.0150680 = 18.2560  step·s/cm
 ```
 
 These are the seed gains exported to `model/first_principles/controller_initial_gains.json`
@@ -835,15 +833,15 @@ and `firmware/include/generated/controller_gains.h`.
 The firmware limits the output to ±400 steps:
 
 ```text
-θ_max = 400 × k_step_rad = 400 × 0.0019635 = 0.78540 rad = 45.0°
+θ_max = 400 × k_step_rad = 400 × 0.000150680 = 0.060272 rad = 3.4533°
 ```
 
 The linearization in §7 is only valid for small θ. The accepted engineering rule of
 thumb is |θ| ≲ 5–10°. The design constraint stored in `params_measured.yaml` is
 `theta_cmd_deg: 4.0`, meaning the linear model is considered valid up to ±4°.
 
-At ±4° the controller should rarely saturate during normal ball-position regulation
-near the centre. The ±45° software clamp exists as a safety backstop only.
+The calibrated ±400-step software clamp is now about ±3.45° of physical beam angle,
+which is within the ±4° measured-model design envelope.
 
 ### 9.8 Current Runtime Gains (Empirically Tuned)
 
@@ -852,13 +850,13 @@ physical hardware the active runtime gains in `firmware/include/config.h` are:
 
 | Gain | Seed (1st principles) | Runtime (tuned) | Unit |
 | ------ | ---------------------- | ----------------- | ------ |
-| Kp | 3.8368 | 10.0 | steps/cm |
-| Ki | 1.4835 | 0.6 | steps/(cm·s) |
-| Kd | 1.4010 | 4.5 | step·s/cm |
+| Kp | 49.9967 | 25.0 | steps/cm |
+| Ki | 19.3316 | 0.8 | steps/(cm·s) |
+| Kd | 18.2560 | 10.0 | step·s/cm |
 
-The empirical Kp is ~2.6× the theoretical value; Ki is lower and Kd is ~3× higher.
-This reflects physical effects not captured by the model: sensor noise, quantization,
-asymmetric friction, and structural flex.
+The runtime gains are deliberately below the regenerated seed values for the first
+calibrated-beam-angle hardware pass. Ki stays much lower to avoid endpoint windup,
+while Kd remains large enough to damp HC-SR04 quantization and rolling friction.
 
 ---
 
@@ -915,9 +913,9 @@ Substituting numerical values:
 β       = 2.678571
 αg      = 5.886000  (m/s²)/rad
 τ_φ     = 0.08  s
-k_step_rad = 0.0019635  rad/step
+k_step_rad = 0.000150680  rad/step
 1/τ_φ   = 12.5  s⁻¹
-k_step_rad/τ_φ = 0.0019635 / 0.08 = 0.024544  rad/s/step
+k_step_rad/τ_φ = 0.000150680 / 0.08 = 0.00188350  rad/s/step
 
 A = [  0        1       0       0    ]
     [  0   -2.6786   5.886      0    ]
@@ -927,7 +925,7 @@ A = [  0        1       0       0    ]
 B = [  0      ]
     [  0      ]
     [  0      ]
-    [ 0.024544]
+    [ 0.00188350]
 ```
 
 ### 10.2 Controllability Check
@@ -1020,15 +1018,15 @@ beyond the current single-loop PID architecture.
 | Effective rolling mass | m_e | 0.004667 | kg |
 | Ball inertia ratio | α | 0.600000 | — |
 | Rolling damping coefficient | β | 2.678571 | s⁻¹ |
-| Rad per microstep | k_step_rad | 0.0019635 | rad/step |
-| Plant gain | κ | 1.155713 | cm/s²/step |
+| Rad per microstep | k_step_rad | 0.000150680 | rad/step |
+| Plant gain | κ | 0.088690 | cm/s²/step |
 | Plant pole | −β | −2.678571 | s⁻¹ |
 | Design bandwidth | ωn | 0.753982 | rad/s |
 | Design damping ratio | ζ | 0.850 | — |
 | Third pole | p₃ | 3.015929 | rad/s |
-| Kp (seed) | Kp | 3.8368 | steps/cm |
-| Ki (seed) | Ki | 1.4835 | steps/(cm·s) |
-| Kd (seed) | Kd | 1.4010 | step·s/cm |
+| Kp (seed) | Kp | 49.9967 | steps/cm |
+| Ki (seed) | Ki | 19.3316 | steps/(cm·s) |
+| Kd (seed) | Kd | 18.2560 | step·s/cm |
 
 ---
 

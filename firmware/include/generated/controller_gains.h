@@ -19,9 +19,9 @@ constexpr float kReferencePhysicalPidKpRadPerM = 0.753350f;
 constexpr float kReferencePhysicalPidKiRadPerMSec = 0.291288f;
 constexpr float kReferencePhysicalPidKdRadSecPerM = 0.275081f;
 
-constexpr float kReferencePidKpStepsPerCm = 3.836778f;
-constexpr float kReferencePidKiStepsPerCmSec = 1.483519f;
-constexpr float kReferencePidKdStepsSecPerCm = 1.400977f;
+constexpr float kReferencePidKpStepsPerCm = 49.996718f;
+constexpr float kReferencePidKiStepsPerCmSec = 19.331609f;
+constexpr float kReferencePidKdStepsSecPerCm = 18.256002f;
 constexpr float kReferencePidOutMinSteps = -400.000000f;
 constexpr float kReferencePidOutMaxSteps = 400.000000f;
 

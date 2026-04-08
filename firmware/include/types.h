@@ -13,12 +13,13 @@ enum class AppState : uint8_t {
 };
 
 struct SensorData {
-  // Control-frame actuator estimate from relative step counts.
+  // Physical beam-angle estimate from relative step counts.
   float beam_angle_deg = 0.0f;
   float beam_angle_rad = 0.0f;
-  // AS5600-relative actuator pose (safety / verification only).
+  // AS5600-derived physical beam angle (safety / verification only).
   float as5600_theta_deg = 0.0f;
   float as5600_theta_rad = 0.0f;
+  // Raw AS5600 angle and motor-angle pose from the lower hard stop.
   float beam_angle_raw_deg = 0.0f;
   float actuator_abs_deg = 0.0f;
   float actuator_verify_err_deg = 0.0f;

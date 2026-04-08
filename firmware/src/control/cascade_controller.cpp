@@ -165,7 +165,7 @@ ActuatorCmd CascadeController::update(const SensorData& sensor,
     has_prev_linear_measurement_ = true;
   }
 
-  const float current_steps = sensor.beam_angle_deg / kStepperDegPerStep;
+  const float current_steps = sensor.beam_angle_deg / kBeamDegPerStep;
   const float step_error = target_steps - current_steps;
 
   float desired_rate_sps = 0.0f;
@@ -190,11 +190,11 @@ ActuatorCmd CascadeController::update(const SensorData& sensor,
 }
 
 float CascadeController::lastThetaCmdDeg() const {
-  return last_target_steps_ * kStepperDegPerStep;
+  return last_target_steps_ * kBeamDegPerStep;
 }
 
 float CascadeController::lastThetaCmdUnclampedDeg() const {
-  return last_target_steps_unclamped_ * kStepperDegPerStep;
+  return last_target_steps_unclamped_ * kBeamDegPerStep;
 }
 
 bool CascadeController::lastThetaCmdSaturated() const { return last_target_saturated_; }

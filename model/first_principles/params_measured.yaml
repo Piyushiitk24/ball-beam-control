@@ -31,7 +31,7 @@ actuator:
   phi_tau_s: 0.08
   torque_limit_nm: 0.35
   stepper_steps_per_rev: 3200  # 200 full-steps * 16 microsteps
-  linkage_ratio: 1.0           # measured from runtime sign jog: 200 usteps -> ~22.7 deg beam
+  linkage_ratio: 0.0767406     # iPhone inclinometer fit: physical beam deg / AS5600 actuator deg
 
 calibration:
   theta_from_phi:
@@ -39,7 +39,7 @@ calibration:
     linear:
       phi0_rad: 0.0
       theta0_rad: 0.0
-      gain_theta_per_phi: 1.0     # measured effective beam-per-motor gain
+      gain_theta_per_phi: 0.0767406  # measured physical beam-per-motor gain
     hysteresis:
       enabled: false
       up:

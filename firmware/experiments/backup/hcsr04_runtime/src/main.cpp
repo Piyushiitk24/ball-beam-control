@@ -29,6 +29,7 @@ namespace {
 
 using namespace bb;
 
+// Limit margins here are AS5600 actuator degrees; telemetry theta is physical beam degrees.
 constexpr float kLimitStopMarginDeg = 0.2f;
 constexpr float kLimitMinSpanDeg = 2.0f;
 constexpr float kRunSoftLimitBandDeg = 1.0f;
@@ -36,6 +37,8 @@ constexpr float kRunSoftLimitBandDeg = 1.0f;
 // from small AS5600/calibration mismatch near the travel ends.
 constexpr float kRunHardLimitMarginDeg = 3.0f;
 constexpr float kCenterFeedbackBlend = 0.40f;
+constexpr float kEndpointTargetMarginCm = 1.0f;
+constexpr float kEndpointTargetMarginFrac = 0.25f;
 
 StepperTMC2209 g_stepper(PIN_STEP, PIN_DIR, PIN_EN);
 AS5600Sensor g_as5600;
@@ -96,6 +99,7 @@ void setBallSetpointCm(float target_cm);
 void printSetpointStatus();
 void syncStepPositionToCurrentActuator();
 float currentStepperThetaDeg();
+float currentStepperActuatorRelDeg();
 float linearToCorrectedBallPosCm(float x_linear_cm, float theta_deg);
 float computeFeedbackBlend(float target_cm);
 void updateBallFeedbackPosition();
@@ -135,14 +139,27 @@ void syncLimitCaptureCacheFromRuntime() {
   g_limit_upper_sonar_cm = runtimeCalSonarUpperCm();
 }
 
+float insideEndpointTargetCm(float endpoint_cm) {
+  const float mag = fabsf(endpoint_cm);
+  if (mag <= 1.0e-4f) {
+    return 0.0f;
+  }
+  const float frac_margin = kEndpointTargetMarginFrac * mag;
+  const float margin = (frac_margin < kEndpointTargetMarginCm) ? frac_margin : kEndpointTargetMarginCm;
+  const float target_mag = mag - margin;
+  return (endpoint_cm >= 0.0f) ? target_mag : -target_mag;
+}
+
 bool computeSetpointPresetsCm(float& near_target_cm, float& far_target_cm) {
   if (!runtimeCalIsLimitsSet() || !runtimeCalHasSonarCenter()) {
     return false;
   }
   const float lower_x_cm = runtimeMapBallPosCm(runtimeCalSonarLowerCm());
   const float upper_x_cm = runtimeMapBallPosCm(runtimeCalSonarUpperCm());
-  near_target_cm = (lower_x_cm >= upper_x_cm) ? lower_x_cm : upper_x_cm;
-  far_target_cm = (lower_x_cm <= upper_x_cm) ? lower_x_cm : upper_x_cm;
+  const float near_endpoint_cm = (lower_x_cm >= upper_x_cm) ? lower_x_cm : upper_x_cm;
+  const float far_endpoint_cm = (lower_x_cm <= upper_x_cm) ? lower_x_cm : upper_x_cm;
+  near_target_cm = insideEndpointTargetCm(near_endpoint_cm);
+  far_target_cm = insideEndpointTargetCm(far_endpoint_cm);
   return true;
 }
 
@@ -175,18 +192,20 @@ bool effectiveActuatorStepBounds(int32_t& min_steps, int32_t& max_steps) {
     return false;
   }
 
-  float lower_deg = runtimeCalThetaLowerLimitDeg() + kRunSoftLimitBandDeg;
-  float upper_deg = runtimeCalThetaUpperLimitDeg() - kRunSoftLimitBandDeg;
+  const float trim_deg = runtimeCalActiveActuatorTrimDeg();
+  const float span_deg = runtimeCalActuatorSpanDeg();
+  float lower_deg = kRunSoftLimitBandDeg;
+  float upper_deg = span_deg - kRunSoftLimitBandDeg;
   if (lower_deg > upper_deg) {
-    lower_deg = runtimeCalThetaLowerLimitDeg();
-    upper_deg = runtimeCalThetaUpperLimitDeg();
-    if (lower_deg > upper_deg) {
+    lower_deg = 0.0f;
+    upper_deg = span_deg;
+    if (upper_deg <= 0.0f) {
       return false;
     }
   }
 
-  min_steps = static_cast<int32_t>(lroundf(lower_deg / kStepperDegPerStep));
-  max_steps = static_cast<int32_t>(lroundf(upper_deg / kStepperDegPerStep));
+  min_steps = static_cast<int32_t>(lroundf((lower_deg - trim_deg) / kStepperDegPerStep));
+  max_steps = static_cast<int32_t>(lroundf((upper_deg - trim_deg) / kStepperDegPerStep));
   if (min_steps > max_steps) {
     const int32_t swap = min_steps;
     min_steps = max_steps;
@@ -196,6 +215,10 @@ bool effectiveActuatorStepBounds(int32_t& min_steps, int32_t& max_steps) {
 }
 
 float currentStepperThetaDeg() {
+  return static_cast<float>(g_stepper.positionSteps()) * kBeamDegPerStep;
+}
+
+float currentStepperActuatorRelDeg() {
   return static_cast<float>(g_stepper.positionSteps()) * kStepperDegPerStep;
 }
 
@@ -257,7 +280,7 @@ void syncStepPositionToCurrentActuator() {
   const float rel_deg = currentActuatorDeg() - runtimeCalActiveActuatorTrimDeg();
   const int32_t rel_steps = static_cast<int32_t>(lroundf(rel_deg / kStepperDegPerStep));
   g_stepper.resetPositionSteps(rel_steps);
-  g_sensor.beam_angle_deg = static_cast<float>(rel_steps) * kStepperDegPerStep;
+  g_sensor.beam_angle_deg = static_cast<float>(rel_steps) * kBeamDegPerStep;
   g_sensor.beam_angle_rad = g_sensor.beam_angle_deg * kDegToRad;
 }
 
@@ -450,11 +473,14 @@ bool sampleAngleNow(uint32_t now_ms,
   g_last_valid_angle_ms = now_ms;
   g_fault_flags.i2c_error = false;
   // Angle safety:
-  // Use calibrated limits (mechanical travel). Before limits calibration, don't fault on angle.
+  // Use calibrated motor-angle travel for safety; physical beam-angle span is
+  // asymmetric and smaller than the AS5600 actuator span.
   if (runtimeCalIsLimitsSet()) {
+    const float actuator_deg = g_sensor.actuator_abs_deg;
+    const float actuator_span_deg = runtimeCalActuatorSpanDeg();
     g_fault_flags.angle_oob =
-        (theta_deg < (runtimeCalThetaLowerLimitDeg() - kRunHardLimitMarginDeg)) ||
-        (theta_deg > (runtimeCalThetaUpperLimitDeg() + kRunHardLimitMarginDeg));
+        (actuator_deg < (0.0f - kRunHardLimitMarginDeg)) ||
+        (actuator_deg > (actuator_span_deg + kRunHardLimitMarginDeg));
   } else {
     g_fault_flags.angle_oob = false;
   }
@@ -548,7 +574,8 @@ bool readSensors(uint32_t now_ms) {
   g_sensor.beam_angle_rad = g_sensor.beam_angle_deg * kDegToRad;
   if (runtimeCalActuatorTrimValid() && g_sensor.valid_angle) {
     g_sensor.actuator_verify_err_deg =
-        (g_sensor.actuator_abs_deg - runtimeCalActiveActuatorTrimDeg()) - g_sensor.beam_angle_deg;
+        (g_sensor.actuator_abs_deg - runtimeCalActiveActuatorTrimDeg()) -
+        currentStepperActuatorRelDeg();
   } else {
     g_sensor.actuator_verify_err_deg = 0.0f;
   }
@@ -603,15 +630,16 @@ void maybeStopJogAtLimits() {
     return;
   }
 
-  const float theta_deg = g_sensor.as5600_theta_deg;
+  const float actuator_deg = g_sensor.actuator_abs_deg;
+  const float actuator_span_deg = runtimeCalActuatorSpanDeg();
 
-  if (rate > 0.0f && theta_deg >= (runtimeCalThetaUpperLimitDeg() - kLimitStopMarginDeg)) {
+  if (rate > 0.0f && actuator_deg >= (actuator_span_deg - kLimitStopMarginDeg)) {
     g_stepper.stop();
     Serial.println(F("WARN,jog_upper"));
     return;
   }
 
-  if (rate < 0.0f && theta_deg <= (runtimeCalThetaLowerLimitDeg() + kLimitStopMarginDeg)) {
+  if (rate < 0.0f && actuator_deg <= kLimitStopMarginDeg) {
     g_stepper.stop();
     Serial.println(F("WARN,jog_lower"));
   }
@@ -779,7 +807,7 @@ bool handleCalSignBegin() {
   runtimeCalMarkLowerLimitCaptured(false);
   runtimeCalMarkUpperLimitCaptured(false);
 
-  // Test jog: 200 usteps at 200 sps (~3.3° beam — well above noise).
+  // Test jog: 200 usteps at 200 sps (~1.7° beam — well above noise).
   g_stepper.enable(true);
   g_stepper.requestJogSteps(200, 200.0f);
   runJogBlocking(3000);
@@ -1061,12 +1089,6 @@ bool captureZeroPosition() {
     return false;
   }
 
-  float raw_deg = 0.0f;
-  if (!captureAs5600CalRawDeg(raw_deg)) {
-    Serial.println(F("ERR,angle_not_ready"));
-    return false;
-  }
-
   if (runtimeCalIsLowerLimitCaptured() && runtimeCalIsUpperLimitCaptured()) {
     const float lo_cm = runtimeCalSonarFarCm();
     const float hi_cm = runtimeCalSonarNearCm();
@@ -1081,13 +1103,10 @@ bool captureZeroPosition() {
   runtimeCalSetSonarCenterCm(dist_cm);
   runtimeCalSetSonarCenterSource(CenterSource::kManual);
   runtimeCalMarkZeroPosCaptured(true);
-  runtimeCalSetActuatorTrimDeg(runtimeMapActuatorDeg(raw_deg));
+  runtimeCalSetActuatorTrimDeg(runtimeCalBeamLevelActuatorDeg());
   runtimeCalSetActuatorTrimValid(true);
-  runtimeCalSetActuatorTrimSource(ActuatorTrimSource::kSaved);
+  runtimeCalSetActuatorTrimSource(ActuatorTrimSource::kSearched);
   g_controller.clearAdaptiveCenterBias();
-  g_stepper.resetPositionSteps(0);
-  g_sensor.beam_angle_deg = 0.0f;
-  g_sensor.beam_angle_rad = 0.0f;
   sampleSonarNow(millis(), nullptr, nullptr, nullptr);
   g_runtime_cal_dirty = true;
   Serial.print(F("OK,cal_zero_position_set="));
@@ -1118,7 +1137,9 @@ bool finalizeNormalizedLimitSpan() {
     return false;
   }
 
-  runtimeCalSetActuatorTrimValid(false);
+  runtimeCalSetActuatorTrimDeg(runtimeCalBeamLevelActuatorDeg());
+  runtimeCalSetActuatorTrimValid(true);
+  runtimeCalSetActuatorTrimSource(ActuatorTrimSource::kSearched);
   runtimeCalSetUpperLimitNearSensor(true);
   runtimeCalApplyOrientationSonarSign();
   g_controller.clearAdaptiveCenterBias();
