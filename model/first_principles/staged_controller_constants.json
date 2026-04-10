@@ -1,0 +1,409 @@
+{
+  "meta": {
+    "method": "staged-sharp-as5600-discrete-lqi",
+    "controller_architecture": "staged-cascaded-sharp-as5600",
+    "controller_state_order": [
+      "x_cm",
+      "x_dot_cm_s",
+      "theta_rel_deg",
+      "theta_dot_deg_s",
+      "xi_cm_s"
+    ],
+    "controller_command": "theta_cmd_rel_deg",
+    "notes": [
+      "The active design is the staged Sharp/AS5600 controller documented in docs/modeling.md.",
+      "DIR_SIGN, INNER_STEP_SIGN, and OUTER_SIGN_DEFAULT stay explicit so sign bookkeeping is not hidden inside runtime wiring assumptions.",
+      "The runtime integral bleed factors intentionally remain 1.0 because this design uses gating and clamping, not active bleed-down."
+    ]
+  },
+  "inputs": {
+    "distance_calibration": {
+      "sensor_model": "GP2Y0A41SK0F",
+      "mode": "reciprocal_affine",
+      "reciprocal_affine": {
+        "k_v_cm": 12.25,
+        "offset_cm": -0.62
+      },
+      "min_valid_v": 0.08,
+      "d_min_cm": 4.4,
+      "d_max_cm": 12.66,
+      "setpoint_trim_default_cm": 0.0
+    },
+    "angle_calibration": {
+      "sensor_model": "AS5600",
+      "mode": "linear",
+      "linear": {
+        "slope_deg_per_as_deg": 0.07666806,
+        "offset_deg": -23.28443907
+      },
+      "safe_range": {
+        "theta_cal_min_deg": -0.7,
+        "theta_cal_max_deg": 3.1,
+        "theta_cal_margin_deg": 0.1,
+        "theta_cal_extrapolate_deg": 0.3
+      }
+    },
+    "x_from_d_theta": {
+      "mode": "linear",
+      "linear": {
+        "center_m": 0.0853,
+        "sign": 1.0,
+        "gain_x_per_d": 1.0
+      }
+    },
+    "sign_audit": {
+      "x_positive_toward_motor": true,
+      "theta_positive_motor_side_up": true,
+      "dir_sign": -1,
+      "inner_step_sign": -1,
+      "outer_sign": -1
+    },
+    "staged_inner": {
+      "dt_s": 0.04,
+      "inner_discrete_pole": 0.3,
+      "inner_kd_theta": 0.0,
+      "deadband_quantization_multiple": 5.0,
+      "rate_deadband_sample_factor": 2.0,
+      "max_step_delta_budget_fraction": 0.5
+    },
+    "staged_outer_lqi": {
+      "outer_bw_hz": 0.175,
+      "actuator_model_inner_damping_ratio": 1.0,
+      "theta_limit_fraction_of_envelope": 0.5,
+      "q_weights": {
+        "wx": 6.0,
+        "wv": 12.0,
+        "wt": 0.03,
+        "ww": 0.03,
+        "wi": 0.04
+      },
+      "r_weights": {
+        "wu": 24.0
+      },
+      "integral_clamp_fraction_of_theta_limit": 0.09,
+      "xdot_limit_scale_fraction": 1.0,
+      "theta_dot_limit_outer_bw_multiple": 2.0,
+      "center_band_x_fraction_of_half_window": 0.045,
+      "center_band_xdot_fraction_of_xdot_limit": 0.08,
+      "integral_capture_x_fraction_of_half_window": 0.11,
+      "integral_capture_xdot_fraction_of_xdot_limit": 0.067,
+      "gain_scale_min": 0.5,
+      "gain_scale_max": 1.5,
+      "integral_bleed_outside": 1.0,
+      "integral_bleed_recovery": 1.0,
+      "integral_bleed_center": 1.0,
+      "recovery_enter_x_fraction_of_half_window": 0.29,
+      "recovery_enter_xdot_fraction_of_xdot_limit": 0.08,
+      "recovery_enter_time_s": 0.16,
+      "recovery_exit_x_fraction_of_half_window": 0.06,
+      "recovery_exit_handoff_x_fraction_of_half_window": 0.36,
+      "recovery_exit_inward_xdot_fraction_of_xdot_limit": 0.1,
+      "recovery_floor_fraction_of_theta_limit": 0.35,
+      "recovery_floor_max_fraction_of_theta_limit": 0.55,
+      "recovery_floor_gain_fraction_of_theta_limit_per_half_window": 0.375,
+      "zero_trim_x_fraction_of_half_window": 0.06,
+      "zero_trim_xdot_fraction_of_xdot_limit": 0.055,
+      "zero_trim_theta_track_fraction_of_theta_limit": 0.05,
+      "zero_trim_theta_dot_fraction_of_theta_dot_limit": 0.1,
+      "zero_trim_estimator_tau_s": 0.8
+    }
+  },
+  "plant_model": {
+    "alpha": 0.6000000000000001,
+    "beta_1ps": 2.678571428571429,
+    "k_theta_cmps2_per_deg": 10.273007977238626,
+    "a_continuous": [
+      [
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        -2.678571428571429,
+        -10.273007977238626,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      [
+        0.0,
+        0.0,
+        -905.9690709727867,
+        -60.1986402162968
+      ]
+    ],
+    "b_continuous": [
+      [
+        0.0
+      ],
+      [
+        0.0
+      ],
+      [
+        0.0
+      ],
+      [
+        905.9690709727867
+      ]
+    ],
+    "a_discrete": [
+      [
+        1.0,
+        0.03793166669672013,
+        -0.007315988468163323,
+        -6.039907122863757e-05
+      ],
+      [
+        0.0,
+        0.898397321348071,
+        -0.3349526241167346,
+        -0.0036800465098720887
+      ],
+      [
+        0.0,
+        0.0,
+        0.6611918412977806,
+        0.011999999999999997
+      ],
+      [
+        0.0,
+        0.0,
+        -10.871628851673435,
+        -0.06119184129778055
+      ]
+    ],
+    "b_discrete": [
+      [
+        -0.0006165998875314409
+      ],
+      [
+        -0.054719690448627956
+      ],
+      [
+        0.3388081587022194
+      ],
+      [
+        10.871628851673435
+      ]
+    ]
+  },
+  "design_targets": {
+    "loop_ms": 40,
+    "dt_s": 0.04,
+    "inner_discrete_pole": 0.3,
+    "inner_bw_hz": 4.7904555789171,
+    "inner_bw_radps": 30.0993201081484,
+    "outer_bw_hz": 0.175,
+    "outer_bw_radps": 1.0995574287564276,
+    "theta_safe_span_deg": 4.199999999999999,
+    "theta_envelope_deg": 4.0,
+    "theta_cmd_limit_default_deg": 2.0
+  },
+  "scales": {
+    "x_scale_cm": 4.13,
+    "x_dot_scale_cm_s": 4.541172180764046,
+    "theta_scale_deg": 2.0,
+    "theta_dot_state_scale_deg_s": 60.1986402162968,
+    "xi_scale_cm_s": 3.75605665696873,
+    "beam_deg_per_step": 0.008625156749999998,
+    "as5600_lsb_beam_deg": 0.006738403710937499,
+    "dominant_angle_quantization_deg": 0.008625156749999998,
+    "step_budget_per_sample": 80.0,
+    "theta_limit_steps": 231.87984380689664
+  },
+  "weights": {
+    "q": [
+      [
+        0.351763802332194,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.5818959153441181,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0075,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        8.278428304342504e-06,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.002835278483507428
+      ]
+    ],
+    "r": [
+      [
+        6.0
+      ]
+    ],
+    "q_weights": {
+      "wx": 6.0,
+      "wv": 12.0,
+      "wt": 0.03,
+      "ww": 0.03,
+      "wi": 0.04
+    },
+    "r_weights": {
+      "wu": 24.0
+    }
+  },
+  "constants": {
+    "LOOP_MS": 40,
+    "DT": 0.04,
+    "SHARP_FIT_K_V_CM": 12.25,
+    "SHARP_FIT_OFFSET_CM": -0.62,
+    "SHARP_MIN_VALID_V": 0.08,
+    "D_MIN_CM": 4.4,
+    "D_MAX_CM": 12.66,
+    "D_SETPOINT_MIDPOINT_CM": 8.530000000000001,
+    "D_SETPOINT_TRIM_DEFAULT_CM": 0.0,
+    "D_SETPOINT_DEFAULT_CM": 8.530000000000001,
+    "AS5600_RAW_TO_DEG": 0.087890625,
+    "THETA_SLOPE_DEG_PER_AS_DEG": 0.07666806,
+    "THETA_OFFSET_DEG": -23.28443907,
+    "THETA_CAL_MIN_DEG": -0.7,
+    "THETA_CAL_MAX_DEG": 3.1,
+    "THETA_CAL_MARGIN_DEG": 0.1,
+    "THETA_CAL_EXTRAPOLATE_DEG": 0.3,
+    "STEPS_PER_BEAM_DEG": 115.93992190344832,
+    "DIR_SIGN": -1,
+    "INNER_STEP_SIGN": -1,
+    "OUTER_SIGN_DEFAULT": -1,
+    "INNER_KP_THETA": 0.7,
+    "INNER_KD_THETA": 0.0,
+    "INNER_THETA_DEADBAND_DEG": 0.043125783749999994,
+    "INNER_THETA_RATE_DEADBAND_DEG_S": 0.5390722968749999,
+    "INNER_MAX_STEP_DELTA": 40,
+    "THETA_CMD_LIMIT_DEFAULT_DEG": 2.0,
+    "OUTER_KX_DEFAULT": -0.27264931167736883,
+    "OUTER_KV_DEFAULT": -0.18055199775177233,
+    "OUTER_KT_DEFAULT": 0.1251177504640299,
+    "OUTER_KW_DEFAULT": 0.00206955856212749,
+    "OUTER_KI_DEFAULT": -0.02091732840533224,
+    "OUTER_INTEGRAL_CLAMP_DEG": 0.18,
+    "OUTER_INTEGRAL_CAPTURE_CM": 0.4543,
+    "OUTER_INTEGRAL_CAPTURE_X_DOT_CM_S": 0.3042585361111911,
+    "OUTER_INTEGRAL_BLEED_OUTSIDE": 1.0,
+    "OUTER_INTEGRAL_BLEED_RECOVERY": 1.0,
+    "OUTER_INTEGRAL_BLEED_CENTER": 1.0,
+    "OUTER_CENTER_BAND_CM": 0.18585,
+    "OUTER_CENTER_BAND_X_DOT_CM_S": 0.3632937744611237,
+    "OUTER_X_DOT_LIMIT_CM_S": 4.541172180764046,
+    "OUTER_THETA_DOT_LIMIT_DEG_S": 4.39822971502571,
+    "OUTER_GAIN_SCALE_MIN": 0.5,
+    "OUTER_GAIN_SCALE_MAX": 1.5,
+    "RECOVERY_ENTER_X_CM": 1.1977,
+    "RECOVERY_ENTER_X_DOT_CM_S": 0.3632937744611237,
+    "RECOVERY_ENTER_COUNT": 4,
+    "RECOVERY_EXIT_X_CM": 0.2478,
+    "RECOVERY_EXIT_HANDOFF_X_CM": 1.4868,
+    "RECOVERY_EXIT_INWARD_X_DOT_CM_S": 0.4541172180764046,
+    "RECOVERY_FLOOR_DEFAULT_DEG": 0.7,
+    "RECOVERY_FLOOR_MIN_DEG": 0.0,
+    "RECOVERY_FLOOR_MAX_DEG": 1.1,
+    "RECOVERY_FLOOR_GAIN_DEG_PER_CM": 0.18159806295399517,
+    "ZERO_TRIM_EST_X_CM": 0.2478,
+    "ZERO_TRIM_EST_X_DOT_CM_S": 0.24976446994202253,
+    "ZERO_TRIM_EST_THETA_TRACK_ERR_DEG": 0.1,
+    "ZERO_TRIM_EST_THETA_DOT_DEG_S": 0.43982297150257105,
+    "ZERO_TRIM_EST_ALPHA": 0.048770575499285984
+  },
+  "units": {
+    "LOOP_MS": "ms",
+    "DT": "s",
+    "SHARP_FIT_K_V_CM": "cm*V",
+    "SHARP_FIT_OFFSET_CM": "cm",
+    "SHARP_MIN_VALID_V": "V",
+    "D_MIN_CM": "cm",
+    "D_MAX_CM": "cm",
+    "D_SETPOINT_MIDPOINT_CM": "cm",
+    "D_SETPOINT_TRIM_DEFAULT_CM": "cm",
+    "D_SETPOINT_DEFAULT_CM": "cm",
+    "AS5600_RAW_TO_DEG": "as-deg/count",
+    "THETA_SLOPE_DEG_PER_AS_DEG": "beam-deg/as-deg",
+    "THETA_OFFSET_DEG": "beam-deg",
+    "THETA_CAL_MIN_DEG": "deg",
+    "THETA_CAL_MAX_DEG": "deg",
+    "THETA_CAL_MARGIN_DEG": "deg",
+    "THETA_CAL_EXTRAPOLATE_DEG": "deg",
+    "STEPS_PER_BEAM_DEG": "steps/deg",
+    "DIR_SIGN": "sign",
+    "INNER_STEP_SIGN": "sign",
+    "OUTER_SIGN_DEFAULT": "sign",
+    "INNER_KP_THETA": "ratio",
+    "INNER_KD_THETA": "s",
+    "INNER_THETA_DEADBAND_DEG": "deg",
+    "INNER_THETA_RATE_DEADBAND_DEG_S": "deg/s",
+    "INNER_MAX_STEP_DELTA": "steps/sample",
+    "THETA_CMD_LIMIT_DEFAULT_DEG": "deg",
+    "OUTER_KX_DEFAULT": "deg/cm",
+    "OUTER_KV_DEFAULT": "deg*s/cm",
+    "OUTER_KT_DEFAULT": "deg/deg",
+    "OUTER_KW_DEFAULT": "s",
+    "OUTER_KI_DEFAULT": "deg/(cm*s)",
+    "OUTER_INTEGRAL_CLAMP_DEG": "deg",
+    "OUTER_INTEGRAL_CAPTURE_CM": "cm",
+    "OUTER_INTEGRAL_CAPTURE_X_DOT_CM_S": "cm/s",
+    "OUTER_INTEGRAL_BLEED_OUTSIDE": "ratio/sample",
+    "OUTER_INTEGRAL_BLEED_RECOVERY": "ratio/sample",
+    "OUTER_INTEGRAL_BLEED_CENTER": "ratio/sample",
+    "OUTER_CENTER_BAND_CM": "cm",
+    "OUTER_CENTER_BAND_X_DOT_CM_S": "cm/s",
+    "OUTER_X_DOT_LIMIT_CM_S": "cm/s",
+    "OUTER_THETA_DOT_LIMIT_DEG_S": "deg/s",
+    "OUTER_GAIN_SCALE_MIN": "ratio",
+    "OUTER_GAIN_SCALE_MAX": "ratio",
+    "RECOVERY_ENTER_X_CM": "cm",
+    "RECOVERY_ENTER_X_DOT_CM_S": "cm/s",
+    "RECOVERY_ENTER_COUNT": "samples",
+    "RECOVERY_EXIT_X_CM": "cm",
+    "RECOVERY_EXIT_HANDOFF_X_CM": "cm",
+    "RECOVERY_EXIT_INWARD_X_DOT_CM_S": "cm/s",
+    "RECOVERY_FLOOR_DEFAULT_DEG": "deg",
+    "RECOVERY_FLOOR_MIN_DEG": "deg",
+    "RECOVERY_FLOOR_MAX_DEG": "deg",
+    "RECOVERY_FLOOR_GAIN_DEG_PER_CM": "deg/cm",
+    "ZERO_TRIM_EST_X_CM": "cm",
+    "ZERO_TRIM_EST_X_DOT_CM_S": "cm/s",
+    "ZERO_TRIM_EST_THETA_TRACK_ERR_DEG": "deg",
+    "ZERO_TRIM_EST_THETA_DOT_DEG_S": "deg/s",
+    "ZERO_TRIM_EST_ALPHA": "ratio/sample"
+  },
+  "verification": {
+    "closed_loop_stable": true,
+    "closed_loop_max_abs_pole": 0.9963730226101991,
+    "closed_loop_poles": [
+      0.2817825212536864,
+      0.32275513607699974,
+      0.8460818280737301,
+      0.976466561141747,
+      0.9963730226101991
+    ],
+    "inner_outer_bandwidth_ratio": 27.374031879526285,
+    "ordering_ok": true
+  }
+}

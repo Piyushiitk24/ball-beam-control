@@ -11,20 +11,21 @@ All first-principles derivations, hardware parameters, and controller designs li
 
 The system consists of a beam pivoted at one end and actuated at the other by a stepper
 motor through a crank-rocker linkage. A hollow ping-pong ball rolls freely along a
-V-groove runner mounted on top of the beam. An HC-SR04 ultrasonic rangefinder mounted
-at the pivot end of the beam measures the ball's distance from the sensor face.
+V-groove runner mounted on top of the beam. A Sharp GP2Y0A41SK0F IR distance sensor
+mounted at the pivot end of the beam measures the ball's distance from the sensor face.
+Because the Sharp has a minimum usable detection range of about 4 cm, a tape stop
+blocks the near end of the runner and shortens the usable ball-travel window.
 
 ```text
-  HC-SR04
+  Sharp IR
   sensor
-  ||||
-  ||||
-  ||||  pivot                                motor crank
-  ||||====O===========[ runner ]==============O--( )
-          ^            ~~~ball~~~             ^
-          |                                  |
-        fulcrum                          motor-side
-        (fixed)                          clevis
+  [====]
+  [====]  pivot                              motor crank
+  [====]==O====[ tape stop ][ runner ]========O--( )
+            ^           ~~~ball~~~            ^
+            |                                 |
+          fulcrum                         motor-side
+          (fixed)                         clevis
 ```
 
 The pivot-side clevis hole is the coordinate origin for all length measurements along
@@ -47,10 +48,12 @@ In the canonical control convention used by this project:
 
 - Positive microstep count is intended to mean motor-side-up actuator motion (`θ > 0`).
 - Positive `θ` makes gravity pull the ball toward the pivot, so `r` decreases.
-- For a pivot-mounted distance sensor, the controller coordinate is
-  `x_ctrl = center_m − d`, where `d` is the measured distance and
-  `center_m = 0.1295 m` is the nominal center. Therefore `x_ctrl > 0`
-  means the ball is toward the motor side.
+- For the pivot-mounted Sharp sensor, the measured distance `d_sharp` increases toward
+  the motor side. The controller coordinate is therefore
+  `x_ctrl = d_sharp − center_d`, where `center_d = 0.0853 m` is the center reading.
+  Therefore `x_ctrl > 0` means the ball is toward the motor side.
+- In `model/first_principles/params_measured.yaml`, this center-distance value is
+  stored in the legacy-named calibration field `center_m`.
 
 ---
 
@@ -65,14 +68,19 @@ All values were measured on the final assembled hardware.
 | Ball mass | 2.8 g | Standard 40 mm ping-pong ball |
 | Ball diameter | 40.0 mm | |
 | Bare beam mass | 33.2 g | Aluminium extrusion, 263 mm span |
-| HC-SR04 + wires mass | 8.9 g | Mounted at pivot end of beam |
-| Total beam assembly mass | 42.1 g | Bare beam + sensor + wires |
+| Sharp IR sensor + wires mass | 5.3 g | Pivot-mounted |
+| Total beam assembly mass | 38.5 g | Bare beam + sensor + wires |
 | Beam length (clevis-to-clevis) | 263 mm | |
-| Runner start from pivot-side clevis | 48 mm | |
-| Runner length (nominal) | 199 mm | Range: 198–200 mm |
-| Runner end clearance to motor clevis | 12.5 mm | |
-| Sensor face from pivot-side clevis | 18 mm | |
-| Nearest ball–sensor clearance | 30 mm | When ball is at runner start |
+| Sharp body start from pivot-side clevis | 27.3 mm | Mount footprint start |
+| Sharp body end from pivot-side clevis | 40.3 mm | Mount footprint end |
+| Sharp sensing face from pivot-side clevis | 40.3 mm | Front face used for distance mapping |
+| Sharp mass lump from pivot-side clevis | 33.8 mm | Body midpoint used for COM/inertia |
+| Nearest ball–sensor clearance | 44.0 mm | Tape-limited near stop |
+| Farthest ball–sensor clearance | 126.6 mm | Far usable stop |
+| Usable sensing window | 82.6 mm | `126.6 − 44.0` mm |
+| Nearest valid ball position from pivot-side clevis | 84.3 mm | `40.3 + 44.0` mm |
+| Farthest valid ball position from pivot-side clevis | 166.9 mm | `40.3 + 126.6` mm |
+| Effective runner end clearance to motor clevis | 96.1 mm | `263.0 − 166.9` mm |
 | Stepper full-steps per revolution | 200 | NEMA 17 |
 | Microstep divisor | 16 | TMC2209 driver |
 | Rolling viscous damping | 0.0125 N·s/m | Pre-identification estimate |
@@ -105,10 +113,10 @@ I = (2/3) × 0.0028 × (0.020)²
 
 | Symbol | Formula | Value | Unit |
 | -------- | --------- | ------- | ------ |
-| M_b | m_beam + m_sensor | 0.0421 | kg |
+| M_b | m_beam + m_sensor | 0.0385 | kg |
 | L | — | 0.263 | m |
-| L_com | see §2.3 | 0.10751 | m |
-| J | see §2.4 | 7.684 × 10⁻⁴ | kg·m² |
+| L_com | see §2.3 | 0.11805 | m |
+| J | see §2.4 | 7.715 × 10⁻⁴ | kg·m² |
 
 **Actuation and sensing:**
 
@@ -117,7 +125,8 @@ I = (2/3) × 0.0028 × (0.020)²
 | N_steps | 200 × 16 | 3200 | steps/rev |
 | k_step_rad | (2π / N_steps) × λ | 1.5068 × 10⁻⁴ | rad/step |
 | λ | linkage_ratio | 0.0767406 | — |
-| center_m | 30 mm + 199/2 mm | 0.1295 | m |
+| center_d | (44.0 mm + 126.6 mm) / 2 | 0.0853 | m |
+| r₀ | x_sensor_face + center_d | 0.1256 | m |
 
 **Physical constants:**
 
@@ -130,22 +139,24 @@ I = (2/3) × 0.0028 × (0.020)²
 ### 2.3 Beam + Sensor Combined Centre of Mass
 
 The beam assembly is modelled as a uniform slender rod (the aluminium extrusion) plus a
-lumped point mass (the HC-SR04 and wires) at the sensor face location.
+lumped point mass (the Sharp sensor and wires) at the sensor body midpoint. The sensing
+face location is kept separate for ball-position mapping.
 
 ```text
-x_com = (m_beam × x_beam_com + m_sensor × x_sensor) / M_b
+x_com = (m_beam × x_beam_com + m_sensor × x_sensor_com) / M_b
 ```
 
 where `x_beam_com = L / 2 = 0.263 / 2 = 0.1315 m` (uniform rod) and
-`x_sensor = 0.018 m` (sensor face from pivot-side clevis).
+`x_sensor_com = (0.0273 + 0.0403)/2 = 0.0338 m` (sensor body midpoint). The sensing
+face used for distance mapping remains `x_sensor_face = 0.0403 m`.
 
 Substitution:
 
 ```text
-x_com = (0.0332 × 0.1315 + 0.0089 × 0.018) / 0.0421
-      = (0.0043658 + 0.0001602) / 0.0421
-      = 0.004526 / 0.0421
-      = 0.10751 m
+x_com = (0.0332 × 0.1315 + 0.0053 × 0.0338) / 0.0385
+      = (0.0043658 + 0.00017914) / 0.0385
+      = 0.00454494 / 0.0385
+      = 0.11805 m
 ```
 
 ### 2.4 Beam Moment of Inertia About the Pivot
@@ -162,35 +173,54 @@ J_beam = (1/3) m_beam L²
        = 7.6547 × 10⁻⁴  kg·m²
 ```
 
-Sensor lumped at x_sensor = 0.018 m:
+Sensor lumped at x_sensor_com = 0.0338 m:
 
 ```text
-J_sensor = m_sensor × x_sensor²
-         = 0.0089 × (0.018)²
-         = 0.0089 × 0.000324
-         = 2.884 × 10⁻⁶  kg·m²
+J_sensor = m_sensor × x_sensor_com²
+         = 0.0053 × (0.0338)²
+         = 0.0053 × 0.00114244
+         = 6.055 × 10⁻⁶  kg·m²
 ```
 
 Total beam inertia about pivot:
 
 ```text
 J = J_beam + J_sensor
-  = 7.6547 × 10⁻⁴ + 2.884 × 10⁻⁶
-  = 7.684 × 10⁻⁴  kg·m²
+  = 7.6547 × 10⁻⁴ + 6.055 × 10⁻⁶
+  = 7.715 × 10⁻⁴  kg·m²
 ```
 
 ### 2.5 Nominal Ball-Position Centre
 
-The HC-SR04 face is at 18 mm from the pivot clevis. The nearest valid ball position
-(ball at runner start, just beyond sensor) is 30 mm beyond the sensor face, so
-48 mm from the pivot. The runner is 199 mm long, so the runner midpoint from the
-sensor face is:
+The Sharp sensing face is at 40.3 mm from the pivot clevis. The tape-limited usable
+ball window is measured directly from the sensor face as 44.0 mm to 126.6 mm, so the
+usable window and center reading are:
 
 ```text
-center_m = 30 mm + (199 mm / 2) = 30 + 99.5 = 129.5 mm = 0.1295 m
+usable_window = 126.6 mm − 44.0 mm = 82.6 mm = 0.0826 m
+
+center_d = (44.0 mm + 126.6 mm) / 2
+         = 85.3 mm
+         = 0.0853 m
 ```
 
-This is the desired ball setpoint (center of runner).
+The corresponding usable near, far, and center ball positions from the pivot are:
+
+```text
+r_near = 40.3 mm + 44.0 mm
+       = 84.3 mm
+       = 0.0843 m
+
+r_far  = 40.3 mm + 126.6 mm
+       = 166.9 mm
+       = 0.1669 m
+
+r₀     = 40.3 mm + 85.3 mm
+       = 125.6 mm
+       = 0.1256 m
+```
+
+This is the desired ball setpoint (center of the usable Sharp window).
 
 ---
 
@@ -539,9 +569,9 @@ Substitute into EOM-θ with cosδ ≈ 1 and ṙ δ̇ ≈ 0:
 (J + m r₀²) δ̈ + b_θ δ̇ + (m r₀ + M_b L_com) g δ = τ − τ₀
 ```
 
-For the active firmware architecture the beam angle is commanded directly (the actuator
-is treated as ideal for controller design), so the beam equation is not used in the PID
-design. It becomes relevant for full-state LQR design (§10).
+The archived ideal-angle PID design omitted this beam equation. The active staged
+controller reintroduces the beam dynamics through the second-order inner-loop actuator
+model used in §9.4.
 
 ---
 
@@ -570,444 +600,529 @@ m_e = (5/3) × 0.0028
 From (LBALL):
 
 ```text
-ẍ + 2.6786 ẋ = 5.886 δ          [x in m, δ in rad]
+ẍ + 2.6786 ẋ = −5.886 δ          [x in m, δ in rad]
 ```
 
 Laplace transform (zero initial conditions):
 
 ```text
-s² X(s) + 2.6786 s X(s) = 5.886 Θ(s)
+s² X(s) + 2.6786 s X(s) = −5.886 Θ(s)
 
-X(s) / Θ(s) = 5.886 / (s² + 2.6786 s)
-             = 5.886 / (s (s + 2.6786))   [m/rad]
+X(s) / Θ(s) = −5.886 / (s² + 2.6786 s)
+             = −5.886 / (s (s + 2.6786))   [m/rad]
 ```
 
 This is an integrator cascaded with a first-order lag (pole at s = −β).
 
 ### 8.3 Beam Inertia at Nominal Operating Point
 
-At the design equilibrium r₀ = 0.1295 m (centre of runner):
+At the design equilibrium r₀ = 0.1256 m (centre of the usable Sharp window):
 
 ```text
 J_total(r₀) = J + m r₀²
-             = 7.684 × 10⁻⁴ + 0.0028 × (0.1295)²
-             = 7.684 × 10⁻⁴ + 0.0028 × 0.016770
-             = 7.684 × 10⁻⁴ + 4.696 × 10⁻⁵
-             = 8.154 × 10⁻⁴  kg·m²
+             = 7.715 × 10⁻⁴ + 0.0028 × (0.1256)²
+             = 7.715 × 10⁻⁴ + 0.0028 × 0.015775
+             = 7.715 × 10⁻⁴ + 4.417 × 10⁻⁵
+             = 8.157 × 10⁻⁴  kg·m²
 ```
 
 ### 8.4 Gravitational Restoring Torque Coefficient (Linearized)
 
 ```text
-(m r₀ + M_b L_com) g = (0.0028 × 0.1295 + 0.0421 × 0.10751) × 9.81
-                      = (0.0003626 + 0.0045261) × 9.81
-                      = 0.0048887 × 9.81
-                      = 0.04796  N·m/rad
+(m r₀ + M_b L_com) g = (0.0028 × 0.1256 + 0.0385 × 0.11805) × 9.81
+                      = (0.00035168 + 0.00454494) × 9.81
+                      = 0.00489662 × 9.81
+                      = 0.04804  N·m/rad
 ```
 
 The linearized beam equation at r₀ (ideal actuator, no damping) has natural frequency:
 
 ```text
-ω_beam = √(0.04796 / 8.154 × 10⁻⁴)
-        = √(58.82)
+ω_beam = √(0.04804 / 8.157 × 10⁻⁴)
+        = √(58.89)
         = 7.67  rad/s  (1.22 Hz)
 ```
 
-This is well above the ball control bandwidth (0.12 Hz), which justifies treating the
+This is well above the ball control bandwidth (0.175 Hz), which justifies treating the
 beam as an ideal angle actuator for ball position control.
 
 ---
 
-## 9. Controller-Oriented Reduced Model and PID Design
+## 9. Active Controller Design: Staged Sharp + AS5600 Cascade
 
-### 9.1 Ideal Actuator Assumption
+The active controller architecture is the staged design implemented by the Sharp +
+AS5600 sketch:
 
-For ball position control the stepper motor is commanded to a microstep count N. The
-relationship between step count and beam angle (from calibration):
+- `M0`: telemetry/state readout only
+- `M1`: inner beam-angle hold using AS5600 only
+- `M2`: outer ball-position cascade using `x`, `ẋ`, `θ`, `θ̇`, and an integral state
 
-```text
-δ = k_step_rad × N
-```
+The first-principles source for the controller constants is
+`model/first_principles/design_staged_controller.py`, which reads
+`model/first_principles/params_measured.yaml` and generates:
 
-where:
+- `model/first_principles/staged_controller_constants.json`
+- `firmware/include/generated/staged_controller_constants.h`
 
-```text
-k_step_rad = (2π / N_steps) × λ
-           = (2π / 3200) × 0.0767406
-           = 0.000150680  rad/step
-```
+ADC averaging counts, EMA smoothing factors, telemetry cadence, and step pulse timing
+remain implementation settings rather than first-principles control outputs.
 
-### 9.2 Plant Transfer Function in Step and Centimetre Units
+### 9.1 Runtime States, Units, and Sign Convention
 
-The firmware measures ball position in centimetres and commands microsteps, so the
-plant transfer function must be expressed in those units.
-
-Convert x from metres to centimetres (multiply by 100) and substitute
-δ = k_step_rad × N:
+The staged controller uses the exact runtime state definitions from the sketch:
 
 ```text
-ẍ_cm + β ẋ_cm = 100 × α g × k_step_rad × N
-               = κ N
+x_cm            = d_sharp_cm − D_SETPOINT_DEFAULT_CM
+x_dot_cm_s      = d/dt (x_cm)
+theta_rel_deg   = theta_cal_deg − theta_balance_deg
+theta_dot_deg_s = d/dt (theta_rel_deg)
+xi_cm_s         = ∫ x_cm dt
 ```
 
-where:
+with command:
 
 ```text
-κ = 100 × α × g × k_step_rad
-  = 100 × 0.600000 × 9.81 × 0.000150680
-  = 0.088690  cm / s² / step
+theta_cmd_rel_deg
 ```
 
-Laplace transform:
+The physical sign convention remains the canonical one from §1.3:
+
+- `x_cm > 0`: ball is toward the motor side
+- `theta_rel_deg > 0`: motor side of the beam is up
+
+The exact outer-loop command law used by the staged controller is
 
 ```text
-G(s) = X_cm(s) / N(s) = κ / (s (s + β))
-                       = 0.088690 / (s (s + 2.678571))
+theta_cmd_rel_deg
+  = clamp(
+      OUTER_SIGN_DEFAULT
+      × (OUTER_KX_DEFAULT x_cm
+       + OUTER_KV_DEFAULT x_dot_cm_s
+       + OUTER_KT_DEFAULT theta_rel_deg
+       + OUTER_KW_DEFAULT theta_dot_deg_s
+       + OUTER_KI_DEFAULT xi_cm_s),
+      ±THETA_CMD_LIMIT_DEFAULT_DEG)
 ```
 
-This is the plant model used for all controller design.
-
-### 9.3 PID Controller Structure
-
-Use an ideal PID in the continuous-time Laplace domain:
+with the sign audit constants:
 
 ```text
-C(s) = Kp + Ki / s + Kd s
+DIR_SIGN         = -1
+INNER_STEP_SIGN  = -1
+OUTER_SIGN_DEFAULT = -1
 ```
 
-with error e = x_setpoint − x_cm (centimetres) and output N (microsteps).
+These are kept explicit so the wiring/sign bookkeeping is never hidden inside the gain
+magnitudes.
 
-The open-loop transfer function is L(s) = C(s) G(s). Write C(s) with a common
-denominator:
+### 9.2 Calibration-Backed Sensor and Angle Mapping
+
+The staged controller uses the measured Sharp fit
 
 ```text
-C(s) = (Kd s² + Kp s + Ki) / s
-
-L(s) = [κ (Kd s² + Kp s + Ki)] / [s² (s + β)]
+d_sharp_cm = 12.25 / V_sharp − 0.62
 ```
 
-The closed-loop characteristic polynomial is the denominator of 1 + L(s), i.e. the
-numerator of 1 + L(s) set to zero:
+with the validated usable window
 
 ```text
-s²(s + β) + κ(Kd s² + Kp s + Ki) = 0
-
-s³ + β s² + κ Kd s² + κ Kp s + κ Ki = 0
-
-s³ + (β + κ Kd) s² + (κ Kp) s + (κ Ki) = 0       ... (CHARPOLY)
+D_MIN_CM = 4.40
+D_MAX_CM = 12.66
 ```
 
-### 9.4 Pole-Placement Target
-
-Choose desired closed-loop poles to give a smooth, well-damped response. The target is
-a complex-conjugate pair for the dominant dynamics plus one real pole placed further
-left (faster) so it has minimal effect on the transient.
-
-Design parameters (from `params_measured.yaml`):
+so the centered default setpoint is
 
 ```text
-outer_bw_hz  = 0.12   Hz
-outer_zeta   = 0.85
-extra_pole_factor = 4.0
+D_SETPOINT_MIDPOINT_CM = (4.40 + 12.66) / 2 = 8.53 cm
+D_SETPOINT_DEFAULT_CM  = 8.53 + 0.00 = 8.53 cm
 ```
 
-Natural frequency:
+The AS5600 calibration used by the controller is
 
 ```text
-ωn = 2π × 0.12 = 0.753982  rad/s
+theta_cal_deg = 0.07666806 × theta_as5600_deg − 23.28443907
 ```
 
-Desired dominant pole pair:
+with the safe calibrated-angle clamp inputs
 
 ```text
-s₁,₂ = −ζ ωn ± jωn √(1 − ζ²)
-      = −0.85 × 0.753982 ± j × 0.753982 × √(1 − 0.85²)
-      = −0.640884 ± j × 0.753982 × 0.526783
-      = −0.640884 ± j 0.397114
+THETA_CAL_MIN_DEG         = -0.70
+THETA_CAL_MAX_DEG         =  3.10
+THETA_CAL_MARGIN_DEG      =  0.10
+THETA_CAL_EXTRAPOLATE_DEG =  0.30
 ```
 
-Third (real) pole:
+The soft runtime clamp range implied by these values is
 
 ```text
-p₃ = extra_pole_factor × ωn = 4.0 × 0.753982 = 3.015929  rad/s
+theta_soft_min = -0.70 + 0.10 − 0.30 = -0.90 deg
+theta_soft_max =  3.10 − 0.10 + 0.30 =  3.30 deg
+usable_span    = 3.30 − (-0.90)      =  4.20 deg
 ```
 
-Desired characteristic polynomial:
+The design envelope is the tighter of the AS5600 safe span and the measured-model
+small-angle envelope `theta_cmd_deg = 4.0 deg`, so:
 
 ```text
-(s² + 2ζωn s + ωn²)(s + p₃)
+theta_envelope = min(4.20, 4.00) = 4.00 deg
+THETA_CMD_LIMIT_DEFAULT_DEG = 0.5 × 4.00 = 2.00 deg
 ```
 
-Expand:
+The angle-to-step conversion used by the sketch is
 
 ```text
-s³ + p₃ s²  +  2ζωn s²  +  2ζωn p₃ s  +  ωn² s  +  ωn² p₃
-
-= s³ + (2ζωn + p₃) s² + (ωn² + 2ζωn p₃) s + ωn² p₃
+STEPS_PER_BEAM_DEG
+  = (3200 / 360) / 0.07666806
+  = 115.9399219 steps/deg
 ```
 
-Compute each coefficient:
+### 9.3 M1 Inner Loop: Discrete Beam-Angle Servo
+
+Ignoring deadband and saturation, the inner loop uses the exact sketch structure
 
 ```text
-a₂ = 2ζωn + p₃
-   = 2 × 0.85 × 0.753982 + 3.015929
-   = 1.281768 + 3.015929
-   = 4.297698
+theta[k+1] = theta[k] + delta_steps[k] / STEPS_PER_BEAM_DEG
 
-a₁ = ωn² + 2ζωn p₃
-   = (0.753982)² + 2 × 0.85 × 0.753982 × 3.015929
-   = 0.568490 + 3.865726
-   = 4.434216
-
-a₀ = ωn² × p₃
-   = 0.568490 × 3.015929
-   = 1.714523
+delta_steps[k]
+  = INNER_STEP_SIGN × STEPS_PER_BEAM_DEG
+    × (INNER_KP_THETA e_theta[k] − INNER_KD_THETA theta_dot[k])
 ```
 
-Desired polynomial:
+where `e_theta[k] = theta_cmd[k] − theta[k]`.
+
+For the first pass we deliberately choose
 
 ```text
-s³ + 4.297698 s² + 4.434216 s + 1.714523 = 0
+INNER_KD_THETA = 0
 ```
 
-### 9.5 PID Gain Calculation — Physical (Beam-Angle) Domain
-
-Before converting to firmware units, solve for the PID gains in the physical domain
-where the plant output is x in metres and the actuator input is θ in radians.
-
-The physical plant is:
+and place the nominal inner closed-loop pole at
 
 ```text
-X(s) / Θ(s) = αg / (s(s + β))
+z_i = 0.30
 ```
 
-For this plant, a PID controller with output θ_cmd gives the characteristic polynomial:
+With the discrete-time error dynamics
 
 ```text
-s³ + (β + αg Kd_θ) s² + αg Kp_θ s + αg Ki_θ = 0
+theta[k+1] = (1 − INNER_KP_THETA) theta[k] + INNER_KP_THETA theta_cmd[k]
 ```
 
-Match coefficients with the desired polynomial:
+this gives
 
 ```text
-β + αg Kd_θ = a₂    →   Kd_θ = (a₂ − β) / (αg)
-αg Kp_θ     = a₁    →   Kp_θ = a₁ / (αg)
-αg Ki_θ     = a₀    →   Ki_θ = a₀ / (αg)
+INNER_KP_THETA = 1 − z_i = 0.70
 ```
 
-Substitute numerical values (αg = 5.886000):
+The equivalent continuous bandwidth is
 
 ```text
-Kp_θ = 4.434216 / 5.886000 = 0.753350  rad/m
-Ki_θ = 1.714523 / 5.886000 = 0.291288  rad/(m·s)
-Kd_θ = (4.297698 − 2.678571) / 5.886000
-      = 1.619127 / 5.886000
-      = 0.275081  rad·s/m
+omega_i = −ln(0.30) / 0.04 = 30.0993 rad/s
+f_i     = omega_i / (2π)   = 4.79046 Hz
 ```
 
-### 9.6 Conversion to Firmware Units (steps / cm)
-
-The firmware error is in centimetres and the output is in microsteps, so:
+The deadband is derived from the larger of:
 
 ```text
-Kp = Kp_θ / (100 × k_step_rad)
-Ki = Ki_θ / (100 × k_step_rad)
-Kd = Kd_θ / (100 × k_step_rad)
+beam_deg_per_step      = 1 / 115.9399219 = 0.00862516 deg
+as5600_lsb_beam_deg    = 0.07666806 × (360 / 4096)
+                       = 0.00673840 deg
+dominant_quantization  = 0.00862516 deg
 ```
 
-The factor 100 converts m⁻¹ to cm⁻¹; k_step_rad converts rad to steps.
+Using a `5×` quantization guard:
 
 ```text
-100 × k_step_rad = 100 × 0.000150680 = 0.0150680  cm⁻¹·step⁻¹·rad
-
-Kp = 0.753350 / 0.0150680 = 49.9967  steps/cm
-Ki = 0.291288 / 0.0150680 = 19.3316  steps/(cm·s)
-Kd = 0.275081 / 0.0150680 = 18.2560  step·s/cm
+INNER_THETA_DEADBAND_DEG
+  = 5 × 0.00862516
+  = 0.0431258 deg
 ```
 
-These are the seed gains exported to `model/first_principles/controller_initial_gains.json`
-and `firmware/include/generated/controller_gains.h`.
-
-### 9.7 Output Clamp and Linear-Model Validity
-
-The firmware limits the output to ±400 steps:
+and the corresponding finite-difference rate deadband is
 
 ```text
-θ_max = 400 × k_step_rad = 400 × 0.000150680 = 0.060272 rad = 3.4533°
+INNER_THETA_RATE_DEADBAND_DEG_S
+  = 0.0431258 / (2 × 0.04)
+  = 0.539072 deg/s
 ```
 
-The linearization in §7 is only valid for small θ. The accepted engineering rule of
-thumb is |θ| ≲ 5–10°. The design constraint stored in `params_measured.yaml` is
-`theta_cmd_deg: 4.0`, meaning the linear model is considered valid up to ±4°.
+The per-sample step limit is the smaller of the 40 ms step-rate budget and the command
+envelope, with an added `0.5×` guard:
 
-The calibrated ±400-step software clamp is now about ±3.45° of physical beam angle,
-which is within the ±4° measured-model design envelope.
+```text
+step_budget_per_sample = 2000 × 0.04 = 80 steps
+theta_limit_steps      = 2.00 × 115.9399219 = 231.88 steps
 
-### 9.8 Current Runtime Gains (Empirically Tuned)
+INNER_MAX_STEP_DELTA
+  = floor(0.5 × min(80, 231.88))
+  = 40 steps
+```
 
-The first-principles gains above are seed values. After empirical tuning on the
-physical hardware the active runtime gains in `firmware/include/config.h` are:
+### 9.4 M2 Outer Loop: Discrete LQI Design
 
-| Gain | Seed (1st principles) | Runtime (tuned) | Unit |
-| ------ | ---------------------- | ----------------- | ------ |
-| Kp | 49.9967 | 25.0 | steps/cm |
-| Ki | 19.3316 | 0.8 | steps/(cm·s) |
-| Kd | 18.2560 | 10.0 | step·s/cm |
+Unlike the archived single-loop PID, the active staged controller keeps the inner beam
+dynamics in the plant seen by the outer loop. In controller units (`cm`, `deg`, `s`),
+the small-angle continuous-time model is
 
-The runtime gains are deliberately below the regenerated seed values for the first
-calibrated-beam-angle hardware pass. Ki stays much lower to avoid endpoint windup,
-while Kd remains large enough to damp HC-SR04 quantization and rolling friction.
+```text
+x_dot     = v
+v_dot     = -beta v - k_theta theta
+theta_dot = omega
+omega_dot = -omega_i^2 theta - 2 zeta_i omega_i omega + omega_i^2 theta_cmd
+```
+
+where
+
+```text
+beta    = 2.678571 s^-1
+k_theta = alpha g (pi/180) 100
+        = 0.6 × 9.81 × (pi/180) × 100
+        = 10.273008 cm/s^2/deg
+omega_i = 30.0993 rad/s
+zeta_i  = 1.0
+```
+
+so
+
+```text
+A_c = [ 0      1        0         0 ]
+      [ 0   -2.6786  -10.2730     0 ]
+      [ 0      0        0         1 ]
+      [ 0      0     -905.9691  -60.1986 ]
+
+B_c = [ 0 ]
+      [ 0 ]
+      [ 0 ]
+      [ 905.9691 ]
+```
+
+The generator discretizes this model at `DT = 0.04 s` with
+`scipy.signal.cont2discrete`, then augments the integral state
+
+```text
+xi[k+1] = xi[k] + DT x[k]
+```
+
+so the LQI state is
+
+```text
+z[k] = [x_cm, x_dot_cm_s, theta_rel_deg, theta_dot_deg_s, xi_cm_s]^T
+```
+
+### 9.5 Normalized LQI Weights and Solved Gains
+
+The controller uses the following normalization scales:
+
+```text
+x_scale        = 0.5 × (12.66 − 4.40) = 4.13 cm
+theta_scale    = THETA_CMD_LIMIT_DEFAULT_DEG = 2.00 deg
+x_dot_scale    = outer_bw × x_scale = 1.099557 × 4.13 = 4.54117 cm/s
+theta_dot_scale= omega_i × theta_scale = 30.0993 × 2.00 = 60.1986 deg/s
+xi_scale       = x_scale / outer_bw = 4.13 / 1.099557 = 3.75606 cm·s
+```
+
+with
+
+```text
+outer_bw = 2π × 0.175 = 1.099557 rad/s
+```
+
+The LQI weight matrices are
+
+```text
+Q = diag( 6/x_scale^2,
+         12/x_dot_scale^2,
+       0.03/theta_scale^2,
+       0.03/theta_dot_scale^2,
+       0.04/xi_scale^2 )
+
+R = 24/theta_scale^2 = 6.0
+```
+
+The generator solves the discrete algebraic Riccati equation with
+`scipy.linalg.solve_discrete_are` and produces
+
+```text
+K = [OUTER_KX_DEFAULT,
+     OUTER_KV_DEFAULT,
+     OUTER_KT_DEFAULT,
+     OUTER_KW_DEFAULT,
+     OUTER_KI_DEFAULT]
+
+  = [-0.272649312,
+     -0.180551998,
+      0.125117750,
+      0.002069559,
+     -0.020917328]
+```
+
+Because the controller states stay in the physical sign basis (`theta_rel_deg > 0`
+means motor side up), the solved LQI gains are negative on `x`, `x_dot`, and `xi`,
+positive on `theta` and `theta_dot`, and are then multiplied by
+`OUTER_SIGN_DEFAULT = -1` in the runtime command law. This is expected and preserves
+the explicit sign audit instead of hiding it in ad-hoc coordinate flips.
+
+The resulting augmented closed-loop discrete poles are
+
+```text
+z_cl = {0.28178, 0.32276, 0.84608, 0.97647, 0.99637}
+```
+
+so the nominal linearized staged controller is stable.
+
+### 9.6 Model-Derived Guard, Capture, Recovery, and Trim Constants
+
+The remaining sketch constants are derived from the same scales rather than being left
+as unexplained literals.
+
+The command and integral guards are
+
+```text
+OUTER_INTEGRAL_CLAMP_DEG = 0.09 × 2.00 = 0.18 deg
+OUTER_X_DOT_LIMIT_CM_S   = 1.0 × x_dot_scale = 4.54117 cm/s
+OUTER_THETA_DOT_LIMIT_DEG_S
+  = 2 × outer_bw × theta_scale
+  = 2 × 1.099557 × 2.00
+  = 4.39823 deg/s
+```
+
+The center and capture bands use fixed fractions of the half-window and velocity scale:
+
+```text
+OUTER_CENTER_BAND_CM                  = 0.045 × 4.13 = 0.18585 cm
+OUTER_CENTER_BAND_X_DOT_CM_S          = 0.08  × 4.54117 = 0.36329 cm/s
+OUTER_INTEGRAL_CAPTURE_CM             = 0.11  × 4.13 = 0.45430 cm
+OUTER_INTEGRAL_CAPTURE_X_DOT_CM_S     = 0.067 × 4.54117 = 0.30426 cm/s
+```
+
+The recovery thresholds are
+
+```text
+RECOVERY_ENTER_X_CM                   = 0.29 × 4.13 = 1.19770 cm
+RECOVERY_ENTER_X_DOT_CM_S             = 0.08 × 4.54117 = 0.36329 cm/s
+RECOVERY_ENTER_COUNT                  = ceil(0.16 / 0.04) = 4
+RECOVERY_EXIT_X_CM                    = 0.06 × 4.13 = 0.24780 cm
+RECOVERY_EXIT_HANDOFF_X_CM            = 0.36 × 4.13 = 1.48680 cm
+RECOVERY_EXIT_INWARD_X_DOT_CM_S       = 0.10 × 4.54117 = 0.45412 cm/s
+RECOVERY_FLOOR_DEFAULT_DEG            = 0.35 × 2.00 = 0.70 deg
+RECOVERY_FLOOR_MAX_DEG                = 0.55 × 2.00 = 1.10 deg
+RECOVERY_FLOOR_GAIN_DEG_PER_CM        = 0.375 × 2.00 / 4.13 = 0.181598 deg/cm
+```
+
+The zero-trim estimator thresholds are
+
+```text
+ZERO_TRIM_EST_X_CM                    = 0.06 × 4.13 = 0.24780 cm
+ZERO_TRIM_EST_X_DOT_CM_S              = 0.055 × 4.54117 = 0.24976 cm/s
+ZERO_TRIM_EST_THETA_TRACK_ERR_DEG     = 0.05 × 2.00 = 0.10 deg
+ZERO_TRIM_EST_THETA_DOT_DEG_S         = 0.10 × 4.39823 = 0.439823 deg/s
+ZERO_TRIM_EST_ALPHA                   = 1 − exp(-0.04 / 0.8)
+                                      = 0.0487706
+```
+
+The three integral bleed factors remain
+
+```text
+OUTER_INTEGRAL_BLEED_OUTSIDE  = 1.0
+OUTER_INTEGRAL_BLEED_RECOVERY = 1.0
+OUTER_INTEGRAL_BLEED_CENTER   = 1.0
+```
+
+by design: the staged controller uses gating and clamping, not active bleed-down.
+
+### 9.7 Exported Sketch Constants
+
+The staged-controller generator exports the exact sketch-facing constants listed below.
+`OUTER_SIGN_DEFAULT` is the modeled initial value for the sketch variable
+`g_outer_sign`.
+
+**Timing, calibration, and sign constants**
+
+| Constant | Formula / source | Value | Unit |
+| -------- | ---------------- | ----- | ---- |
+| `LOOP_MS` | `1000 × DT` | `40` | ms |
+| `DT` | staged inner-loop design input | `0.040000000` | s |
+| `SHARP_FIT_K_V_CM` | measured Sharp fit | `12.250000000` | cm·V |
+| `SHARP_FIT_OFFSET_CM` | measured Sharp fit | `-0.620000000` | cm |
+| `SHARP_MIN_VALID_V` | measured Sharp validity floor | `0.080000000` | V |
+| `D_MIN_CM` | measured near-stop reading | `4.400000000` | cm |
+| `D_MAX_CM` | measured far-stop reading | `12.660000000` | cm |
+| `D_SETPOINT_MIDPOINT_CM` | `(D_MIN_CM + D_MAX_CM)/2` | `8.530000000` | cm |
+| `D_SETPOINT_TRIM_DEFAULT_CM` | design trim input | `0.000000000` | cm |
+| `D_SETPOINT_DEFAULT_CM` | midpoint + trim | `8.530000000` | cm |
+| `AS5600_RAW_TO_DEG` | `360 / 4096` | `0.087890625` | AS-deg/count |
+| `THETA_SLOPE_DEG_PER_AS_DEG` | measured AS5600 beam-angle fit | `0.076668060` | beam-deg/AS-deg |
+| `THETA_OFFSET_DEG` | measured AS5600 beam-angle fit | `-23.284439070` | deg |
+| `THETA_CAL_MIN_DEG` | measured safe-range input | `-0.700000000` | deg |
+| `THETA_CAL_MAX_DEG` | measured safe-range input | `3.100000000` | deg |
+| `THETA_CAL_MARGIN_DEG` | measured safe-range input | `0.100000000` | deg |
+| `THETA_CAL_EXTRAPOLATE_DEG` | measured safe-range input | `0.300000000` | deg |
+| `STEPS_PER_BEAM_DEG` | `(3200/360) / THETA_SLOPE_DEG_PER_AS_DEG` | `115.939921903` | steps/deg |
+| `DIR_SIGN` | wiring sign audit | `-1` | sign |
+| `INNER_STEP_SIGN` | inner-loop sign audit | `-1` | sign |
+| `OUTER_SIGN_DEFAULT` | outer-loop sign audit | `-1` | sign |
+
+**Inner-loop and outer-state-feedback constants**
+
+| Constant | Formula / source | Value | Unit |
+| -------- | ---------------- | ----- | ---- |
+| `INNER_KP_THETA` | `1 − z_i`, `z_i = 0.30` | `0.700000000` | — |
+| `INNER_KD_THETA` | first-pass design choice | `0.000000000` | s |
+| `INNER_THETA_DEADBAND_DEG` | `5 × max(beam_deg_per_step, as5600_lsb_beam_deg)` | `0.043125784` | deg |
+| `INNER_THETA_RATE_DEADBAND_DEG_S` | `INNER_THETA_DEADBAND_DEG / (2 DT)` | `0.539072297` | deg/s |
+| `INNER_MAX_STEP_DELTA` | `floor(0.5 × min(step_budget, theta_limit_steps))` | `40` | steps/sample |
+| `THETA_CMD_LIMIT_DEFAULT_DEG` | `0.5 × min(theta_safe_span, theta_model_envelope)` | `2.000000000` | deg |
+| `OUTER_KX_DEFAULT` | discrete LQI gain on `x_cm` | `-0.272649312` | deg/cm |
+| `OUTER_KV_DEFAULT` | discrete LQI gain on `x_dot_cm_s` | `-0.180551998` | deg·s/cm |
+| `OUTER_KT_DEFAULT` | discrete LQI gain on `theta_rel_deg` | `0.125117750` | — |
+| `OUTER_KW_DEFAULT` | discrete LQI gain on `theta_dot_deg_s` | `0.002069559` | s |
+| `OUTER_KI_DEFAULT` | discrete LQI gain on `xi_cm_s` | `-0.020917328` | deg/(cm·s) |
+| `OUTER_INTEGRAL_CLAMP_DEG` | `0.09 × THETA_CMD_LIMIT_DEFAULT_DEG` | `0.180000000` | deg |
+| `OUTER_X_DOT_LIMIT_CM_S` | `x_dot_scale` | `4.541172181` | cm/s |
+| `OUTER_THETA_DOT_LIMIT_DEG_S` | `2 × outer_bw × theta_scale` | `4.398229715` | deg/s |
+| `OUTER_GAIN_SCALE_MIN` | staged design input | `0.500000000` | — |
+| `OUTER_GAIN_SCALE_MAX` | staged design input | `1.500000000` | — |
+
+**Capture, recovery, and trim constants**
+
+| Constant | Formula / source | Value | Unit |
+| -------- | ---------------- | ----- | ---- |
+| `OUTER_INTEGRAL_CAPTURE_CM` | `0.11 × x_scale` | `0.454300000` | cm |
+| `OUTER_INTEGRAL_CAPTURE_X_DOT_CM_S` | `0.067 × x_dot_scale` | `0.304258536` | cm/s |
+| `OUTER_INTEGRAL_BLEED_OUTSIDE` | gating-only design choice | `1.000000000` | ratio/sample |
+| `OUTER_INTEGRAL_BLEED_RECOVERY` | gating-only design choice | `1.000000000` | ratio/sample |
+| `OUTER_INTEGRAL_BLEED_CENTER` | gating-only design choice | `1.000000000` | ratio/sample |
+| `OUTER_CENTER_BAND_CM` | `0.045 × x_scale` | `0.185850000` | cm |
+| `OUTER_CENTER_BAND_X_DOT_CM_S` | `0.08 × x_dot_scale` | `0.363293774` | cm/s |
+| `RECOVERY_ENTER_X_CM` | `0.29 × x_scale` | `1.197700000` | cm |
+| `RECOVERY_ENTER_X_DOT_CM_S` | `0.08 × x_dot_scale` | `0.363293774` | cm/s |
+| `RECOVERY_ENTER_COUNT` | `ceil(0.16 / DT)` | `4` | samples |
+| `RECOVERY_EXIT_X_CM` | `0.06 × x_scale` | `0.247800000` | cm |
+| `RECOVERY_EXIT_HANDOFF_X_CM` | `0.36 × x_scale` | `1.486800000` | cm |
+| `RECOVERY_EXIT_INWARD_X_DOT_CM_S` | `0.10 × x_dot_scale` | `0.454117218` | cm/s |
+| `RECOVERY_FLOOR_DEFAULT_DEG` | `0.35 × THETA_CMD_LIMIT_DEFAULT_DEG` | `0.700000000` | deg |
+| `RECOVERY_FLOOR_MIN_DEG` | lower floor bound | `0.000000000` | deg |
+| `RECOVERY_FLOOR_MAX_DEG` | `0.55 × THETA_CMD_LIMIT_DEFAULT_DEG` | `1.100000000` | deg |
+| `RECOVERY_FLOOR_GAIN_DEG_PER_CM` | `0.375 × theta_scale / x_scale` | `0.181598063` | deg/cm |
+| `ZERO_TRIM_EST_X_CM` | `0.06 × x_scale` | `0.247800000` | cm |
+| `ZERO_TRIM_EST_X_DOT_CM_S` | `0.055 × x_dot_scale` | `0.249764470` | cm/s |
+| `ZERO_TRIM_EST_THETA_TRACK_ERR_DEG` | `0.05 × theta_scale` | `0.100000000` | deg |
+| `ZERO_TRIM_EST_THETA_DOT_DEG_S` | `0.10 × OUTER_THETA_DOT_LIMIT_DEG_S` | `0.439822972` | deg/s |
+| `ZERO_TRIM_EST_ALPHA` | `1 − exp(-DT / 0.8)` | `0.048770575` | ratio/sample |
 
 ---
 
-## 10. State-Space Representation and LQR Design
+## 10. Archived Reference-Controller Notes
 
-### 10.1 State-Space Model
+The older single-loop reference PID derivation and the exploratory LQR discussion are
+retained only as historical artifacts of the previous controller architecture.
 
-For a full-state controller, augment the ball state with the beam state. With the ideal
-actuator approximation (θ commanded directly), the linearized system has four states:
+- `model/first_principles/design_cascade_pid.py`
+- `model/first_principles/controller_initial_gains.json`
+- `firmware/include/generated/controller_gains.h`
 
-```text
-z = [x, ẋ, δ, δ̇]ᵀ
-```
-
-where x is ball displacement from setpoint (m), δ is beam angle (rad), and the input
-is the microstep command N (steps). The state equations are:
-
-Ball subsystem (from §7.2):
-
-```text
-ẋ = ẋ
-ẍ = −β ẋ + αg δ
-```
-
-Beam as a first-order actuator (with bandwidth τ_φ = 0.08 s):
-
-```text
-δ̇ = δ̇
-δ̈ = −(1/τ_φ) δ̇ + (k_step_rad / τ_φ) N
-```
-
-Written in matrix form:
-
-```text
-ż = A z + B N
-
-A = [ 0    1     0       0     ]
-    [ 0   -β    αg       0     ]
-    [ 0    0     0       1     ]
-    [ 0    0     0   -1/τ_φ   ]
-
-B = [       0         ]
-    [       0         ]
-    [       0         ]
-    [ k_step_rad/τ_φ  ]
-
-C = [1  0  0  0]    (measure ball position only)
-D = 0
-```
-
-Substituting numerical values:
-
-```text
-β       = 2.678571
-αg      = 5.886000  (m/s²)/rad
-τ_φ     = 0.08  s
-k_step_rad = 0.000150680  rad/step
-1/τ_φ   = 12.5  s⁻¹
-k_step_rad/τ_φ = 0.000150680 / 0.08 = 0.00188350  rad/s/step
-
-A = [  0        1       0       0    ]
-    [  0   -2.6786   5.886      0    ]
-    [  0        0       0       1    ]
-    [  0        0       0    -12.5   ]
-
-B = [  0      ]
-    [  0      ]
-    [  0      ]
-    [ 0.00188350]
-```
-
-### 10.2 Controllability Check
-
-A system is controllable if the controllability matrix:
-
-```text
-𝒞 = [B  AB  A²B  A³B]
-```
-
-has full rank (rank 4 for this system). For the given A and B, all four states can be
-reached from the input N, so the system is controllable. (Verification is best done
-numerically.)
-
-### 10.3 Observability Check
-
-Only ball position x (first state) is measured. The observability matrix is:
-
-```text
-𝒪 = [C; CA; CA²; CA³]
-```
-
-With only ball position measured (C = [1,0,0,0]), the system is observable if all
-states are distinguishable from the position output. For this system the ball velocity
-state and beam states can be reconstructed from position measurements in principle,
-but in practice the beam state is better obtained from the AS5600 encoder.
-
-### 10.4 LQR Design
-
-Linear Quadratic Regulator (LQR) finds the optimal full-state feedback gain vector
-K* that minimises the cost functional:
-
-```text
-J_LQR = ∫₀^∞ (zᵀ Q z + N² R) dt
-```
-
-where Q penalises state deviations and R penalises control effort.
-
-**Algebraic Riccati Equation (ARE):**
-
-```text
-Aᵀ P + P A − P B R⁻¹ Bᵀ P + Q = 0
-```
-
-Solve for the positive-definite matrix P, then compute the optimal gain:
-
-```text
-K* = R⁻¹ Bᵀ P
-```
-
-Control law:
-
-```text
-N = −K* z = −[K_x  K_xdot  K_δ  K_δdot] [x, ẋ, δ, δ̇]ᵀ
-```
-
-**Tuning guidelines:**
-
-Q and R are design knobs. A reasonable starting point:
-
-```text
-Q = diag(q_x, q_xdot, q_δ, q_δdot)
-  = diag(1.0,  0.1,   10.0, 1.0)    (position errors penalised most)
-
-R = 0.001                             (allow generous control effort)
-```
-
-Increasing q_x relative to R speeds up position regulation (at the cost of larger
-step commands). Increasing q_δ penalises beam excursions.
-
-**Practical note — state observer required:**
-
-LQR requires the full state z = [x, ẋ, δ, δ̇]ᵀ. The hardware provides:
-
-- x: directly from HC-SR04 (noisy, 25 Hz)
-- ẋ: must be estimated (finite difference or Kalman filter)
-- δ: available from AS5600 encoder (not currently used in active firmware)
-- δ̇: must be estimated from AS5600 readings
-
-A Luenberger observer or Kalman filter using both HC-SR04 and AS5600 readings would
-provide the full state for LQR implementation. This represents the natural next step
-beyond the current single-loop PID architecture.
+They are no longer authoritative for the staged Sharp/AS5600 controller and should not
+be used as the source for the constants in the new sketch.
 
 ---
 
@@ -1015,33 +1130,40 @@ beyond the current single-loop PID architecture.
 
 | Quantity | Symbol | Value | Unit |
 | ---------- | -------- | ------- | ------ |
-| Effective rolling mass | m_e | 0.004667 | kg |
-| Ball inertia ratio | α | 0.600000 | — |
+| Beam assembly mass | M_b | 0.038500 | kg |
+| Beam COM from pivot | L_com | 0.118050 | m |
+| Beam inertia about pivot | J | 7.715 × 10⁻⁴ | kg·m² |
+| Center Sharp reading | center_d | 0.085300 | m |
+| Nominal ball position | r₀ | 0.125600 | m |
+| Effective rolling-mass ratio | α | 0.600000 | — |
 | Rolling damping coefficient | β | 2.678571 | s⁻¹ |
-| Rad per microstep | k_step_rad | 0.000150680 | rad/step |
-| Plant gain | κ | 0.088690 | cm/s²/step |
-| Plant pole | −β | −2.678571 | s⁻¹ |
-| Design bandwidth | ωn | 0.753982 | rad/s |
-| Design damping ratio | ζ | 0.850 | — |
-| Third pole | p₃ | 3.015929 | rad/s |
-| Kp (seed) | Kp | 49.9967 | steps/cm |
-| Ki (seed) | Ki | 19.3316 | steps/(cm·s) |
-| Kd (seed) | Kd | 18.2560 | step·s/cm |
+| Ball acceleration gain | k_theta | 10.273008 | cm/s²/deg |
+| Inner closed-loop bandwidth | f_i | 4.790456 | Hz |
+| Outer design bandwidth | f_o | 0.175000 | Hz |
+| Beam angle per degree command | STEPS_PER_BEAM_DEG | 115.939922 | steps/deg |
+| Default beam-angle limit | THETA_CMD_LIMIT_DEFAULT_DEG | 2.000000 | deg |
+| LQI gain on `x_cm` | OUTER_KX_DEFAULT | -0.272649 | deg/cm |
+| LQI gain on `x_dot_cm_s` | OUTER_KV_DEFAULT | -0.180552 | deg·s/cm |
+| LQI gain on `theta_rel_deg` | OUTER_KT_DEFAULT | 0.125118 | — |
+| LQI gain on `theta_dot_deg_s` | OUTER_KW_DEFAULT | 0.002070 | s |
+| LQI gain on `xi_cm_s` | OUTER_KI_DEFAULT | -0.020917 | deg/(cm·s) |
 
 ---
 
 ## 12. Files in Sync with This Document
 
-When the controller architecture or hardware parameters change, update these together:
+When the staged controller architecture or Sharp hardware parameters change, update
+these together:
 
 | File | Role |
 | ------ | ------ |
-| `docs/modeling.md` | This document — canonical model and control derivation |
-| `model/first_principles/params_measured.yaml` | Hardware parameter values |
-| `model/first_principles/linearized_model.json` | Generated linear state-space matrices |
-| `model/first_principles/controller_initial_gains.json` | Generated seed gains |
-| `firmware/include/generated/controller_gains.h` | Generated gains header |
-| `firmware/src/main.cpp` | Active controller implementation |
-| `firmware/include/config.h` | Runtime-tuned gains and configuration |
-| `model/first_principles/linearize.py` | Generates linearized_model.json |
-| `model/first_principles/design_cascade_pid.py` | Generates controller gains |
+| `docs/modeling.md` | Canonical plant and staged-controller derivation |
+| `docs/modeling_source_of_truth.md` | Canonical sync contract for the modeling artifacts |
+| `model/first_principles/params_measured.yaml` | Measured Sharp hardware and staged-design inputs |
+| `model/first_principles/linearize.py` | Generates the linearized plant artifact |
+| `model/first_principles/design_staged_controller.py` | Generates staged-controller constants |
+| `model/first_principles/staged_controller_constants.json` | Generated staged-controller constants and verification data |
+| `firmware/include/generated/staged_controller_constants.h` | Generated copy-into-sketch constants header |
+
+Historical reference-PID artifacts remain in the repo for comparison, but they are not
+part of the active staged-controller source-of-truth set.

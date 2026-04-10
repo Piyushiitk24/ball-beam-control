@@ -18,4 +18,5 @@ __pycache__/
 /firmware/src/main.cpp.as5600_*.bak
 /firmware/src/main.cpp.tfmini_*.bak
 /model/first_principles/*.json
+!/model/first_principles/staged_controller_constants.json
 /model/first_principles/*.png

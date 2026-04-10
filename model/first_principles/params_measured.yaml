@@ -7,15 +7,15 @@ plant:
   ball_inertia_ratio: 0.6666666666666666  # thin-shell hollow sphere
 
   # Beam + attachments excluding ball.
-  # Final hardware: uniform 263 mm beam plus mounted HC-SR04 and wires.
+  # Current hardware: uniform 263 mm beam plus pivot-mounted Sharp IR and wires.
   beam_length_m: 0.263
-  beam_mass_kg: 0.0421
-  beam_com_l_m: 0.1075059382422803  # from pivot-side clevis hole, + toward motor side
+  beam_mass_kg: 0.0385
+  beam_com_l_m: 0.11805038961038961  # from pivot-side clevis hole, + toward motor side
   beam_com_h_m: 0.0  # TODO: measure vertical COM offset from pivot axis
 
-  # Provisional J about the pivot-side clevis hole:
-  #   uniform beam rod about one end + sensor/wires lumped as a point mass.
-  beam_inertia_kgm2: 0.0007683538666666666
+  # Pivot inertia about the pivot-side clevis hole:
+  #   uniform beam rod about one end + Sharp/wires lumped at the sensor-body midpoint.
+  beam_inertia_kgm2: 0.0007715251986666667
 
   # Pre-identification placeholders; re-identify after assembly.
   rolling_damping_ns_per_m: 0.0125
@@ -34,6 +34,17 @@ actuator:
   linkage_ratio: 0.0767406     # iPhone inclinometer fit: physical beam deg / AS5600 actuator deg
 
 calibration:
+  d_from_voltage:
+    sensor_model: GP2Y0A41SK0F
+    mode: reciprocal_affine
+    reciprocal_affine:
+      k_v_cm: 12.25
+      offset_cm: -0.62
+    min_valid_v: 0.08
+    d_min_cm: 4.40
+    d_max_cm: 12.66
+    setpoint_trim_default_cm: 0.0
+
   theta_from_phi:
     mode: linear
     linear:
@@ -49,12 +60,31 @@ calibration:
         phi_rad: [-0.35, 0.0, 0.35]
         theta_rad: [-0.35, 0.0, 0.35]
 
+  theta_from_as5600_deg:
+    sensor_model: AS5600
+    mode: linear
+    linear:
+      slope_deg_per_as_deg: 0.07666806
+      offset_deg: -23.28443907
+    safe_range:
+      theta_cal_min_deg: -0.70
+      theta_cal_max_deg: 3.10
+      theta_cal_margin_deg: 0.10
+      theta_cal_extrapolate_deg: 0.30
+
   x_from_d_theta:
     mode: linear
     linear:
-      center_m: 0.1295
+      center_m: 0.0853
       sign: 1.0
       gain_x_per_d: 1.0
+
+sign_audit:
+  x_positive_toward_motor: true
+  theta_positive_motor_side_up: true
+  dir_sign: -1
+  inner_step_sign: -1
+  outer_sign: -1
 
 design:
   # Archived cascade-only fields retained for history; the active reference PID
@@ -65,23 +95,81 @@ design:
   outer_zeta: 0.85
   extra_pole_factor: 4.0
 
+  # Active staged Sharp + AS5600 controller design inputs.
+  staged_inner:
+    dt_s: 0.04
+    inner_discrete_pole: 0.30
+    inner_kd_theta: 0.0
+    deadband_quantization_multiple: 5.0
+    rate_deadband_sample_factor: 2.0
+    max_step_delta_budget_fraction: 0.5
+
+  staged_outer_lqi:
+    outer_bw_hz: 0.175
+    actuator_model_inner_damping_ratio: 1.0
+    theta_limit_fraction_of_envelope: 0.5
+    q_weights:
+      wx: 6.0
+      wv: 12.0
+      wt: 0.03
+      ww: 0.03
+      wi: 0.04
+    r_weights:
+      wu: 24.0
+    integral_clamp_fraction_of_theta_limit: 0.09
+    xdot_limit_scale_fraction: 1.0
+    theta_dot_limit_outer_bw_multiple: 2.0
+    center_band_x_fraction_of_half_window: 0.045
+    center_band_xdot_fraction_of_xdot_limit: 0.08
+    integral_capture_x_fraction_of_half_window: 0.11
+    integral_capture_xdot_fraction_of_xdot_limit: 0.067
+    gain_scale_min: 0.5
+    gain_scale_max: 1.5
+    integral_bleed_outside: 1.0
+    integral_bleed_recovery: 1.0
+    integral_bleed_center: 1.0
+    recovery_enter_x_fraction_of_half_window: 0.29
+    recovery_enter_xdot_fraction_of_xdot_limit: 0.08
+    recovery_enter_time_s: 0.16
+    recovery_exit_x_fraction_of_half_window: 0.06
+    recovery_exit_handoff_x_fraction_of_half_window: 0.36
+    recovery_exit_inward_xdot_fraction_of_xdot_limit: 0.10
+    recovery_floor_fraction_of_theta_limit: 0.35
+    recovery_floor_max_fraction_of_theta_limit: 0.55
+    recovery_floor_gain_fraction_of_theta_limit_per_half_window: 0.375
+    zero_trim_x_fraction_of_half_window: 0.06
+    zero_trim_xdot_fraction_of_xdot_limit: 0.055
+    zero_trim_theta_track_fraction_of_theta_limit: 0.05
+    zero_trim_theta_dot_fraction_of_theta_dot_limit: 0.10
+    zero_trim_estimator_tau_s: 0.8
+
 geometry:
   measured:
     pivot_side_to_motor_side_clevis_c2c_m: 0.263
-    runner_start_from_pivot_side_clevis_m: 0.048
-    runner_end_clearance_to_motor_side_clevis_m: 0.0125
-    runner_length_nominal_m: 0.199
-    runner_length_min_m: 0.198
-    runner_length_max_m: 0.200
-    sensor_face_from_pivot_side_clevis_m: 0.018
-    nearest_ball_clearance_from_sensor_face_m: 0.030
+    runner_start_from_pivot_side_clevis_m: 0.0843
+    runner_end_clearance_to_motor_side_clevis_m: 0.0961
+    runner_length_nominal_m: 0.0826
+    runner_length_min_m: 0.0826
+    runner_length_max_m: 0.0826
+    sensor_body_start_from_pivot_side_clevis_m: 0.0273
+    sensor_body_end_from_pivot_side_clevis_m: 0.0403
+    sensor_face_from_pivot_side_clevis_m: 0.0403
+    sensor_mass_lump_from_pivot_side_clevis_m: 0.0338
+    nearest_ball_clearance_from_sensor_face_m: 0.044
+    farthest_ball_clearance_from_sensor_face_m: 0.1266
     runner_inner_width_m: 0.0265
     runner_depth_m: 0.015
     runner_flat_bottom_width_m: 0.005
     runner_wall_slant_length_m: 0.015
     neutral_pose_motor_side_to_fulcrum_side_pivot_spacing_m: 0.270
+  derived:
+    usable_window_m: 0.0826
+    nominal_center_from_sensor_face_m: 0.0853
+    nominal_center_from_pivot_side_clevis_m: 0.1256
+    farthest_valid_ball_from_pivot_side_clevis_m: 0.1669
   notes:
-    - "This file replaces the old-beam measured model and is now the active final-hardware parameter set."
-    - "Sensor face reference is approximated from 48 mm runner start and 30 mm nearest-ball clearance."
-    - "Runner span uses 199 mm nominal with the user-stated 198-200 mm range recorded above."
+    - "This is the active measured-model parameter set for the pivot-mounted Sharp IR hardware."
+    - "Sensor face and sensor mass lump are stored separately so sensing geometry and beam-mass modeling stay distinct."
+    - "Runner geometry fields describe the tape-limited usable ball window defined by the measured Sharp endpoints."
+    - "The `calibration.x_from_d_theta.linear.center_m` field stores the center distance reading from the Sharp face."
     - "The 270 mm neutral-pose assembly spacing is a documentation cross-check only, not an active modeled beam-arm length."
