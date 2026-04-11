@@ -52,8 +52,6 @@ In the canonical control convention used by this project:
   the motor side. The controller coordinate is therefore
   `x_ctrl = d_sharp − center_d`, where `center_d = 0.0853 m` is the center reading.
   Therefore `x_ctrl > 0` means the ball is toward the motor side.
-- In `model/first_principles/params_measured.yaml`, this center-distance value is
-  stored in the legacy-named calibration field `center_m`.
 
 ---
 
@@ -569,9 +567,8 @@ Substitute into EOM-θ with cosδ ≈ 1 and ṙ δ̇ ≈ 0:
 (J + m r₀²) δ̈ + b_θ δ̇ + (m r₀ + M_b L_com) g δ = τ − τ₀
 ```
 
-The archived ideal-angle PID design omitted this beam equation. The active staged
-controller reintroduces the beam dynamics through the second-order inner-loop actuator
-model used in §9.4.
+This beam equation supplies the rotational mode retained in the controller design
+through the second-order inner-loop actuator model used in §9.4.
 
 ---
 
@@ -650,26 +647,22 @@ beam as an ideal angle actuator for ball position control.
 
 ## 9. Active Controller Design: Staged Sharp + AS5600 Cascade
 
-The active controller architecture is the staged design implemented by the Sharp +
-AS5600 sketch:
+The active controller architecture uses three staged operating modes:
 
 - `M0`: telemetry/state readout only
 - `M1`: inner beam-angle hold using AS5600 only
 - `M2`: outer ball-position cascade using `x`, `ẋ`, `θ`, `θ̇`, and an integral state
 
-The first-principles source for the controller constants is
-`model/first_principles/design_staged_controller.py`, which reads
-`model/first_principles/params_measured.yaml` and generates:
-
-- `model/first_principles/staged_controller_constants.json`
-- `firmware/include/generated/staged_controller_constants.h`
+This section derives the runtime calibration, inner-loop gains, outer-loop LQI gains,
+and all guard, capture, recovery, and trim constants directly from the measured
+hardware model and the selected design rules.
 
 ADC averaging counts, EMA smoothing factors, telemetry cadence, and step pulse timing
 remain implementation settings rather than first-principles control outputs.
 
 ### 9.1 Runtime States, Units, and Sign Convention
 
-The staged controller uses the exact runtime state definitions from the sketch:
+The staged controller uses the following runtime state definitions:
 
 ```text
 x_cm            = d_sharp_cm − D_SETPOINT_DEFAULT_CM
@@ -768,7 +761,7 @@ theta_envelope = min(4.20, 4.00) = 4.00 deg
 THETA_CMD_LIMIT_DEFAULT_DEG = 0.5 × 4.00 = 2.00 deg
 ```
 
-The angle-to-step conversion used by the sketch is
+The angle-to-step conversion used by the controller is
 
 ```text
 STEPS_PER_BEAM_DEG
@@ -778,7 +771,7 @@ STEPS_PER_BEAM_DEG
 
 ### 9.3 M1 Inner Loop: Discrete Beam-Angle Servo
 
-Ignoring deadband and saturation, the inner loop uses the exact sketch structure
+Ignoring deadband and saturation, the inner loop uses the following discrete structure
 
 ```text
 theta[k+1] = theta[k] + delta_steps[k] / STEPS_PER_BEAM_DEG
@@ -860,9 +853,8 @@ INNER_MAX_STEP_DELTA
 
 ### 9.4 M2 Outer Loop: Discrete LQI Design
 
-Unlike the archived single-loop PID, the active staged controller keeps the inner beam
-dynamics in the plant seen by the outer loop. In controller units (`cm`, `deg`, `s`),
-the small-angle continuous-time model is
+The outer loop keeps the inner beam dynamics in the plant seen by the controller. In
+controller units (`cm`, `deg`, `s`), the small-angle continuous-time model is
 
 ```text
 x_dot     = v
@@ -896,8 +888,8 @@ B_c = [ 0 ]
       [ 905.9691 ]
 ```
 
-The generator discretizes this model at `DT = 0.04 s` with
-`scipy.signal.cont2discrete`, then augments the integral state
+Applying zero-order-hold discretization at `DT = 0.04 s`, then augmenting the integral
+state,
 
 ```text
 xi[k+1] = xi[k] + DT x[k]
@@ -939,8 +931,7 @@ Q = diag( 6/x_scale^2,
 R = 24/theta_scale^2 = 6.0
 ```
 
-The generator solves the discrete algebraic Riccati equation with
-`scipy.linalg.solve_discrete_are` and produces
+Solving the discrete algebraic Riccati equation for the augmented plant produces
 
 ```text
 K = [OUTER_KX_DEFAULT,
@@ -972,7 +963,7 @@ so the nominal linearized staged controller is stable.
 
 ### 9.6 Model-Derived Guard, Capture, Recovery, and Trim Constants
 
-The remaining sketch constants are derived from the same scales rather than being left
+The remaining runtime constants are derived from the same scales rather than being left
 as unexplained literals.
 
 The command and integral guards are
@@ -1030,11 +1021,10 @@ OUTER_INTEGRAL_BLEED_CENTER   = 1.0
 
 by design: the staged controller uses gating and clamping, not active bleed-down.
 
-### 9.7 Exported Sketch Constants
+### 9.7 Final Runtime Constants
 
-The staged-controller generator exports the exact sketch-facing constants listed below.
-`OUTER_SIGN_DEFAULT` is the modeled initial value for the sketch variable
-`g_outer_sign`.
+The runtime controller constants derived in this section are collected below.
+`OUTER_SIGN_DEFAULT` is the default sign selector used in the command law.
 
 **Timing, calibration, and sign constants**
 
@@ -1112,21 +1102,7 @@ The staged-controller generator exports the exact sketch-facing constants listed
 
 ---
 
-## 10. Archived Reference-Controller Notes
-
-The older single-loop reference PID derivation and the exploratory LQR discussion are
-retained only as historical artifacts of the previous controller architecture.
-
-- `model/first_principles/design_cascade_pid.py`
-- `model/first_principles/controller_initial_gains.json`
-- `firmware/include/generated/controller_gains.h`
-
-They are no longer authoritative for the staged Sharp/AS5600 controller and should not
-be used as the source for the constants in the new sketch.
-
----
-
-## 11. Summary of Key Numerical Results
+## 10. Summary of Key Numerical Results
 
 | Quantity | Symbol | Value | Unit |
 | ---------- | -------- | ------- | ------ |
@@ -1147,23 +1123,3 @@ be used as the source for the constants in the new sketch.
 | LQI gain on `theta_rel_deg` | OUTER_KT_DEFAULT | 0.125118 | — |
 | LQI gain on `theta_dot_deg_s` | OUTER_KW_DEFAULT | 0.002070 | s |
 | LQI gain on `xi_cm_s` | OUTER_KI_DEFAULT | -0.020917 | deg/(cm·s) |
-
----
-
-## 12. Files in Sync with This Document
-
-When the staged controller architecture or Sharp hardware parameters change, update
-these together:
-
-| File | Role |
-| ------ | ------ |
-| `docs/modeling.md` | Canonical plant and staged-controller derivation |
-| `docs/modeling_source_of_truth.md` | Canonical sync contract for the modeling artifacts |
-| `model/first_principles/params_measured.yaml` | Measured Sharp hardware and staged-design inputs |
-| `model/first_principles/linearize.py` | Generates the linearized plant artifact |
-| `model/first_principles/design_staged_controller.py` | Generates staged-controller constants |
-| `model/first_principles/staged_controller_constants.json` | Generated staged-controller constants and verification data |
-| `firmware/include/generated/staged_controller_constants.h` | Generated copy-into-sketch constants header |
-
-Historical reference-PID artifacts remain in the repo for comparison, but they are not
-part of the active staged-controller source-of-truth set.
